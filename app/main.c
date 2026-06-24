@@ -322,8 +322,17 @@ static void ScrollCaretIntoView(void)
 
     caretLine = LineContaining(gActiveTE, (**gActiveTE).selEnd);
 
+    /* Querying a single line's height in isolation (e.g. TEGetHeight
+       for just [caretLine, caretLine+1)) comes back unreliable right
+       after Enter creates a new, still-empty line -- it hasn't
+       "settled" with any content yet. (**te).lineHeight turned out
+       to have the same problem, returning a stale/wrong value rather
+       than tracking the actual current font size. Avoid isolated
+       single-line queries entirely: always sum cumulatively from the
+       very start of the document, the same pattern already proven
+       reliable in UpdateScrollbarRange's TEGetHeight(nLines, 0, ...). */
     lineTop = (**gActiveTE).destRect.top + TEGetHeight(caretLine, 0, gActiveTE);
-    lineBottom = lineTop + TEGetHeight(caretLine + 1, caretLine, gActiveTE);
+    lineBottom = (**gActiveTE).destRect.top + TEGetHeight(caretLine + 1, 0, gActiveTE);
 
     viewTop = (**gActiveTE).viewRect.top;
     viewBottom = (**gActiveTE).viewRect.bottom;
