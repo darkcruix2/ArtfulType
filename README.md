@@ -2,6 +2,8 @@
 
 A distraction-free Markdown writing app for classic 68k Macintosh computers (System 6/7), built to run from a [BlueSCSI](https://bluescsi.com) device on a Mac Plus or similar compact Mac.
 
+![ArtfulType running in Writer mode](screenshot1.png)
+
 ## Features
 
 - **Writer mode** — live Markdown-to-rich-text formatting as you type (bold, italic, code, headings, links)
