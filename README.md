@@ -20,7 +20,7 @@ If your Mac can use [BlueSCSI](https://bluescsi.com), use the BlueSCSI image. If
 ### Real hardware with BlueSCSI
 
 1. Write `ArtfulType.hda` to your BlueSCSI SD card as the device image for your Mac. (See [BlueSCSI](https://bluescsi.com) for how to set up and image an SD card for your specific BlueSCSI hardware.)
-2. Boot the Mac. ArtfulType launches automatically in place of the Finder.
+2. Boot the Mac. The Finder will appear as usual — double-click ArtfulType to launch it.
 3. To also write a physical 800K floppy: open `Utilities/Disk Copy 4.2` (already on the disk image), and use it to write `ArtfulType 800K` (also already on the disk image, in proper DiskCopy 4.2 format) to a blank floppy in your Mac's floppy drive.
 
 ### Real hardware without BlueSCSI
