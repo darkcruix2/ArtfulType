@@ -13,11 +13,17 @@ A distraction-free Markdown writing app for classic 68k Macintosh computers (Sys
 
 ## Getting Started
 
-### On real hardware (BlueSCSI)
+If your Mac can use [BlueSCSI](https://bluescsi.com), use the BlueSCSI image. If it can't (or you just want a physical floppy), use the 800K floppy image instead.
+
+### Real hardware with BlueSCSI
 
 1. Write `ArtfulType.hda` to your BlueSCSI SD card as the device image for your Mac. (See [BlueSCSI](https://bluescsi.com) for how to set up and image an SD card for your specific BlueSCSI hardware.)
 2. Boot the Mac. ArtfulType launches automatically in place of the Finder.
-3. To write a physical 800K floppy: open `Utilities/Disk Copy 4.2` (already on the disk image), and use it to write `ArtfulType 800K` (also already on the disk image, in proper DiskCopy 4.2 format) to a blank floppy in your Mac's floppy drive.
+3. To also write a physical 800K floppy: open `Utilities/Disk Copy 4.2` (already on the disk image), and use it to write `ArtfulType 800K` (also already on the disk image, in proper DiskCopy 4.2 format) to a blank floppy in your Mac's floppy drive.
+
+### Real hardware without BlueSCSI
+
+Write `ArtfulType-800K.dsk` to a real 800K floppy disk and boot from it directly — no BlueSCSI required.
 
 ### In an emulator (Mini vMac)
 
@@ -49,9 +55,6 @@ Saved files are plain `.md` text, editable in any text editor.
 
 ## Known Limitations
 
-- Double-clicking a `.md` file in the Finder to launch ArtfulType doesn't work yet.
-- Saving writes to the boot volume's own HFS filesystem — there's no direct-to-SD-card save that bypasses the disk image.
-- No 1.44MB floppy image yet, so SuperDrive-equipped Macs (SE/30, IIx, and later) aren't supported as a separate target — use the 800K floppy or the 20MB BlueSCSI image instead.
 - Copying styled text (bold/italic/etc.) in Writer mode and pasting it back loses the styling — only plain text round-trips through the clipboard, a limitation of the cross-compiler toolchain this app is built with.
 
 ## Building
