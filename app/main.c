@@ -502,11 +502,16 @@ static void EventLoop(void)
                                     DetectInlineMarkdown(key);
                                 
                                 caret = (**gActiveTE).selStart;
-                                if (caret >= 6) {
+                                if (caret >= 5) {
                                     Handle hText = (**gActiveTE).hText;
-                                    Boolean isToday;
+                                    Boolean isToday = false, isTime = false;
                                     HLock(hText);
-                                    isToday = (memcmp(*hText + caret - 6, "@today", 6) == 0);
+                                    if (caret >= 6) {
+                                        isToday = (memcmp(*hText + caret - 6, "@today", 6) == 0);
+                                    }
+                                    if (!isToday) {
+                                        isTime = (memcmp(*hText + caret - 5, "@time", 5) == 0);
+                                    }
                                     HUnlock(hText);
                                     if (isToday) {
                                         unsigned long secs;
@@ -522,6 +527,20 @@ static void EventLoop(void)
                                         TESetSelect(caret - 6, caret, gActiveTE);
                                         TEDelete(gActiveTE);
                                         TEInsert(dateStr + 1, dateStr[0], gActiveTE);
+                                    } else if (isTime) {
+                                        unsigned long secs;
+                                        DateTimeRec date;
+                                        Str255 timeStr;
+                                        char tempBuf[16];
+                                        GetDateTime(&secs);
+                                        SecondsToDate(secs, &date);
+                                        sprintf(tempBuf, "%02d:%02d", date.hour, date.minute);
+                                        timeStr[0] = strlen(tempBuf);
+                                        BlockMove(tempBuf, timeStr + 1, timeStr[0]);
+                                        
+                                        TESetSelect(caret - 5, caret, gActiveTE);
+                                        TEDelete(gActiveTE);
+                                        TEInsert(timeStr + 1, timeStr[0], gActiveTE);
                                     }
                                 }
 
