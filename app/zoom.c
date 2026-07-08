@@ -15,15 +15,21 @@ short CurrentFontSize(void)
 void LoadZoomPref(void)
 {
     Handle prefH = GetResource(kZoomPrefType, kZoomPrefID);
+    short loadedPref = kZoomDefaultIndex;
 
     if (prefH != NULL) {
         HLock(prefH);
-        gZoomIndex = *(short *) *prefH;
+        loadedPref = *(short *) *prefH;
         HUnlock(prefH);
         ReleaseResource(prefH);
-        if (gZoomIndex < 0 || gZoomIndex >= kNumZoomLevels)
-            gZoomIndex = kZoomBaselineIndex;
+        if (loadedPref < 0 || loadedPref >= kNumZoomLevels)
+            loadedPref = kZoomDefaultIndex;
     }
+    
+    gDefaultZoomIndex = loadedPref;
+#ifndef ARTFUL_PRO
+    gZoomIndex = loadedPref;
+#endif
 }
 
 static void SaveZoomPref(void)
@@ -116,5 +122,5 @@ void DoZoom(short direction)
 
 void DoZoomReset(void)
 {
-    ApplyZoomIndex(kZoomBaselineIndex);
+    ApplyZoomIndex(kZoomDefaultIndex);
 }

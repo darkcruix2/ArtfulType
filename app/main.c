@@ -8,22 +8,19 @@
 
 #include "app.h"
 
+#ifndef ARTFUL_PRO
+
 WindowPtr gWindow;
 TEHandle gTE;
 TEHandle gHiddenTE;
 TEHandle gActiveTE;
 ControlHandle gScrollBar;
 Boolean gScrollBarVisible = false;
-Boolean gDone = false;
 Boolean gHaveFile = false;
 Boolean gDirty = false;
 Str255 gFileName;
 short gVRefNum;
-MenuHandle gViewMenu;
-MenuHandle gEditMenu;
 Boolean gHideMarkdown = true;
-short gZoomIndex = kZoomBaselineIndex;
-Boolean gUseSansSerif = true;
 
 Boolean gShiftSelectionActive = false;
 short gShiftAnchor = 0;
@@ -36,6 +33,100 @@ Boolean gTypingRunActive = false;
 
 Str255 gLinkURLs[MAX_LINKS + 1];
 short gLinkCount = 0;
+
+#else
+
+DocumentRecord *gDocumentList = NULL;
+DocumentRecord *gActiveDoc = NULL;
+MenuHandle gWindowMenu = NULL;
+
+DocumentRecord* GetDocumentForWindow(WindowPtr w)
+{
+    if (w == NULL) return NULL;
+    return (DocumentRecord*) GetWRefCon(w);
+}
+
+DocumentRecord* CreateNewDocument(void)
+{
+    DocumentRecord *doc = (DocumentRecord*) NewPtrClear(sizeof(DocumentRecord));
+    if (doc) {
+        doc->hideMarkdown = true;
+        doc->zoomIndex = kZoomDefaultIndex;
+        doc->next = gDocumentList;
+        gDocumentList = doc;
+    }
+    return doc;
+}
+
+void DisposeDocument(DocumentRecord *doc)
+{
+    if (doc) {
+        if (gDocumentList == doc) {
+            gDocumentList = doc->next;
+        } else {
+            DocumentRecord *curr = gDocumentList;
+            while (curr && curr->next != doc) {
+                curr = curr->next;
+            }
+            if (curr) {
+                curr->next = doc->next;
+            }
+        }
+        if (doc->te) TEDispose(doc->te);
+        if (doc->hiddenTE) TEDispose(doc->hiddenTE);
+        DisposePtr((Ptr)doc);
+    }
+}
+
+void SetActiveDocument(DocumentRecord *doc)
+{
+    gActiveDoc = doc;
+#ifdef ARTFUL_PRO
+    if (gActiveDoc && gViewMenu) {
+        CheckItem(gViewMenu, iMarkdownView, !gActiveDoc->hideMarkdown);
+        CheckItem(gViewMenu, iWriterView, gActiveDoc->hideMarkdown);
+    }
+#endif
+}
+
+void UpdateWindowMenu(void)
+{
+    short count = CountMItems(gWindowMenu);
+    short i;
+    DocumentRecord *curr;
+    Str255 title;
+
+    for (i = count; i > 0; i--) {
+        DeleteMenuItem(gWindowMenu, i);
+    }
+    
+    curr = gDocumentList;
+    i = 1;
+    while (curr) {
+        if (curr->haveFile) {
+            BlockMove(curr->fileName, title, curr->fileName[0] + 1);
+        } else {
+            BlockMove("\pUntitled", title, 9);
+        }
+        AppendMenu(gWindowMenu, title);
+        if (curr == gActiveDoc) {
+            CheckItem(gWindowMenu, i, true);
+        }
+        curr = curr->next;
+        i++;
+    }
+}
+
+#endif
+
+Boolean gDone = false;
+MenuHandle gViewMenu;
+MenuHandle gEditMenu;
+short gDefaultZoomIndex = kZoomDefaultIndex;
+#ifndef ARTFUL_PRO
+short gZoomIndex = kZoomDefaultIndex;
+#endif
+Boolean gUseSansSerif = true;
 
 static void Init(void)
 {
@@ -62,10 +153,17 @@ void UpdateMenuBarLook(void)
     GrafPtr savePort;
     GrafPtr wMgrPort;
     Rect bar;
+    Boolean doHide;
+
+#ifdef ARTFUL_PRO
+    doHide = (gActiveDoc != NULL) ? gActiveDoc->hideMarkdown : false;
+#else
+    doHide = gHideMarkdown;
+#endif
 
     DrawMenuBar();
 
-    if (gHideMarkdown) {
+    if (doHide) {
         GetPort(&savePort);
         GetWMgrPort(&wMgrPort);
         SetPort(wMgrPort);
@@ -107,6 +205,11 @@ static void MakeMenu(void)
     CheckItem(gViewMenu, iWriterView, true);
     CheckItem(gViewMenu, iSansSerif, true);
 
+#ifdef ARTFUL_PRO
+    gWindowMenu = NewMenu(mWindow, "\pWindow");
+    InsertMenu(gWindowMenu, 0);
+#endif
+
     helpMenu = NewMenu(mHelp, "\pHelp");
     AppendMenu(helpMenu, "\pAbout The Artful Type...");
     InsertMenu(helpMenu, 0);
@@ -114,18 +217,38 @@ static void MakeMenu(void)
     UpdateMenuBarLook();
 }
 
-static void MakeWindow(void)
+void MakeWindow(void)
 {
     Rect bounds;
     Rect viewRect;
     Rect sbRect;
     short fontNum;
-
+    
+#ifdef ARTFUL_PRO
+    static short cascadeOffset = 0;
+    DocumentRecord *doc = CreateNewDocument();
+    if (!doc) return;
+    SetActiveDocument(doc);
+    
+    bounds = qd.screenBits.bounds;
+    bounds.top += MENU_BAR_HEIGHT + 20 + cascadeOffset;
+    bounds.bottom -= 20 - cascadeOffset;
+    bounds.left += 20 + cascadeOffset;
+    bounds.right -= 20 - cascadeOffset;
+    
+    cascadeOffset += 20;
+    if (cascadeOffset > 100) cascadeOffset = 0;
+    
+    gWindow = NewWindow(NULL, &bounds, "\pUntitled", true, documentProc,
+                         (WindowPtr) -1L, true, (long)doc);
+#else
     bounds = qd.screenBits.bounds;
     bounds.top += MENU_BAR_HEIGHT;
 
     gWindow = NewWindow(NULL, &bounds, "\p", true, plainDBox,
                          (WindowPtr) -1L, false, 0);
+#endif
+
     SetPort(gWindow);
 
     fontNum = GetDefaultFontNum();
@@ -138,7 +261,15 @@ static void MakeWindow(void)
     viewRect.top += MARGIN_TOP;
     viewRect.bottom -= MARGIN_BOTTOM;
 
+    {
+        short monoFont;
+        GetFNum("\pMonaco", &monoFont);
+        if (monoFont == 0) GetFNum("\pCourier", &monoFont);
+        if (monoFont != 0) TextFont(monoFont);
+    }
     gTE = TEStyleNew(&viewRect, &viewRect);
+
+    TextFont(fontNum);
     gHiddenTE = TEStyleNew(&viewRect, &viewRect);
     gActiveTE = gHideMarkdown ? gHiddenTE : gTE;
     TEActivate(gActiveTE);
@@ -153,11 +284,17 @@ static void MakeWindow(void)
 
 static void DoUpdate(WindowPtr w)
 {
+    GrafPtr savedPort;
+    GetPort(&savedPort);
+    SetPort(w);
+    
     BeginUpdate(w);
     EraseRect(&w->portRect);
     TEUpdate(&w->portRect, gActiveTE);
     DrawControls(w);
     EndUpdate(w);
+    
+    SetPort(savedPort);
 }
 
 static void DoMenuCommand(long menuResult)
@@ -168,18 +305,42 @@ static void DoMenuCommand(long menuResult)
     if (menuID == mFile) {
         switch (menuItem) {
             case iNew:
+#ifdef ARTFUL_PRO
+                DoNewFile();
+#else
                 if (ConfirmDiscardChanges())
                     DoNewFile();
+#endif
                 break;
             case iOpen:
+#ifdef ARTFUL_PRO
+                DoOpenFile();
+#else
                 if (ConfirmDiscardChanges())
                     DoOpenFile();
+#endif
                 break;
             case iSave:   DoSave(); break;
             case iSaveAs: DoSaveAs(); break;
             case iQuit:
+#ifdef ARTFUL_PRO
+                {
+                    DocumentRecord *curr = gDocumentList;
+                    gDone = true;
+                    while (curr) {
+                        SetActiveDocument(curr);
+                        SelectWindow(curr->window);
+                        if (!ConfirmDiscardChanges()) {
+                            gDone = false;
+                            break;
+                        }
+                        curr = curr->next;
+                    }
+                }
+#else
                 if (ConfirmDiscardChanges())
                     gDone = true;
+#endif
                 break;
         }
     } else if (menuID == mEdit) {
@@ -236,6 +397,20 @@ static void DoMenuCommand(long menuResult)
         switch (menuItem) {
             case iAbout: ShowAboutBox(); break;
         }
+#ifdef ARTFUL_PRO
+    } else if (menuID == mWindow) {
+        DocumentRecord *curr = gDocumentList;
+        short idx = 1;
+        while (curr) {
+            if (idx == menuItem) {
+                SelectWindow(curr->window);
+                SetActiveDocument(curr);
+                break;
+            }
+            curr = curr->next;
+            idx++;
+        }
+#endif
     }
     HiliteMenu(0);
     /* HiliteMenu un-hilites the clicked title assuming the Menu Manager's
@@ -304,14 +479,73 @@ static void EventLoop(void)
             /* Disposing a dialog/window doesn't restore the caller's port
                -- cheap insurance against any path (found or not) leaving
                thePort dangling at a freed window's memory. */
+#ifndef ARTFUL_PRO
             SetPort(gWindow);
+#else
+            w = FrontWindow();
+            if (w) SetPort(w);
+            SetActiveDocument(GetDocumentForWindow(w));
+#endif
             switch (event.what) {
                 case updateEvt:
-                    DoUpdate((WindowPtr) event.message);
+                    w = (WindowPtr) event.message;
+#ifdef ARTFUL_PRO
+                    {
+                        GrafPtr savedPort;
+                        DocumentRecord *savedDoc = gActiveDoc;
+                        GetPort(&savedPort);
+                        SetPort(w);
+                        SetActiveDocument(GetDocumentForWindow(w));
+                        if (gActiveDoc) DoUpdate(w);
+                        SetActiveDocument(savedDoc);
+                        SetPort(savedPort);
+                    }
+#else
+                    SetPort(w);
+                    DoUpdate(w);
+#endif
                     break;
 
                 case mouseDown:
                     part = FindWindow(event.where, &w);
+#ifdef ARTFUL_PRO
+                    if (w) SetActiveDocument(GetDocumentForWindow(w));
+                    if (part == inSysWindow) {
+                        SystemClick(&event, w);
+                    } else if (part == inDrag) {
+                        Rect dragRect = qd.screenBits.bounds;
+                        DragWindow(w, event.where, &dragRect);
+                    } else if (part == inGoAway) {
+                        if (TrackGoAway(w, event.where)) {
+                            if (ConfirmDiscardChanges()) {
+                                DisposeDocument(gActiveDoc);
+                                DisposeWindow(w);
+                                SetActiveDocument(GetDocumentForWindow(FrontWindow()));
+                            }
+                        }
+                    } else if (part == inMenuBar) {
+                        SetActiveDocument(GetDocumentForWindow(FrontWindow()));
+                        UpdateEditMenuState();
+#ifdef ARTFUL_PRO
+                        UpdateWindowMenu();
+#endif
+                        DoMenuCommand(MenuSelect(event.where));
+                    } else if (part == inContent) {
+                        if (w != FrontWindow()) {
+                            SelectWindow(w);
+                        } else if (gActiveDoc) {
+                            ControlHandle hitControl;
+                            SetPort(w);
+                            GlobalToLocal(&event.where);
+                            if (FindControl(event.where, w, &hitControl) != 0 && hitControl == gScrollBar)
+                                DoScrollClick(event.where);
+                            else {
+                                gTypingRunActive = false;
+                                TEClick(event.where, (event.modifiers & shiftKey) != 0, gActiveTE);
+                            }
+                        }
+                    }
+#else
                     if (part == inMenuBar) {
                         UpdateEditMenuState();
                         DoMenuCommand(MenuSelect(event.where));
@@ -327,10 +561,15 @@ static void EventLoop(void)
                             TEClick(event.where, (event.modifiers & shiftKey) != 0, gActiveTE);
                         }
                     }
+#endif
                     break;
 
                 case keyDown:
                 case autoKey: {
+#ifdef ARTFUL_PRO
+                    SetActiveDocument(GetDocumentForWindow(FrontWindow()));
+                    if (!gActiveDoc && (event.modifiers & cmdKey) == 0) break;
+#endif
                     char key = event.message & charCodeMask;
                     char keyCode = (event.message & keyCodeMask) >> 8;
                     Boolean isContentKey = (key < 0x1C || key > 0x1F);
@@ -586,14 +825,34 @@ static void EventLoop(void)
                 }
 
                 case activateEvt:
-                    if ((event.modifiers & activeFlag) != 0)
+#ifdef ARTFUL_PRO
+                    SetActiveDocument(GetDocumentForWindow((WindowPtr) event.message));
+                    if (gActiveDoc) {
+                        if ((event.modifiers & activeFlag) != 0) {
+                            SetPort(gWindow);
+                            TEActivate(gActiveTE);
+                            InvalRect(&gWindow->portRect); /* Force redraw when coming to front */
+                        } else {
+                            TEDeactivate(gActiveTE);
+                        }
+                    }
+#else
+                    if ((event.modifiers & activeFlag) != 0) {
                         TEActivate(gActiveTE);
-                    else
+                        InvalRect(&gWindow->portRect);
+                    } else {
                         TEDeactivate(gActiveTE);
+                    }
+#endif
                     break;
             }
         }
+#ifdef ARTFUL_PRO
+        SetActiveDocument(GetDocumentForWindow(FrontWindow()));
+        if (gActiveDoc) TEIdle(gActiveTE);
+#else
         TEIdle(gActiveTE);
+#endif
     }
 }
 
@@ -613,6 +872,10 @@ void SetFontMode(Boolean useSans)
     gUseSansSerif = useSans;
     CheckItem(gViewMenu, iSerif, !useSans);
     CheckItem(gViewMenu, iSansSerif, useSans);
+
+#ifdef ARTFUL_PRO
+    if (!gActiveDoc) return;
+#endif
 
     if (gHideMarkdown) {
         SyncHiddenToCanonical();

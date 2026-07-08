@@ -80,6 +80,8 @@
 #define iSerif       8
 #define iSansSerif   9
 
+#define mWindow  134
+
 #define mHelp    132
 #define iAbout   1
 
@@ -87,6 +89,11 @@
 
 #define kNumZoomLevels 5
 #define kZoomBaselineIndex 2
+#ifdef ARTFUL_PRO
+#define kZoomDefaultIndex 0
+#else
+#define kZoomDefaultIndex kZoomBaselineIndex
+#endif
 
 #define kZoomPrefType 'ZLvl'
 #define kZoomPrefID   128
@@ -128,6 +135,65 @@ typedef struct {
 */
 #define MAX_LINKS 64
 
+#ifdef ARTFUL_PRO
+
+typedef struct DocumentRecord {
+    WindowPtr window;
+    TEHandle te;
+    TEHandle hiddenTE;
+    TEHandle activeTE;
+    ControlHandle scrollBar;
+    Boolean scrollBarVisible;
+    Boolean haveFile;
+    Boolean dirty;
+    Str255 fileName;
+    short vRefNum;
+    Boolean hideMarkdown;
+    UndoSnapshot undoStack[MAX_UNDO_LEVELS];
+    short undoCount;
+    UndoSnapshot redoStack[MAX_UNDO_LEVELS];
+    short redoCount;
+    Boolean typingRunActive;
+    Str255 linkURLs[MAX_LINKS + 1];
+    short linkCount;
+    Boolean shiftSelectionActive;
+    short shiftAnchor;
+    short zoomIndex;
+    struct DocumentRecord *next;
+} DocumentRecord;
+
+extern DocumentRecord *gActiveDoc;
+extern DocumentRecord *gDocumentList;
+
+#define gWindow (gActiveDoc->window)
+#define gTE (gActiveDoc->te)
+#define gHiddenTE (gActiveDoc->hiddenTE)
+#define gActiveTE (gActiveDoc->activeTE)
+#define gScrollBar (gActiveDoc->scrollBar)
+#define gScrollBarVisible (gActiveDoc->scrollBarVisible)
+#define gHaveFile (gActiveDoc->haveFile)
+#define gDirty (gActiveDoc->dirty)
+#define gFileName (gActiveDoc->fileName)
+#define gVRefNum (gActiveDoc->vRefNum)
+#define gHideMarkdown (gActiveDoc->hideMarkdown)
+#define gZoomIndex (gActiveDoc->zoomIndex)
+#define gUndoStack (gActiveDoc->undoStack)
+#define gUndoCount (gActiveDoc->undoCount)
+#define gRedoStack (gActiveDoc->redoStack)
+#define gRedoCount (gActiveDoc->redoCount)
+#define gTypingRunActive (gActiveDoc->typingRunActive)
+#define gLinkURLs (gActiveDoc->linkURLs)
+#define gLinkCount (gActiveDoc->linkCount)
+#define gShiftSelectionActive (gActiveDoc->shiftSelectionActive)
+#define gShiftAnchor (gActiveDoc->shiftAnchor)
+
+DocumentRecord* GetDocumentForWindow(WindowPtr w);
+DocumentRecord* CreateNewDocument(void);
+void DisposeDocument(DocumentRecord *doc);
+void SetActiveDocument(DocumentRecord *doc);
+
+#else
+
 /* Global state -- actual storage lives in main.c */
 extern WindowPtr gWindow;
 extern TEHandle gTE;
@@ -135,30 +201,35 @@ extern TEHandle gHiddenTE;
 extern TEHandle gActiveTE;
 extern ControlHandle gScrollBar;
 extern Boolean gScrollBarVisible;
-extern Boolean gDone;
 extern Boolean gHaveFile;
 extern Boolean gDirty;
 extern Str255 gFileName;
 extern short gVRefNum;
-extern MenuHandle gViewMenu;
-extern MenuHandle gEditMenu;
 extern Boolean gHideMarkdown;
-extern short gZoomIndex;
-extern Boolean gUseSansSerif;
-
 extern Boolean gShiftSelectionActive;
 extern short gShiftAnchor;
-
 extern UndoSnapshot gUndoStack[MAX_UNDO_LEVELS];
 extern short gUndoCount;
 extern UndoSnapshot gRedoStack[MAX_UNDO_LEVELS];
 extern short gRedoCount;
 extern Boolean gTypingRunActive;
-
 extern Str255 gLinkURLs[MAX_LINKS + 1];
 extern short gLinkCount;
 
+#endif
+
+extern Boolean gDone;
+extern MenuHandle gViewMenu;
+extern MenuHandle gEditMenu;
+extern MenuHandle gWindowMenu;
+#ifndef ARTFUL_PRO
+extern short gZoomIndex;
+#endif
+extern short gDefaultZoomIndex;
+extern Boolean gUseSansSerif;
+
 /* main.c */
+void MakeWindow(void);
 void UpdateMenuBarLook(void);
 short GetDefaultFontNum(void);
 void SetFontMode(Boolean useSans);

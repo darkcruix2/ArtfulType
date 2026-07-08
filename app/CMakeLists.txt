@@ -25,3 +25,24 @@ if(CMAKE_SYSTEM_NAME MATCHES Retro68)
 else()
     set_target_properties(ArtfulType PROPERTIES LINK_FLAGS "-Wl,-gc-sections")
 endif()
+
+add_application(ArtfulTypePro
+    main.c
+    scrolling.c
+    markdown.c
+    undo.c
+    zoom.c
+    file.c
+    splash.c
+    main_pro.r
+    CREATOR "ArtT"
+    )
+
+target_compile_definitions(ArtfulTypePro PRIVATE ARTFUL_PRO)
+
+set_target_properties(ArtfulTypePro PROPERTIES COMPILE_OPTIONS -ffunction-sections)
+if(CMAKE_SYSTEM_NAME MATCHES Retro68)
+    set_target_properties(ArtfulTypePro PROPERTIES LINK_FLAGS "-Wl,-gc-sections -Wl,--mac-strip-macsbug")
+else()
+    set_target_properties(ArtfulTypePro PROPERTIES LINK_FLAGS "-Wl,-gc-sections")
+endif()

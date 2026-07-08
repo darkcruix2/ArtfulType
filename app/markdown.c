@@ -22,7 +22,7 @@ void ClearStyles(void)
     short savedStart = (**gTE).selStart;
     short savedEnd = (**gTE).selEnd;
 
-    fontNum = GetDefaultFontNum();
+    GetFNum("\pMonaco", &fontNum);
     ts.tsFont = fontNum;
     ts.tsFace = normal;
     ts.tsSize = CurrentFontSize();
