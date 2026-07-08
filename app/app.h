@@ -14,8 +14,10 @@
 #include <Files.h>
 #include <StandardFile.h>
 #include <SegLoad.h>
+#include <TextUtils.h>
 #include <Multiverse.h>
 #include <string.h>
+#include <stdio.h>
 
 #define MARGIN_H     64
 #define MARGIN_TOP   32
@@ -143,6 +145,9 @@ extern MenuHandle gEditMenu;
 extern Boolean gHideMarkdown;
 extern short gZoomIndex;
 extern Boolean gUseSansSerif;
+
+extern Boolean gShiftSelectionActive;
+extern short gShiftAnchor;
 
 extern UndoSnapshot gUndoStack[MAX_UNDO_LEVELS];
 extern short gUndoCount;

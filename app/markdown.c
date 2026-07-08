@@ -93,10 +93,20 @@ void BuildHiddenView(void)
     gLinkCount = 0;
     srcH = (**gTE).hText;
     len = (**gTE).teLength;
-    outH = NewHandle(len + 1);
+    
+    HLock(srcH);
+    {
+        long maxOutLen = len + 1;
+        long j;
+        for (j = 0; j < len - 2; j++) {
+            if ((j == 0 || (*srcH)[j - 1] == '\r') && (*srcH)[j] == '-' && (*srcH)[j+1] == '-' && (*srcH)[j+2] == '-') {
+                maxOutLen += 17; /* --- (3) becomes 20 dashes */
+            }
+        }
+        outH = NewHandle(maxOutLen);
+    }
     outLen = 0;
 
-    HLock(srcH);
     HLock(outH);
 
     i = 0;
@@ -132,6 +142,28 @@ void BuildHiddenView(void)
                     i = lineEnd;
                 }
                 continue;
+            }
+
+            if (i + 2 < len && (*srcH)[i] == '-' && (*srcH)[i+1] == '-' && (*srcH)[i+2] == '-') {
+                long end = i + 3;
+                while (end < len && (*srcH)[end] == ' ') end++;
+                if (end == len || (*srcH)[end] == '\r') {
+                    long outStart = outLen;
+                    short s;
+                    for (s = 0; s < 20; s++) (*outH)[outLen++] = '-'; /* 20 dashes */
+                    if (opCount < MAX_STYLE_OPS) {
+                        ops[opCount].start = (short) outStart;
+                        ops[opCount].end = (short) outLen;
+                        ops[opCount].kind = 'R';
+                        opCount++;
+                    }
+                    if (end < len && (*srcH)[end] == '\r') {
+                        (*outH)[outLen++] = '\r';
+                        end++;
+                    }
+                    i = end;
+                    continue;
+                }
             }
 
             if (i + 1 < len && (*srcH)[i] == '-' && (*srcH)[i + 1] == ' ') {
@@ -301,6 +333,11 @@ void BuildHiddenView(void)
                 opStyle.tsSize = CurrentFontSize() + (4 - ops[k].level) * 4;
                 TESetStyle(doFace + doSize, &opStyle, true, gHiddenTE);
                 break;
+            case 'R':
+                opStyle.tsFace = bold;
+                opStyle.tsColor.blue = 1; /* special marker for horizontal rule */
+                TESetStyle(doFace + doColor, &opStyle, true, gHiddenTE);
+                break;
         }
     }
 
@@ -358,6 +395,7 @@ void SyncHiddenToCanonical(void)
         long lineEnd = lineStart;
         short headingLevel = 0;
         Boolean isHeading = false;
+        Boolean isHR = false;
 
         while (lineEnd < len && (*srcH)[lineEnd] != '\r')
             lineEnd++;
@@ -367,7 +405,9 @@ void SyncHiddenToCanonical(void)
             short dummyLH, dummyFA;
 
             TEGetStyle((short) lineStart, &firstStyle, &dummyLH, &dummyFA, gHiddenTE);
-            if (firstStyle.tsFace & bold) {
+            if (firstStyle.tsColor.blue == 1) {
+                isHR = true;
+            } else if (firstStyle.tsFace & bold) {
                 short lvl;
 
                 for (lvl = 1; lvl <= 3; lvl++) {
@@ -380,33 +420,42 @@ void SyncHiddenToCanonical(void)
             }
         }
 
-        Boolean isBullet = false;
-        if (!isHeading && lineEnd > lineStart) {
-            if ((unsigned char)(*srcH)[lineStart] == 0xA5) {
-                isBullet = true;
-            }
-        }
-
-        if (isHeading) {
-            short k;
-
-            for (k = 0; k < headingLevel; k++)
-                (*outH)[outLen++] = '#';
-            (*outH)[outLen++] = ' ';
-            BlockMove(*srcH + lineStart, *outH + outLen, lineEnd - lineStart);
-            outLen += (lineEnd - lineStart);
-
+        if (isHR) {
+            (*outH)[outLen++] = '-';
+            (*outH)[outLen++] = '-';
+            (*outH)[outLen++] = '-';
             if (lineEnd < len) {
                 (*outH)[outLen++] = '\r';
             }
-        } else if (isBullet) {
-            (*outH)[outLen++] = '-';
-            (*outH)[outLen++] = ' ';
-            long restStart = lineStart + 1;
-            if (restStart < lineEnd && (*srcH)[restStart] == ' ') {
-                restStart++;
+        } else {
+            Boolean isBullet = false;
+            
+            if (!isHeading && lineStart < lineEnd) {
+                if ((unsigned char)(*srcH)[lineStart] == 0xA5) {
+                    isBullet = true;
+                }
             }
-            long i = restStart;
+
+            if (isHeading) {
+                short k;
+
+                for (k = 0; k < headingLevel; k++)
+                    (*outH)[outLen++] = '#';
+                (*outH)[outLen++] = ' ';
+                BlockMove(*srcH + lineStart, *outH + outLen, lineEnd - lineStart);
+                outLen += (lineEnd - lineStart);
+
+                if (lineEnd < len) {
+                    (*outH)[outLen++] = '\r';
+                }
+            } else if (isBullet) {
+                (*outH)[outLen++] = '-';
+                (*outH)[outLen++] = ' ';
+                long restStart = lineStart + 1;
+                if (restStart < lineEnd && (*srcH)[restStart] == ' ') {
+                    restStart++;
+                }
+                long i = restStart;
             Boolean inBold = false, inItalic = false, inCode = false, inLink = false;
             Str255 curLinkURL;
 
@@ -520,9 +569,13 @@ void SyncHiddenToCanonical(void)
                 i++;
             }
         }
-
-        if (lineEnd < len)
-            (*outH)[outLen++] = '\r';
+        }
+        
+        if (!isHR) {
+            if (lineEnd < len)
+                (*outH)[outLen++] = '\r';
+        }
+        
         lineStart = lineEnd + 1;
     }
 

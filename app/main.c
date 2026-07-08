@@ -25,6 +25,9 @@ Boolean gHideMarkdown = true;
 short gZoomIndex = kZoomBaselineIndex;
 Boolean gUseSansSerif = true;
 
+Boolean gShiftSelectionActive = false;
+short gShiftAnchor = 0;
+
 UndoSnapshot gUndoStack[MAX_UNDO_LEVELS];
 short gUndoCount = 0;
 UndoSnapshot gRedoStack[MAX_UNDO_LEVELS];
@@ -268,6 +271,28 @@ static void GetCurrentLineRange(short *lineStart, short *lineEnd)
     }
 }
 
+static void GetCurrentParagraphRange(short *paraStart, short *paraEnd)
+{
+    short caretPos = (**gActiveTE).selEnd;
+    Handle hText = (**gActiveTE).hText;
+    short len = (**gActiveTE).teLength;
+    short start = caretPos;
+    short end = caretPos;
+
+    HLock(hText);
+    while (start > 0 && (*hText)[start - 1] != '\r') {
+        start--;
+    }
+    while (end < len && (*hText)[end] != '\r') {
+        end++;
+    }
+    HUnlock(hText);
+
+    *paraStart = start;
+    *paraEnd = end;
+}
+
+
 static void EventLoop(void)
 {
     EventRecord event;
@@ -365,6 +390,7 @@ static void EventLoop(void)
                             }
                         }
                     } else {
+                        Boolean isArrowKey = (!isContentKey && key >= 0x1C && key <= 0x1F);
                         if (isContentKey) {
                             if (!gTypingRunActive) {
                                 PushUndoSnapshot();
@@ -374,11 +400,161 @@ static void EventLoop(void)
                             gTypingRunActive = false;
                         }
 
-                        TEKey(key, gActiveTE);
-                        if (isContentKey) {
-                            gDirty = true;
-                            if (gHideMarkdown)
-                                DetectInlineMarkdown(key);
+                        if (isArrowKey && (event.modifiers & shiftKey)) {
+                            short activeEnd, newPos;
+                            if (!gShiftSelectionActive) {
+                                gShiftSelectionActive = true;
+                                gShiftAnchor = (**gActiveTE).selStart; 
+                            }
+                            activeEnd = (gShiftAnchor == (**gActiveTE).selStart) ? (**gActiveTE).selEnd : (**gActiveTE).selStart;
+                            TESetSelect(activeEnd, activeEnd, gActiveTE);
+                            
+                            TEKey(key, gActiveTE);
+                            newPos = (**gActiveTE).selStart;
+                            
+                            if (newPos < gShiftAnchor) {
+                                TESetSelect(newPos, gShiftAnchor, gActiveTE);
+                            } else {
+                                TESetSelect(gShiftAnchor, newPos, gActiveTE);
+                            }
+                        } else {
+                            if (isArrowKey || key == 0x09 || key == 0x0D || key == 0x08 || isContentKey) {
+                                gShiftSelectionActive = false;
+                            }
+                            if (key == 0x0D) {
+                                short lineStart, lineEnd, caret;
+                                Handle hText = (**gActiveTE).hText;
+                                short prefixLen = 0;
+                                char prefixBuf[16];
+                                Boolean doInsertCR = true;
+                                
+                                caret = (**gActiveTE).selStart;
+                                GetCurrentParagraphRange(&lineStart, &lineEnd);
+                                
+                                HLock(hText);
+                                if (gHideMarkdown) {
+                                    if (lineStart < caret && (unsigned char)(*hText)[lineStart] == 0xA5 && 
+                                        lineStart + 1 < caret && (*hText)[lineStart + 1] == ' ') {
+                                        prefixLen = 2;
+                                        BlockMove(*hText + lineStart, prefixBuf, prefixLen);
+                                    } else {
+                                        short i = lineStart;
+                                        while (i < caret && (*hText)[i] >= '0' && (*hText)[i] <= '9') i++;
+                                        if (i > lineStart && i < caret && (*hText)[i] == '.' && i + 1 < caret && (*hText)[i + 1] == ' ') {
+                                            prefixLen = (i + 2) - lineStart;
+                                            BlockMove(*hText + lineStart, prefixBuf, prefixLen);
+                                        }
+                                    }
+                                } else {
+                                    if (lineStart < caret && (*hText)[lineStart] == '-' && 
+                                        lineStart + 1 < caret && (*hText)[lineStart + 1] == ' ') {
+                                        prefixLen = 2;
+                                        BlockMove(*hText + lineStart, prefixBuf, prefixLen);
+                                    } else {
+                                        short i = lineStart;
+                                        while (i < caret && (*hText)[i] >= '0' && (*hText)[i] <= '9') i++;
+                                        if (i > lineStart && i < caret && (*hText)[i] == '.' && i + 1 < caret && (*hText)[i + 1] == ' ') {
+                                            prefixLen = (i + 2) - lineStart;
+                                            BlockMove(*hText + lineStart, prefixBuf, prefixLen);
+                                        }
+                                    }
+                                }
+                                HUnlock(hText);
+                                
+                                if (prefixLen > 0) {
+                                    if (lineEnd == lineStart + prefixLen) {
+                                        TESetSelect(lineStart, lineEnd, gActiveTE);
+                                        TEDelete(gActiveTE);
+                                        doInsertCR = false;
+                                        gDirty = true;
+                                    } else {
+                                        Boolean isNumbered = false;
+                                        short i;
+                                        for (i = 0; i < prefixLen; i++) {
+                                            if (prefixBuf[i] >= '0' && prefixBuf[i] <= '9') isNumbered = true;
+                                        }
+                                        if (isNumbered) {
+                                            long num;
+                                            char newNumBuf[16];
+                                            prefixBuf[prefixLen-2] = 0;
+                                            sscanf(prefixBuf, "%ld", &num);
+                                            sprintf(newNumBuf, "%ld. ", num + 1);
+                                            prefixLen = strlen(newNumBuf);
+                                            BlockMove(newNumBuf, prefixBuf, prefixLen);
+                                        }
+                                    }
+                                }
+                                
+                                if (doInsertCR) {
+                                    TEKey(key, gActiveTE);
+                                    if (prefixLen > 0) {
+                                        TEInsert(prefixBuf, prefixLen, gActiveTE);
+                                    }
+                                }
+                            } else {
+                                TEKey(key, gActiveTE);
+                            }
+                            
+                            if (isContentKey) {
+                                short caret;
+                                gDirty = true;
+                                if (gHideMarkdown)
+                                    DetectInlineMarkdown(key);
+                                
+                                caret = (**gActiveTE).selStart;
+                                if (caret >= 6) {
+                                    Handle hText = (**gActiveTE).hText;
+                                    Boolean isToday;
+                                    HLock(hText);
+                                    isToday = (memcmp(*hText + caret - 6, "@today", 6) == 0);
+                                    HUnlock(hText);
+                                    if (isToday) {
+                                        unsigned long secs;
+                                        DateTimeRec date;
+                                        Str255 dateStr;
+                                        char tempBuf[16];
+                                        GetDateTime(&secs);
+                                        SecondsToDate(secs, &date);
+                                        sprintf(tempBuf, "%04d-%02d-%02d", date.year, date.month, date.day);
+                                        dateStr[0] = strlen(tempBuf);
+                                        BlockMove(tempBuf, dateStr + 1, dateStr[0]);
+                                        
+                                        TESetSelect(caret - 6, caret, gActiveTE);
+                                        TEDelete(gActiveTE);
+                                        TEInsert(dateStr + 1, dateStr[0], gActiveTE);
+                                    }
+                                }
+
+                                if (gHideMarkdown && caret >= 3) {
+                                    Handle hText = (**gActiveTE).hText;
+                                    Boolean isDashes;
+                                    short lineStart, lineEnd;
+                                    
+                                    GetCurrentParagraphRange(&lineStart, &lineEnd);
+                                    HLock(hText);
+                                    isDashes = (caret - lineStart == 3 && caret == lineEnd && memcmp(*hText + lineStart, "---", 3) == 0);
+                                    HUnlock(hText);
+                                    
+                                    if (isDashes) {
+                                        TextStyle opStyle;
+                                        TESetSelect(lineStart, caret, gActiveTE);
+                                        TEDelete(gActiveTE);
+                                        TEInsert("--------------------", 20, gActiveTE);
+                                        
+                                        opStyle.tsFace = bold;
+                                        opStyle.tsColor.red = 0;
+                                        opStyle.tsColor.green = 0;
+                                        opStyle.tsColor.blue = 1;
+                                        TESetSelect(lineStart, lineStart + 20, gActiveTE);
+                                        TESetStyle(doFace + doColor, &opStyle, false, gActiveTE);
+                                        
+                                        TESetSelect(lineStart + 20, lineStart + 20, gActiveTE);
+                                        opStyle.tsFace = normal;
+                                        opStyle.tsColor.blue = 0;
+                                        TESetStyle(doFace + doColor, &opStyle, false, gActiveTE);
+                                    }
+                                }
+                            }
                         }
                         ScrollCaretIntoView();
                         UpdateScrollbarRange();
