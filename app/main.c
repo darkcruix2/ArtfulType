@@ -23,6 +23,7 @@ MenuHandle gViewMenu;
 MenuHandle gEditMenu;
 Boolean gHideMarkdown = true;
 short gZoomIndex = kZoomBaselineIndex;
+Boolean gUseSansSerif = true;
 
 UndoSnapshot gUndoStack[MAX_UNDO_LEVELS];
 short gUndoCount = 0;
@@ -98,9 +99,10 @@ static void MakeMenu(void)
     InsertMenu(styleMenu, 0);
 
     gViewMenu = NewMenu(mView, "\pView");
-    AppendMenu(gViewMenu, "\pMarkdown;Writer;(-;Zoom In/=;Zoom Out/-;Default Size/0");
+    AppendMenu(gViewMenu, "\pMarkdown;Writer;(-;Zoom In/=;Zoom Out/-;Default Size/0;(-;Serif;Sans Serif");
     InsertMenu(gViewMenu, 0);
     CheckItem(gViewMenu, iWriterView, true);
+    CheckItem(gViewMenu, iSansSerif, true);
 
     helpMenu = NewMenu(mHelp, "\pHelp");
     AppendMenu(helpMenu, "\pAbout The Artful Type...");
@@ -123,7 +125,7 @@ static void MakeWindow(void)
                          (WindowPtr) -1L, false, 0);
     SetPort(gWindow);
 
-    GetFNum("\pTimes", &fontNum);
+    fontNum = GetDefaultFontNum();
     TextFont(fontNum);
     TextSize(CurrentFontSize());
 
@@ -224,6 +226,8 @@ static void DoMenuCommand(long menuResult)
             case iZoomIn:       DoZoom(1); break;
             case iZoomOut:      DoZoom(-1); break;
             case iZoomDefault:  DoZoomReset(); break;
+            case iSerif:        SetFontMode(false); break;
+            case iSansSerif:    SetFontMode(true); break;
         }
     } else if (menuID == mHelp) {
         switch (menuItem) {
@@ -235,6 +239,33 @@ static void DoMenuCommand(long menuResult)
        own standard white-bar/black-text look, which clobbers our inverted
        Writer-mode bar -- reassert it now that the menu has closed. */
     UpdateMenuBarLook();
+}
+
+static void GetCurrentLineRange(short *lineStart, short *lineEnd)
+{
+    short caretPos = (**gActiveTE).selEnd;
+    short numLines = (**gActiveTE).nLines;
+    short lineIdx = 0;
+
+    while (lineIdx < numLines - 1 && (**gActiveTE).lineStarts[lineIdx + 1] <= caretPos) {
+        lineIdx++;
+    }
+
+    *lineStart = (**gActiveTE).lineStarts[lineIdx];
+    if (lineIdx < numLines - 1) {
+        short end = (**gActiveTE).lineStarts[lineIdx + 1];
+        if (end > *lineStart) {
+            Handle hText = (**gActiveTE).hText;
+            HLock(hText);
+            if ((*hText)[end - 1] == '\r') {
+                end--;
+            }
+            HUnlock(hText);
+        }
+        *lineEnd = end;
+    } else {
+        *lineEnd = (**gActiveTE).teLength;
+    }
 }
 
 static void EventLoop(void)
@@ -276,9 +307,55 @@ static void EventLoop(void)
                 case keyDown:
                 case autoKey: {
                     char key = event.message & charCodeMask;
+                    char keyCode = (event.message & keyCodeMask) >> 8;
                     Boolean isContentKey = (key < 0x1C || key > 0x1F);
+                    Boolean handled = false;
 
-                    if (event.modifiers & cmdKey) {
+                    if (keyCode == 0x75) { /* Del (Forward Delete) */
+                        short selStart = (**gActiveTE).selStart;
+                        short selEnd = (**gActiveTE).selEnd;
+
+                        PushUndoSnapshot();
+                        gTypingRunActive = false;
+
+                        if (selStart == selEnd) {
+                            if (selStart < (**gActiveTE).teLength) {
+                                TESetSelect(selStart, selStart + 1, gActiveTE);
+                                TEDelete(gActiveTE);
+                            }
+                        } else {
+                            TEDelete(gActiveTE);
+                        }
+                        gDirty = true;
+                        ScrollCaretIntoView();
+                        UpdateScrollbarRange();
+                        handled = true;
+                    } else if (keyCode == 0x73) { /* Home */
+                        TESetSelect(0, 0, gActiveTE);
+                        ScrollCaretIntoView();
+                        handled = true;
+                    } else if (keyCode == 0x77) { /* End */
+                        short len = (**gActiveTE).teLength;
+                        TESetSelect(len, len, gActiveTE);
+                        ScrollCaretIntoView();
+                        handled = true;
+                    } else if ((event.modifiers & cmdKey) && keyCode == 0x7B) { /* Cmd+Cursor Left */
+                        short lineStart, lineEnd;
+                        GetCurrentLineRange(&lineStart, &lineEnd);
+                        TESetSelect(lineStart, lineStart, gActiveTE);
+                        ScrollCaretIntoView();
+                        handled = true;
+                    } else if ((event.modifiers & cmdKey) && keyCode == 0x7C) { /* Cmd+Cursor Right */
+                        short lineStart, lineEnd;
+                        GetCurrentLineRange(&lineStart, &lineEnd);
+                        TESetSelect(lineEnd, lineEnd, gActiveTE);
+                        ScrollCaretIntoView();
+                        handled = true;
+                    }
+
+                    if (handled) {
+                        /* Already handled */
+                    } else if (event.modifiers & cmdKey) {
                         if (event.what == keyDown) {
                             if ((key == 'z' || key == 'Z') && (event.modifiers & shiftKey))
                                 DoRedo();
@@ -319,6 +396,36 @@ static void EventLoop(void)
         }
         TEIdle(gActiveTE);
     }
+}
+
+short GetDefaultFontNum(void)
+{
+    short fontNum;
+    if (gUseSansSerif) {
+        GetFNum("\pHelvetica", &fontNum);
+    } else {
+        GetFNum("\pTimes", &fontNum);
+    }
+    return fontNum;
+}
+
+void SetFontMode(Boolean useSans)
+{
+    gUseSansSerif = useSans;
+    CheckItem(gViewMenu, iSerif, !useSans);
+    CheckItem(gViewMenu, iSansSerif, useSans);
+
+    if (gHideMarkdown) {
+        SyncHiddenToCanonical();
+        BuildHiddenView();
+        ClearStyles();
+    } else {
+        ClearStyles();
+        BuildHiddenView();
+    }
+
+    AdjustScrollbar();
+    InvalRect(&gWindow->portRect);
 }
 
 int main(void)

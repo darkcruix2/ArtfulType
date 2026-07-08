@@ -75,6 +75,8 @@
 #define iZoomIn      4
 #define iZoomOut     5
 #define iZoomDefault 6
+#define iSerif       8
+#define iSansSerif   9
 
 #define mHelp    132
 #define iAbout   1
@@ -140,6 +142,7 @@ extern MenuHandle gViewMenu;
 extern MenuHandle gEditMenu;
 extern Boolean gHideMarkdown;
 extern short gZoomIndex;
+extern Boolean gUseSansSerif;
 
 extern UndoSnapshot gUndoStack[MAX_UNDO_LEVELS];
 extern short gUndoCount;
@@ -152,6 +155,8 @@ extern short gLinkCount;
 
 /* main.c */
 void UpdateMenuBarLook(void);
+short GetDefaultFontNum(void);
+void SetFontMode(Boolean useSans);
 
 /* scrolling.c */
 void UpdateScrollbarRange(void);

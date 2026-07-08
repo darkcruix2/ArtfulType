@@ -22,7 +22,7 @@ void ClearStyles(void)
     short savedStart = (**gTE).selStart;
     short savedEnd = (**gTE).selEnd;
 
-    GetFNum("\pTimes", &fontNum);
+    fontNum = GetDefaultFontNum();
     ts.tsFont = fontNum;
     ts.tsFace = normal;
     ts.tsSize = CurrentFontSize();
@@ -120,6 +120,36 @@ void BuildHiddenView(void)
                     ops[opCount].end = (short) outLen;
                     ops[opCount].kind = 'H';
                     ops[opCount].level = level;
+                    opCount++;
+                }
+                if (lineEnd < len && (*srcH)[lineEnd] == '\r') {
+                    (*outH)[outLen++] = '\r';
+                    i = lineEnd + 1;
+                    if (i < len && (*srcH)[i] == '\r') {
+                        i++;
+                    }
+                } else {
+                    i = lineEnd;
+                }
+                continue;
+            }
+
+            if (i + 1 < len && (*srcH)[i] == '-' && (*srcH)[i + 1] == ' ') {
+                long lineStart = i + 2;
+                long lineEnd = lineStart;
+                long outStart = outLen;
+
+                (*outH)[outLen++] = '\245';
+                (*outH)[outLen++] = ' ';
+
+                while (lineEnd < len && (*srcH)[lineEnd] != '\r') {
+                    (*outH)[outLen++] = (*srcH)[lineEnd];
+                    lineEnd++;
+                }
+                if (opCount < MAX_STYLE_OPS) {
+                    ops[opCount].start = (short) outStart;
+                    ops[opCount].end = (short) outLen;
+                    ops[opCount].kind = 'U';
                     opCount++;
                 }
                 i = lineEnd;
@@ -234,7 +264,7 @@ void BuildHiddenView(void)
     TEInsert(*outH, outLen, gHiddenTE);
     DisposeHandle(outH);
 
-    GetFNum("\pTimes", &fontNum);
+    fontNum = GetDefaultFontNum();
     ts.tsFont = fontNum;
     ts.tsFace = normal;
     ts.tsSize = CurrentFontSize();
@@ -350,6 +380,13 @@ void SyncHiddenToCanonical(void)
             }
         }
 
+        Boolean isBullet = false;
+        if (!isHeading && lineEnd > lineStart) {
+            if ((unsigned char)(*srcH)[lineStart] == 0xA5) {
+                isBullet = true;
+            }
+        }
+
         if (isHeading) {
             short k;
 
@@ -358,6 +395,73 @@ void SyncHiddenToCanonical(void)
             (*outH)[outLen++] = ' ';
             BlockMove(*srcH + lineStart, *outH + outLen, lineEnd - lineStart);
             outLen += (lineEnd - lineStart);
+
+            if (lineEnd < len) {
+                (*outH)[outLen++] = '\r';
+            }
+        } else if (isBullet) {
+            (*outH)[outLen++] = '-';
+            (*outH)[outLen++] = ' ';
+            long restStart = lineStart + 1;
+            if (restStart < lineEnd && (*srcH)[restStart] == ' ') {
+                restStart++;
+            }
+            long i = restStart;
+            Boolean inBold = false, inItalic = false, inCode = false, inLink = false;
+            Str255 curLinkURL;
+
+            while (i <= lineEnd) {
+                Boolean wantBold = false, wantItalic = false, wantCode = false, wantLink = false;
+                short linkID = 0;
+
+                if (i < lineEnd) {
+                    TextStyle st;
+                    short dlh, dfa;
+
+                    TEGetStyle((short) i, &st, &dlh, &dfa, gHiddenTE);
+                    wantBold = (st.tsFace & bold) != 0;
+                    wantItalic = (st.tsFace & italic) != 0;
+                    wantCode = (st.tsFont == monacoFont);
+                    wantLink = (st.tsFace & underline) != 0;
+                    linkID = st.tsColor.red;
+                }
+
+                if (inCode && !wantCode) { (*outH)[outLen++] = '`'; inCode = false; }
+                if (inItalic && !wantItalic) { (*outH)[outLen++] = '*'; inItalic = false; }
+                if (inBold && !wantBold) {
+                    (*outH)[outLen++] = '*';
+                    (*outH)[outLen++] = '*';
+                    inBold = false;
+                }
+                if (inLink && !wantLink) {
+                    (*outH)[outLen++] = ']';
+                    (*outH)[outLen++] = '(';
+                    BlockMove(curLinkURL + 1, *outH + outLen, curLinkURL[0]);
+                    outLen += curLinkURL[0];
+                    (*outH)[outLen++] = ')';
+                    inLink = false;
+                }
+
+                if (!inLink && wantLink) {
+                    (*outH)[outLen++] = '[';
+                    inLink = true;
+                    if (linkID >= 1 && linkID <= gLinkCount)
+                        BlockMove(gLinkURLs[linkID], curLinkURL, gLinkURLs[linkID][0] + 1);
+                    else
+                        curLinkURL[0] = 0;
+                }
+                if (!inBold && wantBold) {
+                    (*outH)[outLen++] = '*';
+                    (*outH)[outLen++] = '*';
+                    inBold = true;
+                }
+                if (!inItalic && wantItalic) { (*outH)[outLen++] = '*'; inItalic = true; }
+                if (!inCode && wantCode) { (*outH)[outLen++] = '`'; inCode = true; }
+
+                if (i < lineEnd)
+                    (*outH)[outLen++] = (*srcH)[i];
+                i++;
+            }
         } else {
             long i = lineStart;
             Boolean inBold = false, inItalic = false, inCode = false, inLink = false;
@@ -379,8 +483,6 @@ void SyncHiddenToCanonical(void)
                     linkID = st.tsColor.red;
                 }
 
-                /* Close innermost-first: code, italic, bold, then link
-                   (link is the outermost wrapper, [bold link](url)). */
                 if (inCode && !wantCode) { (*outH)[outLen++] = '`'; inCode = false; }
                 if (inItalic && !wantItalic) { (*outH)[outLen++] = '*'; inItalic = false; }
                 if (inBold && !wantBold) {
@@ -682,7 +784,7 @@ void InsertMarkdownAsStyled(Handle srcH, long srcLen, TEHandle te)
        insertion point -- normalize the whole pasted range to plain
        before applying the specific ops parsed above, the same order
        BuildHiddenView uses for the same reason. */
-    GetFNum("\pTimes", &fontNum);
+    fontNum = GetDefaultFontNum();
     baseStyle.tsFont = fontNum;
     baseStyle.tsFace = normal;
     baseStyle.tsSize = CurrentFontSize();
@@ -964,13 +1066,13 @@ void ToggleCode(void)
 {
     TextStyle ts;
     short lh, fa;
-    short monacoFont, timesFont;
+    short monacoFont, defaultFont;
 
     GetFNum("\pMonaco", &monacoFont);
-    GetFNum("\pTimes", &timesFont);
+    defaultFont = GetDefaultFontNum();
 
     TEGetStyle((**gHiddenTE).selStart, &ts, &lh, &fa, gHiddenTE);
-    ts.tsFont = (ts.tsFont == monacoFont) ? timesFont : monacoFont;
+    ts.tsFont = (ts.tsFont == monacoFont) ? defaultFont : monacoFont;
     TESetStyle(doFont, &ts, true, gHiddenTE);
 }
 
@@ -1022,7 +1124,7 @@ static void SetTypingStyleNormal(short pos)
     TextStyle ts;
     short fontNum;
 
-    GetFNum("\pTimes", &fontNum);
+    fontNum = GetDefaultFontNum();
     ts.tsFont = fontNum;
     ts.tsFace = normal;
     ts.tsSize = CurrentFontSize();
@@ -1083,6 +1185,16 @@ void DetectInlineMarkdown(char justTyped)
             ts.tsFace = bold;
             ts.tsSize = CurrentFontSize() + (4 - level) * 4;
             TESetStyle(doFace + doSize, &ts, true, gHiddenTE);
+            InvalidateHeightCache();
+            return;
+        }
+
+        if (caret - 1 == lineStart + 1 && (*textH)[lineStart] == '-') {
+            HUnlock(textH);
+            TESetSelect((short) lineStart, (short) caret, gHiddenTE);
+            TEDelete(gHiddenTE);
+            char bulletStr[3] = "\245 ";
+            TEInsert(bulletStr, 2, gHiddenTE);
             InvalidateHeightCache();
             return;
         }
@@ -1312,7 +1424,7 @@ void ClearSelectionStyleHidden(void)
     if ((**gHiddenTE).selStart == (**gHiddenTE).selEnd)
         return;
 
-    GetFNum("\pTimes", &fontNum);
+    fontNum = GetDefaultFontNum();
     ts.tsFont = fontNum;
     ts.tsFace = normal;
     ts.tsSize = CurrentFontSize();
