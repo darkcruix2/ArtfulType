@@ -537,13 +537,17 @@ static void EventLoop(void)
                                     
                                     if (isDashes) {
                                         TextStyle opStyle;
+                                        opStyle.tsColor.red = 0;
+                                        opStyle.tsColor.green = 0;
+                                        opStyle.tsColor.blue = 0;
+                                        opStyle.tsFace = normal;
+                                        opStyle.tsSize = 0;
+
                                         TESetSelect(lineStart, caret, gActiveTE);
                                         TEDelete(gActiveTE);
                                         TEInsert("--------------------", 20, gActiveTE);
                                         
                                         opStyle.tsFace = bold;
-                                        opStyle.tsColor.red = 0;
-                                        opStyle.tsColor.green = 0;
                                         opStyle.tsColor.blue = 1;
                                         TESetSelect(lineStart, lineStart + 20, gActiveTE);
                                         TESetStyle(doFace + doColor, &opStyle, false, gActiveTE);

@@ -307,6 +307,12 @@ void BuildHiddenView(void)
     for (k = 0; k < opCount; k++) {
         TextStyle opStyle;
 
+        opStyle.tsColor.red = 0;
+        opStyle.tsColor.green = 0;
+        opStyle.tsColor.blue = 0;
+        opStyle.tsFace = normal;
+        opStyle.tsSize = 0;
+
         TESetSelect(ops[k].start, ops[k].end, gHiddenTE);
         switch (ops[k].kind) {
             case 'B':
@@ -403,6 +409,12 @@ void SyncHiddenToCanonical(void)
         if (lineEnd > lineStart) {
             TextStyle firstStyle;
             short dummyLH, dummyFA;
+
+            firstStyle.tsColor.red = 0;
+            firstStyle.tsColor.green = 0;
+            firstStyle.tsColor.blue = 0;
+            firstStyle.tsFace = normal;
+            firstStyle.tsSize = 0;
 
             TEGetStyle((short) lineStart, &firstStyle, &dummyLH, &dummyFA, gHiddenTE);
             if (firstStyle.tsColor.blue == 1) {
