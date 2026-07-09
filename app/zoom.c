@@ -9,7 +9,9 @@ static short kZoomLevels[] = { -6, -4, 0, 6, 12 };
 
 short CurrentFontSize(void)
 {
-    return FONT_SIZE + kZoomLevels[gZoomIndex];
+    short size = FONT_SIZE + kZoomLevels[gZoomIndex];
+    if (size < 9) size = 9;
+    return size;
 }
 
 void LoadZoomPref(void)

@@ -96,7 +96,7 @@ void BuildHiddenView(void)
     
     HLock(srcH);
     {
-        long maxOutLen = len + 1;
+        long maxOutLen = len * 8 + 1; /* Maximum expansion is --- (3 chars) to 20 dashes */
         long j;
         for (j = 0; j < len - 2; j++) {
             if ((j == 0 || (*srcH)[j - 1] == '\r') && (*srcH)[j] == '-' && (*srcH)[j+1] == '-' && (*srcH)[j+2] == '-') {

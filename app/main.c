@@ -51,7 +51,7 @@ DocumentRecord* CreateNewDocument(void)
     DocumentRecord *doc = (DocumentRecord*) NewPtrClear(sizeof(DocumentRecord));
     if (doc) {
         doc->hideMarkdown = true;
-        doc->zoomIndex = kZoomDefaultIndex;
+        doc->zoomIndex = gDefaultZoomIndex;
         doc->next = gDocumentList;
         gDocumentList = doc;
     }
@@ -82,6 +82,12 @@ void SetActiveDocument(DocumentRecord *doc)
 {
     gActiveDoc = doc;
 #ifdef ARTFUL_PRO
+    if (gActiveDoc) {
+        gTE = gActiveDoc->te;
+        gHiddenTE = gActiveDoc->hiddenTE;
+        gWindow = gActiveDoc->window;
+        gActiveTE = gActiveDoc->hideMarkdown ? gHiddenTE : gTE;
+    }
     if (gActiveDoc && gViewMenu) {
         CheckItem(gViewMenu, iMarkdownView, !gActiveDoc->hideMarkdown);
         CheckItem(gViewMenu, iWriterView, gActiveDoc->hideMarkdown);
@@ -272,6 +278,15 @@ void MakeWindow(void)
     TextFont(fontNum);
     gHiddenTE = TEStyleNew(&viewRect, &viewRect);
     gActiveTE = gHideMarkdown ? gHiddenTE : gTE;
+
+#ifdef ARTFUL_PRO
+    if (gActiveDoc) {
+        gActiveDoc->te = gTE;
+        gActiveDoc->hiddenTE = gHiddenTE;
+        gActiveDoc->window = gWindow;
+    }
+#endif
+
     TEActivate(gActiveTE);
 
     sbRect = viewRect;

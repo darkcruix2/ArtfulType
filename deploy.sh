@@ -13,6 +13,7 @@ HD_IMAGE="vmac/ArtfulType_20M.dsk"
 FLOPPY_IMAGE="vmac/Mac-800K.dsk"
 FLOPPY_IMAGE_NAME="ArtfulType 800K"
 BIN="app/build/ArtfulType.bin"
+PRO_BIN="app/build/ArtfulTypePro.bin"
 GUIDE="doc/START_HERE.md"
 GUIDE_NAME="START_HERE.md"
 WRAPPED_FLOPPY_TEMP="vmac/.ArtfulType_Floppy_wrapped.img"
@@ -27,6 +28,8 @@ echo "Deploying to 20MB image..."
 hmount "$HD_IMAGE"
 hdel ArtfulType 2>/dev/null || true
 hcopy -m "$BIN" :ArtfulType
+hdel ArtfulPro 2>/dev/null || true
+hcopy -m "$PRO_BIN" :ArtfulPro
 hdel "$FLOPPY_IMAGE_NAME" 2>/dev/null || true
 hcopy -r "$WRAPPED_FLOPPY_TEMP" ":$FLOPPY_IMAGE_NAME"
 hattrib -t dImg -c dCpy ":$FLOPPY_IMAGE_NAME"
@@ -41,6 +44,8 @@ echo "Deploying to 800K image..."
 hmount "$FLOPPY_IMAGE"
 hdel ArtfulType 2>/dev/null || true
 hcopy -m "$BIN" :ArtfulType
+hdel ArtfulPro 2>/dev/null || true
+hcopy -m "$PRO_BIN" :ArtfulPro
 hdel "$GUIDE_NAME" 2>/dev/null || true
 hcopy -t "$GUIDE" ":$GUIDE_NAME"
 hattrib -t TEXT -c ArtT ":$GUIDE_NAME"

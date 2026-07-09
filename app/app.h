@@ -23,7 +23,7 @@
 #define MARGIN_TOP   32
 #define MARGIN_BOTTOM 24
 #define MENU_BAR_HEIGHT 20
-#define FONT_SIZE 18
+#define FONT_SIZE 12
 #define SCROLLBAR_WIDTH 16
 
 #define mFile    128
