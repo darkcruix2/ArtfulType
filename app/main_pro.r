@@ -125,6 +125,51 @@ resource 'BNDL' (128) {
     }
 };
 
+resource 'DITL' (134) {
+    {
+        {75, 165, 97, 245}, Button { enabled, "Find" },
+        {75, 75, 97, 155}, Button { enabled, "Cancel" },
+        {15, 20, 33, 300}, StaticText { disabled, "Search for:" },
+        {38, 20, 58, 300}, EditText { enabled, "" }
+    }
+};
+
+resource 'DLOG' (134) {
+    {126, 96, 236, 416},
+    dBoxProc,
+    visible,
+    noGoAway,
+    0,
+    134,
+    "",
+    noAutoCenter
+};
+
+resource 'DITL' (135) {
+    {
+        {125, 110, 147, 190}, Button { enabled, "Replace" },
+        {125, 15, 147, 95}, Button { enabled, "Cancel" },
+        {15, 20, 33, 300}, StaticText { disabled, "Find:" },
+        {38, 20, 58, 300}, EditText { enabled, "" },
+        {65, 20, 83, 300}, StaticText { disabled, "Replace with:" },
+        {88, 20, 108, 300}, EditText { enabled, "" },
+        {125, 205, 147, 305}, Button { enabled, "Replace All" }
+    }
+};
+
+
+resource 'DLOG' (135) {
+    {126, 96, 286, 416},
+    dBoxProc,
+    visible,
+    noGoAway,
+    0,
+    135,
+    "",
+    noAutoCenter
+};
+
+
 resource 'SIZE' (-1) {
     false, // reserved
     acceptSuspendResumeEvents,
@@ -142,8 +187,8 @@ resource 'SIZE' (-1) {
     notDisplayManagerAware,
     false, // reserved
     false, // reserved
-    2000 * 1024,
-    2000 * 1024
+    5000 * 1024,
+    5000 * 1024
 };
 
 resource 'vers' (1, purgeable) {

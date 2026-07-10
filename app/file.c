@@ -18,30 +18,30 @@ void SetViewMode(Boolean hideMarkdown)
     TEDeactivate(gActiveTE);
 
     if (hideMarkdown) {
-        BuildHiddenView();
+        /* Sync Markdown changes before switching */
+        SyncWindowToBacking();
+        
+        gHideMarkdown = true;
         gActiveTE = gHiddenTE;
+        BuildHiddenView();
     } else {
+        /* Sync Writer changes before switching */
+        SyncWindowToBacking();
         SyncHiddenToCanonical();
         
-        TESetSelect(0, 32767, gTE);
-        TEDelete(gTE);
-        if (gMarkdownText != NULL) {
-            HLock(gMarkdownText);
-            TEInsert(*gMarkdownText, gMarkdownLen > 32767 ? 32767 : gMarkdownLen, gTE);
-            HUnlock(gMarkdownText);
-        }
-        
+        gHideMarkdown = false;
         gActiveTE = gTE;
+        LoadTextWindow(gWindowStart);
     }
 
     TEActivate(gActiveTE);
-    gHideMarkdown = hideMarkdown;
     CheckItem(gViewMenu, iMarkdownView, !hideMarkdown);
     CheckItem(gViewMenu, iWriterView, hideMarkdown);
     UpdateMenuBarLook();
     AdjustScrollbar();
     InvalRect(&gWindow->portRect);
 }
+
 
 static void WriteFile(StringPtr name, short vRefNum)
 {
@@ -58,7 +58,9 @@ static void WriteFile(StringPtr name, short vRefNum)
 
     SetEOF(refNum, 0);
 
-    if (gHideMarkdown && gMarkdownText != NULL) {
+    SyncWindowToBacking();
+    
+    if (gMarkdownText != NULL) {
         count = gMarkdownLen;
         textH = gMarkdownText;
     } else {
@@ -140,11 +142,21 @@ static void ReadFile(StringPtr name, short vRefNum)
         count = j;
     }
 
-    TESetSelect(0, 32767, gTE);
-    TEDelete(gTE);
-    TEInsert(*textH, count, gTE);
     HUnlock(textH);
-    DisposeHandle(textH);
+    SetHandleSize(textH, count);
+
+    if (gMarkdownText != NULL)
+        DisposeHandle(gMarkdownText);
+    
+    gMarkdownText = textH;
+    gMarkdownLen = count;
+    gWindowStart = 0;
+
+    if (gHideMarkdown) {
+        BuildHiddenView();
+    } else {
+        LoadTextWindow(0);
+    }
 
     gDirty = false;
     ClearUndoRedoStacks();
@@ -197,10 +209,13 @@ Boolean DoSaveAs(void)
     if (!gActiveDoc) return false;
 #endif
 
+    SyncWindowToBacking();
+
     if (gHideMarkdown)
         SyncHiddenToCanonical();
 
     SFPutFile(where, "\pSave document as:", "\pUntitled.md", NULL, &reply);
+
     UpdateMenuBarLook();
     if (!reply.good)
         return false;
@@ -219,11 +234,14 @@ Boolean DoSave(void)
     if (!gActiveDoc) return false;
 #endif
 
+    SyncWindowToBacking();
+
     if (!gHaveFile)
         return DoSaveAs();
 
     if (gHideMarkdown)
         SyncHiddenToCanonical();
+
 
     WriteFile(gFileName, gVRefNum);
     gDirty = false;

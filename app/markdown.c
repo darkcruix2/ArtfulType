@@ -19,26 +19,26 @@ void ClearStyles(void)
 {
     TextStyle ts;
     short fontNum;
-    short savedStart = (**gTE).selStart;
-    short savedEnd = (**gTE).selEnd;
+    FontInfo info;
+    short savedStart = (**gActiveTE).selStart;
+    short savedEnd = (**gActiveTE).selEnd;
 
-    GetFNum("\pMonaco", &fontNum);
+    fontNum = GetDefaultFontNum();
+        
     ts.tsFont = fontNum;
     ts.tsFace = normal;
     ts.tsSize = CurrentFontSize();
     ts.tsColor.red = ts.tsColor.green = ts.tsColor.blue = 0;
 
-    TESetSelect(0, 32767, gTE);
-    TESetStyle(doFont + doFace + doSize + doColor, &ts, false, gTE);
-    TECalText(gTE);
+    TESetSelect(0, 32767, gActiveTE);
+    TESetStyle(doFont + doFace + doSize + doColor, &ts, false, gActiveTE);
+    TECalText(gActiveTE);
 
-    TESetSelect(savedStart, savedEnd, gTE);
+    TESetSelect(savedStart, savedEnd, gActiveTE);
 }
 
-typedef struct {
-    short start, end, kind, level;
-    short linkID;
-} StyleOp;
+
+
 
 /*
     Builds gHiddenTE from gTE's canonical markdown text, stripping the
@@ -75,33 +75,34 @@ void BuildHiddenView(void)
     Handle outH;
     long outLen;
     long i;
-    static StyleOp ops[MAX_STYLE_OPS];
-    short opCount;
-    short fontNum;
-    TextStyle ts;
-    short k;
-    Rect savedViewRect;
-
-    /* Parsing the whole document and applying one TESetStyle call per
-       styled span is, on real 68000 hardware, slow enough on a long,
-       heavily-styled document to look like the app has hung. A watch
-       cursor doesn't make it faster, but it stops it from looking
-       broken -- the actual fix for the underlying slowness (lazy/
-       incremental styling) is a much bigger, riskier change. */
+    StyleOp *ops;
+    
     SetCursor(*GetCursor(watchCursor));
 
-    opCount = 0;
+    gWriterOpCount = 0;
     gLinkCount = 0;
-    srcH = (**gTE).hText;
-    len = (**gTE).teLength;
+    srcH = gMarkdownText;
+    len = gMarkdownLen;
+    
+    if (srcH == NULL) {
+        if (gWriterText) DisposeHandle(gWriterText);
+        gWriterText = NULL;
+        gWriterLen = 0;
+        LoadTextWindow(0);
+        return;
+    }
+    
+    if (gWriterOpsH == NULL) {
+        gWriterOpsH = NewHandle(MAX_STYLE_OPS * sizeof(StyleOp));
+    }
     
     HLock(srcH);
     {
-        long maxOutLen = len * 8 + 1; /* Maximum expansion is --- (3 chars) to 20 dashes */
+        long maxOutLen = len * 8 + 1;
         long j;
         for (j = 0; j < len - 2; j++) {
             if ((j == 0 || (*srcH)[j - 1] == '\r') && (*srcH)[j] == '-' && (*srcH)[j+1] == '-' && (*srcH)[j+2] == '-') {
-                maxOutLen += 17; /* --- (3) becomes 20 dashes */
+                maxOutLen += 17;
             }
         }
         outH = NewHandle(maxOutLen);
@@ -109,12 +110,13 @@ void BuildHiddenView(void)
     outLen = 0;
 
     HLock(outH);
+    HLock(gWriterOpsH);
+    ops = (StyleOp *) *gWriterOpsH;
 
     i = 0;
     while (i < len) {
         if (i == 0 || (*srcH)[i - 1] == '\r') {
             short level = 0;
-
             while (level < 3 && i + level < len && (*srcH)[i + level] == '#')
                 level++;
             if (level > 0 && i + level < len && (*srcH)[i + level] == ' ') {
@@ -126,12 +128,12 @@ void BuildHiddenView(void)
                     (*outH)[outLen++] = (*srcH)[lineEnd];
                     lineEnd++;
                 }
-                if (opCount < MAX_STYLE_OPS) {
-                    ops[opCount].start = (short) outStart;
-                    ops[opCount].end = (short) outLen;
-                    ops[opCount].kind = 'H';
-                    ops[opCount].level = level;
-                    opCount++;
+                if (gWriterOpCount < MAX_STYLE_OPS) {
+                    ops[gWriterOpCount].start = outStart;
+                    ops[gWriterOpCount].end = outLen;
+                    ops[gWriterOpCount].kind = 'H';
+                    ops[gWriterOpCount].level = level;
+                    gWriterOpCount++;
                 }
                 if (lineEnd < len && (*srcH)[lineEnd] == '\r') {
                     (*outH)[outLen++] = '\r';
@@ -151,12 +153,12 @@ void BuildHiddenView(void)
                 if (end == len || (*srcH)[end] == '\r') {
                     long outStart = outLen;
                     short s;
-                    for (s = 0; s < 20; s++) (*outH)[outLen++] = '-'; /* 20 dashes */
-                    if (opCount < MAX_STYLE_OPS) {
-                        ops[opCount].start = (short) outStart;
-                        ops[opCount].end = (short) outLen;
-                        ops[opCount].kind = 'R';
-                        opCount++;
+                    for (s = 0; s < 20; s++) (*outH)[outLen++] = '-';
+                    if (gWriterOpCount < MAX_STYLE_OPS) {
+                        ops[gWriterOpCount].start = outStart;
+                        ops[gWriterOpCount].end = outLen;
+                        ops[gWriterOpCount].kind = 'R';
+                        gWriterOpCount++;
                     }
                     if (end < len && (*srcH)[end] == '\r') {
                         (*outH)[outLen++] = '\r';
@@ -179,32 +181,32 @@ void BuildHiddenView(void)
                     (*outH)[outLen++] = (*srcH)[lineEnd];
                     lineEnd++;
                 }
-                if (opCount < MAX_STYLE_OPS) {
-                    ops[opCount].start = (short) outStart;
-                    ops[opCount].end = (short) outLen;
-                    ops[opCount].kind = 'U';
-                    opCount++;
+                if (lineEnd < len && (*srcH)[lineEnd] == '\r') {
+                    (*outH)[outLen++] = '\r';
+                    i = lineEnd + 1;
+                    if (i < len && (*srcH)[i] == '\r') {
+                        i++;
+                    }
+                } else {
+                    i = lineEnd;
                 }
-                i = lineEnd;
                 continue;
             }
         }
 
         if (i + 1 < len && (*srcH)[i] == '*' && (*srcH)[i + 1] == '*') {
             long j = i + 2;
-
-            while (j + 1 < len && !((*srcH)[j] == '*' && (*srcH)[j + 1] == '*'))
+            while (j + 1 < len && ((*srcH)[j] != '*' || (*srcH)[j + 1] != '*'))
                 j++;
             if (j + 1 < len) {
                 long outStart = outLen, m;
-
                 for (m = i + 2; m < j; m++)
                     (*outH)[outLen++] = (*srcH)[m];
-                if (opCount < MAX_STYLE_OPS) {
-                    ops[opCount].start = (short) outStart;
-                    ops[opCount].end = (short) outLen;
-                    ops[opCount].kind = 'B';
-                    opCount++;
+                if (gWriterOpCount < MAX_STYLE_OPS) {
+                    ops[gWriterOpCount].start = outStart;
+                    ops[gWriterOpCount].end = outLen;
+                    ops[gWriterOpCount].kind = 'B';
+                    gWriterOpCount++;
                 }
                 i = j + 2;
                 continue;
@@ -212,19 +214,17 @@ void BuildHiddenView(void)
         }
         if ((*srcH)[i] == '*') {
             long j = i + 1;
-
             while (j < len && (*srcH)[j] != '*')
                 j++;
             if (j < len) {
                 long outStart = outLen, m;
-
                 for (m = i + 1; m < j; m++)
                     (*outH)[outLen++] = (*srcH)[m];
-                if (opCount < MAX_STYLE_OPS) {
-                    ops[opCount].start = (short) outStart;
-                    ops[opCount].end = (short) outLen;
-                    ops[opCount].kind = 'I';
-                    opCount++;
+                if (gWriterOpCount < MAX_STYLE_OPS) {
+                    ops[gWriterOpCount].start = outStart;
+                    ops[gWriterOpCount].end = outLen;
+                    ops[gWriterOpCount].kind = 'I';
+                    gWriterOpCount++;
                 }
                 i = j + 1;
                 continue;
@@ -232,19 +232,17 @@ void BuildHiddenView(void)
         }
         if ((*srcH)[i] == '`') {
             long j = i + 1;
-
             while (j < len && (*srcH)[j] != '`')
                 j++;
             if (j < len) {
                 long outStart = outLen, m;
-
                 for (m = i + 1; m < j; m++)
                     (*outH)[outLen++] = (*srcH)[m];
-                if (opCount < MAX_STYLE_OPS) {
-                    ops[opCount].start = (short) outStart;
-                    ops[opCount].end = (short) outLen;
-                    ops[opCount].kind = 'C';
-                    opCount++;
+                if (gWriterOpCount < MAX_STYLE_OPS) {
+                    ops[gWriterOpCount].start = outStart;
+                    ops[gWriterOpCount].end = outLen;
+                    ops[gWriterOpCount].kind = 'C';
+                    gWriterOpCount++;
                 }
                 i = j + 1;
                 continue;
@@ -252,30 +250,27 @@ void BuildHiddenView(void)
         }
         if ((*srcH)[i] == '[') {
             long closeBracket = i + 1;
-
             while (closeBracket < len && (*srcH)[closeBracket] != ']')
                 closeBracket++;
             if (closeBracket < len && closeBracket + 1 < len && (*srcH)[closeBracket + 1] == '(') {
                 long closeParen = closeBracket + 2;
-
                 while (closeParen < len && (*srcH)[closeParen] != ')')
                     closeParen++;
                 if (closeParen < len) {
                     long outStart = outLen, m;
                     Str255 url;
                     long urlLen = closeParen - (closeBracket + 2);
-
                     for (m = i + 1; m < closeBracket; m++)
                         (*outH)[outLen++] = (*srcH)[m];
                     if (urlLen > 255) urlLen = 255;
                     url[0] = (unsigned char) urlLen;
                     BlockMove(*srcH + closeBracket + 2, url + 1, urlLen);
-                    if (opCount < MAX_STYLE_OPS) {
-                        ops[opCount].start = (short) outStart;
-                        ops[opCount].end = (short) outLen;
-                        ops[opCount].kind = 'L';
-                        ops[opCount].linkID = AddLinkURL(url);
-                        opCount++;
+                    if (gWriterOpCount < MAX_STYLE_OPS) {
+                        ops[gWriterOpCount].start = outStart;
+                        ops[gWriterOpCount].end = outLen;
+                        ops[gWriterOpCount].kind = 'L';
+                        ops[gWriterOpCount].linkID = AddLinkURL(url);
+                        gWriterOpCount++;
                     }
                     i = closeParen + 1;
                     continue;
@@ -288,103 +283,33 @@ void BuildHiddenView(void)
     }
 
     HUnlock(srcH);
-    SuppressDrawing(gHiddenTE, &savedViewRect);
-
-    TESetSelect(0, 32767, gHiddenTE);
-    TEDelete(gHiddenTE);
-    TEInsert(*outH, outLen, gHiddenTE);
+    HUnlock(gWriterOpsH);
     HUnlock(outH);
-    DisposeHandle(outH);
+    SetHandleSize(outH, outLen);
 
-    fontNum = GetDefaultFontNum();
-    ts.tsFont = fontNum;
-    ts.tsFace = normal;
-    ts.tsSize = CurrentFontSize();
-    ts.tsColor.red = ts.tsColor.green = ts.tsColor.blue = 0;
-    TESetSelect(0, 32767, gHiddenTE);
-    TESetStyle(doFont + doFace + doSize + doColor, &ts, false, gHiddenTE);
-
-    for (k = 0; k < opCount; k++) {
-        TextStyle opStyle;
-
-        opStyle.tsColor.red = 0;
-        opStyle.tsColor.green = 0;
-        opStyle.tsColor.blue = 0;
-        opStyle.tsFace = normal;
-        opStyle.tsSize = 0;
-
-        TESetSelect(ops[k].start, ops[k].end, gHiddenTE);
-        switch (ops[k].kind) {
-            case 'B':
-                opStyle.tsFace = bold;
-                TESetStyle(doFace, &opStyle, false, gHiddenTE);
-                break;
-            case 'I':
-                opStyle.tsFace = italic;
-                TESetStyle(doFace, &opStyle, false, gHiddenTE);
-                break;
-            case 'C':
-                GetFNum("\pMonaco", &opStyle.tsFont);
-                TESetStyle(doFont, &opStyle, false, gHiddenTE);
-                break;
-            case 'L':
-                opStyle.tsFace = underline;
-                opStyle.tsColor.red = ops[k].linkID;
-                opStyle.tsColor.green = 0;
-                opStyle.tsColor.blue = 0;
-                TESetStyle(doFace + doColor, &opStyle, false, gHiddenTE);
-                break;
-            case 'H':
-                opStyle.tsFace = bold;
-                opStyle.tsSize = CurrentFontSize() + (4 - ops[k].level) * 4;
-                TESetStyle(doFace + doSize, &opStyle, false, gHiddenTE);
-                break;
-            case 'R':
-                opStyle.tsFace = bold;
-                opStyle.tsColor.blue = 1; /* special marker for horizontal rule */
-                TESetStyle(doFace + doColor, &opStyle, false, gHiddenTE);
-                break;
-        }
+    if (gWriterText != NULL) {
+        DisposeHandle(gWriterText);
     }
-
-    TESetSelect(0, 0, gHiddenTE);
-    TECalText(gHiddenTE);
-
-    RestoreDrawing(gHiddenTE, &savedViewRect);
+    gWriterText = outH;
+    gWriterLen = outLen;
 
     InitCursor();
+    LoadTextWindow(0);
 }
 
-/*
-    Reverse direction: walks gHiddenTE's text + style runs and re-derives
-    markdown delimiters, rebuilding gTE's canonical text from scratch.
-    Headings are detected per-line (bold + a heading-sized run at the
-    line's start); everything else is inline bold/italic/Monaco-as-code.
-    Link underlines round-trip as "[text](url)" -- the url comes from
-    gLinkURLs, keyed by the run's tsColor.red (see AddLinkURL above).
-*/
 void SyncHiddenToCanonical(void)
 {
-    Handle srcH;
-    long len;
+    Handle srcH = gWriterText;
+    long len = gWriterLen;
     Handle outH;
     long outCap;
     long outLen;
-    long lineStart;
-    short monacoFont;
-    Rect savedViewRect;
-    long urlSpace;
+    long lineStart, lineEnd;
     short li;
+    long urlSpace;
+    
+    if (srcH == NULL) return;
 
-    /* Same reasoning as the watch cursor in BuildHiddenView -- this is
-       the reverse direction, called on save, mode switch, and (more
-       frequently) at the start of every typing run via PushUndoSnapshot/
-       PushRedoSnapshot, so a long, heavily-styled document can make it
-       pause noticeably mid-typing too. */
-    SetCursor(*GetCursor(watchCursor));
-
-    srcH = (**gHiddenTE).hText;
-    len = (**gHiddenTE).teLength;
     urlSpace = 0;
     for (li = 1; li <= gLinkCount; li++)
         urlSpace += gLinkURLs[li][0];
@@ -392,32 +317,40 @@ void SyncHiddenToCanonical(void)
     outH = NewHandle(outCap);
     outLen = 0;
 
-    GetFNum("\pMonaco", &monacoFont);
-
     HLock(srcH);
     HLock(outH);
 
     lineStart = 0;
-    while (lineStart <= len) {
-        long lineEnd = lineStart;
-        short headingLevel = 0;
-        Boolean isHeading = false;
+    while (lineStart < len) {
         Boolean isHR = false;
-
+        TextStyle firstStyle;
+        long textOffset = lineStart;
+        
+        lineEnd = lineStart;
         while (lineEnd < len && (*srcH)[lineEnd] != '\r')
             lineEnd++;
 
         if (lineEnd > lineStart) {
-            TextStyle firstStyle;
-            short dummyLH, dummyFA;
-
-            firstStyle.tsColor.red = 0;
-            firstStyle.tsColor.green = 0;
+            short k;
+            StyleOp *ops = (StyleOp *) *gWriterOpsH;
+            firstStyle.tsFace = 0;
             firstStyle.tsColor.blue = 0;
-            firstStyle.tsFace = normal;
-            firstStyle.tsSize = 0;
+            if (gWriterOpsH) {
+                HLock(gWriterOpsH);
+                for (k = 0; k < gWriterOpCount; k++) {
+                    if (ops[k].start <= lineStart && ops[k].end > lineStart) {
+                        if (ops[k].kind == 'H') {
+                            firstStyle.tsFace |= bold;
+                            firstStyle.tsSize = CurrentFontSize() + (4 - ops[k].level) * 4;
+                        } else if (ops[k].kind == 'R') {
+                            firstStyle.tsFace |= bold;
+                            firstStyle.tsColor.blue = 1;
+                        }
+                    }
+                }
+                HUnlock(gWriterOpsH);
+            }
 
-            TEGetStyle((short) lineStart, &firstStyle, &dummyLH, &dummyFA, gHiddenTE);
             if (firstStyle.tsColor.blue == 1) {
                 Boolean onlyDashes = true;
                 long d;
@@ -434,11 +367,12 @@ void SyncHiddenToCanonical(void)
             
             if (!isHR && (firstStyle.tsFace & bold)) {
                 short lvl;
-
                 for (lvl = 1; lvl <= 3; lvl++) {
                     if (firstStyle.tsSize == CurrentFontSize() + (4 - lvl) * 4) {
-                        headingLevel = lvl;
-                        isHeading = true;
+                        short s;
+                        for (s = 0; s < lvl; s++)
+                            (*outH)[outLen++] = '#';
+                        (*outH)[outLen++] = ' ';
                         break;
                     }
                 }
@@ -449,157 +383,77 @@ void SyncHiddenToCanonical(void)
             (*outH)[outLen++] = '-';
             (*outH)[outLen++] = '-';
             (*outH)[outLen++] = '-';
-            if (lineEnd < len) {
-                (*outH)[outLen++] = '\r';
-            }
-        } else {
-            Boolean isBullet = false;
-            
-            if (!isHeading && lineStart < lineEnd) {
-                if ((unsigned char)(*srcH)[lineStart] == 0xA5) {
-                    isBullet = true;
-                }
-            }
-
-            if (isHeading) {
-                short k;
-
-                for (k = 0; k < headingLevel; k++)
-                    (*outH)[outLen++] = '#';
-                (*outH)[outLen++] = ' ';
-                BlockMove(*srcH + lineStart, *outH + outLen, lineEnd - lineStart);
-                outLen += (lineEnd - lineStart);
-
-                if (lineEnd < len) {
-                    (*outH)[outLen++] = '\r';
-                }
-            } else if (isBullet) {
-                (*outH)[outLen++] = '-';
-                (*outH)[outLen++] = ' ';
-                long restStart = lineStart + 1;
-                if (restStart < lineEnd && (*srcH)[restStart] == ' ') {
-                    restStart++;
-                }
-                long i = restStart;
-            Boolean inBold = false, inItalic = false, inCode = false, inLink = false;
-            Str255 curLinkURL;
-
-            while (i <= lineEnd) {
-                Boolean wantBold = false, wantItalic = false, wantCode = false, wantLink = false;
-                short linkID = 0;
-
-                if (i < lineEnd) {
-                    TextStyle st;
-                    short dlh, dfa;
-
-                    TEGetStyle((short) i, &st, &dlh, &dfa, gHiddenTE);
-                    wantBold = (st.tsFace & bold) != 0;
-                    wantItalic = (st.tsFace & italic) != 0;
-                    wantCode = (st.tsFont == monacoFont);
-                    wantLink = (st.tsFace & underline) != 0;
-                    linkID = st.tsColor.red;
-                }
-
-                if (inCode && !wantCode) { (*outH)[outLen++] = '`'; inCode = false; }
-                if (inItalic && !wantItalic) { (*outH)[outLen++] = '*'; inItalic = false; }
-                if (inBold && !wantBold) {
-                    (*outH)[outLen++] = '*';
-                    (*outH)[outLen++] = '*';
-                    inBold = false;
-                }
-                if (inLink && !wantLink) {
-                    (*outH)[outLen++] = ']';
-                    (*outH)[outLen++] = '(';
-                    BlockMove(curLinkURL + 1, *outH + outLen, curLinkURL[0]);
-                    outLen += curLinkURL[0];
-                    (*outH)[outLen++] = ')';
-                    inLink = false;
-                }
-
-                if (!inLink && wantLink) {
-                    (*outH)[outLen++] = '[';
-                    inLink = true;
-                    if (linkID >= 1 && linkID <= gLinkCount)
-                        BlockMove(gLinkURLs[linkID], curLinkURL, gLinkURLs[linkID][0] + 1);
-                    else
-                        curLinkURL[0] = 0;
-                }
-                if (!inBold && wantBold) {
-                    (*outH)[outLen++] = '*';
-                    (*outH)[outLen++] = '*';
-                    inBold = true;
-                }
-                if (!inItalic && wantItalic) { (*outH)[outLen++] = '*'; inItalic = true; }
-                if (!inCode && wantCode) { (*outH)[outLen++] = '`'; inCode = true; }
-
-                if (i < lineEnd)
-                    (*outH)[outLen++] = (*srcH)[i];
-                i++;
-            }
-        } else {
-            long i = lineStart;
-            Boolean inBold = false, inItalic = false, inCode = false, inLink = false;
-            Str255 curLinkURL;
-
-            while (i <= lineEnd) {
-                Boolean wantBold = false, wantItalic = false, wantCode = false, wantLink = false;
-                short linkID = 0;
-
-                if (i < lineEnd) {
-                    TextStyle st;
-                    short dlh, dfa;
-
-                    TEGetStyle((short) i, &st, &dlh, &dfa, gHiddenTE);
-                    wantBold = (st.tsFace & bold) != 0;
-                    wantItalic = (st.tsFace & italic) != 0;
-                    wantCode = (st.tsFont == monacoFont);
-                    wantLink = (st.tsFace & underline) != 0;
-                    linkID = st.tsColor.red;
-                }
-
-                if (inCode && !wantCode) { (*outH)[outLen++] = '`'; inCode = false; }
-                if (inItalic && !wantItalic) { (*outH)[outLen++] = '*'; inItalic = false; }
-                if (inBold && !wantBold) {
-                    (*outH)[outLen++] = '*';
-                    (*outH)[outLen++] = '*';
-                    inBold = false;
-                }
-                if (inLink && !wantLink) {
-                    (*outH)[outLen++] = ']';
-                    (*outH)[outLen++] = '(';
-                    BlockMove(curLinkURL + 1, *outH + outLen, curLinkURL[0]);
-                    outLen += curLinkURL[0];
-                    (*outH)[outLen++] = ')';
-                    inLink = false;
-                }
-
-                if (!inLink && wantLink) {
-                    (*outH)[outLen++] = '[';
-                    inLink = true;
-                    if (linkID >= 1 && linkID <= gLinkCount)
-                        BlockMove(gLinkURLs[linkID], curLinkURL, gLinkURLs[linkID][0] + 1);
-                    else
-                        curLinkURL[0] = 0;
-                }
-                if (!inBold && wantBold) {
-                    (*outH)[outLen++] = '*';
-                    (*outH)[outLen++] = '*';
-                    inBold = true;
-                }
-                if (!inItalic && wantItalic) { (*outH)[outLen++] = '*'; inItalic = true; }
-                if (!inCode && wantCode) { (*outH)[outLen++] = '`'; inCode = true; }
-
-                if (i < lineEnd)
-                    (*outH)[outLen++] = (*srcH)[i];
-                i++;
-            }
+        } else if (lineEnd > lineStart && (*srcH)[lineStart] == '\245' && (*srcH)[lineStart + 1] == ' ') {
+            (*outH)[outLen++] = '-';
+            (*outH)[outLen++] = ' ';
+            textOffset = lineStart + 2;
         }
-        }
-        
+
         if (!isHR) {
-            if (lineEnd < len)
-                (*outH)[outLen++] = '\r';
+            long runStart = textOffset;
+            while (runStart < lineEnd) {
+                long runEnd = runStart + 1;
+                short linkID = 0;
+                Boolean isBold = false, isItalic = false, isCode = false;
+                
+                if (gWriterOpsH) {
+                    short k;
+                    StyleOp *ops;
+                    HLock(gWriterOpsH);
+                    ops = (StyleOp *) *gWriterOpsH;
+                    
+                    for (k = 0; k < gWriterOpCount; k++) {
+                        if (ops[k].start <= runStart && ops[k].end > runStart) {
+                            if (ops[k].kind == 'B') isBold = true;
+                            if (ops[k].kind == 'I') isItalic = true;
+                            if (ops[k].kind == 'C') isCode = true;
+                            if (ops[k].kind == 'L') linkID = ops[k].linkID;
+                            if (ops[k].end < runEnd || runEnd == runStart + 1) {
+                                runEnd = ops[k].end;
+                                if (runEnd > lineEnd) runEnd = lineEnd;
+                            }
+                        }
+                    }
+                    
+                    for (k = 0; k < gWriterOpCount; k++) {
+                        if (ops[k].start > runStart && ops[k].start < runEnd) {
+                            runEnd = ops[k].start;
+                        }
+                    }
+                    HUnlock(gWriterOpsH);
+                } else {
+                    runEnd = lineEnd;
+                }
+
+                if (isBold) { (*outH)[outLen++] = '*'; (*outH)[outLen++] = '*'; }
+                if (isItalic) (*outH)[outLen++] = '*';
+                if (isCode) (*outH)[outLen++] = '`';
+                if (linkID > 0) (*outH)[outLen++] = '[';
+
+                while (runStart < runEnd) {
+                    (*outH)[outLen++] = (*srcH)[runStart++];
+                }
+
+                if (linkID > 0) {
+                    (*outH)[outLen++] = ']';
+                    (*outH)[outLen++] = '(';
+                    if (linkID <= gLinkCount) {
+                        long uLen = gLinkURLs[linkID][0];
+                        long u;
+                        for (u = 1; u <= uLen; u++)
+                            (*outH)[outLen++] = gLinkURLs[linkID][u];
+                    }
+                    (*outH)[outLen++] = ')';
+                }
+                if (isCode) (*outH)[outLen++] = '`';
+                if (isItalic) (*outH)[outLen++] = '*';
+                if (isBold) { (*outH)[outLen++] = '*'; (*outH)[outLen++] = '*'; }
+            }
         }
+
+        if (lineEnd < len)
+            (*outH)[outLen++] = '\r';
+
         
         lineStart = lineEnd + 1;
     }
@@ -607,50 +461,15 @@ void SyncHiddenToCanonical(void)
     HUnlock(srcH);
     HUnlock(outH);
 
-    SuppressDrawing(gTE, &savedViewRect);
-
-    TESetSelect(0, 32767, gTE);
-    TEDelete(gTE);
-    // Removed TEInsert to fix O(N^2) delay and 32K truncation
-
     if (gMarkdownText != NULL)
         DisposeHandle(gMarkdownText);
     gMarkdownText = outH;
     gMarkdownLen = outLen;
-
-    ClearStyles();
-
-    RestoreDrawing(gTE, &savedViewRect);
+    SetHandleSize(gMarkdownText, gMarkdownLen);
 
     InitCursor();
 }
 
-/*
-    Cut/Copy/Paste go through the Scrap Manager directly (ZeroScrap/
-    PutScrap/GetScrap) rather than the usual TECut/TECopy/TEPaste +
-    TEToScrap/TEFromScrap pattern -- TEToScrap/TEFromScrap are declared
-    in this toolchain's headers but have no actual implementation
-    linked anywhere (confirmed: linker error, not a typo), so they're
-    unusable here.
-
-    Styling still survives a copy within Writer mode, just not via the
-    clipboard's own (unavailable) style support: copying a Writer-mode
-    selection encodes its styled runs as markdown text (the same
-    inline bold/italic/code/link delimiters SyncHiddenToCanonical
-    already produces for the whole document, just scoped to a range
-    instead of per-line -- so headings specifically aren't
-    re-derived, since they're a line-level construct that doesn't
-    make sense for an arbitrary sub-range), and pasting back into
-    Writer mode parses that text for the same delimiters and applies
-    the corresponding styles (mirroring BuildHiddenView's inline
-    parsing, again without heading handling). Plain text round-trips
-    unchanged either way, including to/from other apps -- a paste
-    that happens to contain a literal "*" or "`" from some other
-    source will get (mis)interpreted as markdown, an accepted
-    trade-off for getting styled copy/paste working at all. Markdown
-    mode's copy/paste is untouched -- the selection is already raw
-    markdown text, no encoding/decoding needed.
-*/
 Handle EncodeSelectionAsMarkdown(short start, short end, TEHandle te)
 {
     Handle srcH;
@@ -1635,3 +1454,345 @@ void ClearMarkdownInSelection(void)
 
     TESetSelect(selStart, (short) (selStart + outLen), gTE);
 }
+
+
+
+void LoadTextWindow(long startOffset)
+{
+    long len, copyLen;
+    Handle srcH;
+    TEHandle te = gActiveTE;
+    Rect savedViewRect;
+    Rect hiddenRect;
+    TextStyle baseStyle;
+    short fontNum;
+    
+    if (gHideMarkdown) {
+        srcH = gWriterText;
+        len = gWriterLen;
+    } else {
+        srcH = gMarkdownText;
+        len = gMarkdownLen;
+    }
+    
+    if (srcH == NULL) return;
+    
+    if (startOffset < 0) startOffset = 0;
+    if (startOffset > len) startOffset = len;
+    
+    copyLen = len - startOffset;
+    if (copyLen > WINDOW_SIZE) copyLen = WINDOW_SIZE;
+    
+    /* Snap the end to a line boundary so we never cut in the middle of a line */
+    if (startOffset + copyLen < len) {
+        long scan = startOffset + copyLen;
+        HLock(srcH);
+        while (scan > startOffset && (*srcH)[scan] != '\r') {
+            scan--;
+        }
+        HUnlock(srcH);
+        if (scan > startOffset) {
+            copyLen = scan - startOffset + 1;
+        }
+    }
+    
+    gWindowStart = startOffset;
+    gWindowEnd = startOffset + copyLen;
+    
+    /* Compute the 1-based global line number at the top of this window.
+       We count '\r' characters in the backing store from byte 0 up to startOffset.
+       This is O(startOffset) but only runs at window-load time (not every keystroke). */
+    {
+        long i;
+        long lineCount = 1;
+        HLock(srcH);
+        for (i = 0; i < startOffset; i++) {
+            if ((*srcH)[i] == '\r') lineCount++;
+        }
+        HUnlock(srcH);
+        gWindowStartLine = lineCount;
+    }
+    /* Move the viewRect completely off-screen so that NO drawing happens
+       during the delete/insert/style phase. Every TESetStyle, TEDelete,
+       TEInsert, TECalText call clips to viewRect – with it off-screen the
+       window stays perfectly still until we restore it at the very end. */
+    savedViewRect = (**te).viewRect;
+    SetRect(&hiddenRect, OFFSCREEN_COORD, OFFSCREEN_COORD,
+            OFFSCREEN_COORD + (savedViewRect.right - savedViewRect.left),
+            OFFSCREEN_COORD + (savedViewRect.bottom - savedViewRect.top));
+    (**te).viewRect = hiddenRect;
+    /* destRect must also follow so TECalText doesn't miscalculate line widths */
+    (**te).destRect = hiddenRect;
+    
+    /* 1. Delete all existing text */
+    TESetSelect(0, (**te).teLength, te);
+    TEDelete(te);
+    
+    /* 2. Insert the new chunk – text arrives unstyled (inherits last run) */
+    HLock(srcH);
+    TEInsert(*srcH + startOffset, copyLen, te);
+    HUnlock(srcH);
+    
+    /* 3. Apply a uniform base style across everything so we start clean */
+    fontNum = GetDefaultFontNum();
+    baseStyle.tsFont  = fontNum;
+    baseStyle.tsFace  = normal;
+    baseStyle.tsSize  = CurrentFontSize();
+    baseStyle.tsColor.red = baseStyle.tsColor.green = baseStyle.tsColor.blue = 0;
+    TESetSelect(0, (**te).teLength, te);
+    TESetStyle(doFont + doFace + doSize + doColor, &baseStyle, false, te);
+    
+    /* 4. Apply any Writer-mode syntax highlight ops */
+    if (gHideMarkdown && gWriterOpsH != NULL) {
+        short k;
+        StyleOp *ops;
+        
+        HLock(gWriterOpsH);
+        ops = (StyleOp *) *gWriterOpsH;
+        for (k = 0; k < gWriterOpCount; k++) {
+            long opStart, opEnd;
+            TextStyle opStyle;
+            
+            if (ops[k].end <= startOffset || ops[k].start >= gWindowEnd)
+                continue;
+                
+            opStart = ops[k].start - startOffset;
+            opEnd   = ops[k].end   - startOffset;
+            if (opStart < 0)        opStart = 0;
+            if (opEnd > copyLen)    opEnd   = copyLen;
+            
+            TESetSelect((short)opStart, (short)opEnd, te);
+            switch (ops[k].kind) {
+                case 'B':
+                    opStyle.tsFace = bold;
+                    TESetStyle(doFace, &opStyle, false, te);
+                    break;
+                case 'I':
+                    opStyle.tsFace = italic;
+                    TESetStyle(doFace, &opStyle, false, te);
+                    break;
+                case 'C':
+                    GetFNum("\pMonaco", &opStyle.tsFont);
+                    opStyle.tsFace = normal;
+                    TESetStyle(doFont + doFace, &opStyle, false, te);
+                    break;
+                case 'L':
+                    opStyle.tsFace = underline;
+                    opStyle.tsColor.red = ops[k].linkID;
+                    opStyle.tsColor.green = 0;
+                    opStyle.tsColor.blue = 0;
+                    TESetStyle(doFace + doColor, &opStyle, false, te);
+                    break;
+                case 'H':
+                    opStyle.tsFace = bold;
+                    opStyle.tsSize = CurrentFontSize() + (4 - ops[k].level) * 4;
+                    TESetStyle(doFace + doSize, &opStyle, false, te);
+                    break;
+                case 'R':
+                    opStyle.tsFace = bold;
+                    opStyle.tsColor.red   = 0;
+                    opStyle.tsColor.green = 0;
+                    opStyle.tsColor.blue  = 1;
+                    TESetStyle(doFace + doColor, &opStyle, false, te);
+                    break;
+            }
+        }
+        HUnlock(gWriterOpsH);
+    }
+    
+    /* 5. Place caret at start, reflow text */
+    TESetSelect(0, 0, te);
+    TECalText(te);
+    
+    /* 6. Restore the real viewRect and destRect (top-aligned, no scroll offset) */
+    (**te).viewRect = savedViewRect;
+    (**te).destRect = savedViewRect;   /* text starts at very top of view */
+    
+    /* 7. Erase the window area and let TEUpdate paint the freshly laid-out text */
+    EraseRect(&savedViewRect);
+    TEUpdate(&savedViewRect, te);
+}
+
+void SyncWindowToBacking(void)
+{
+    long newLen = (**gActiveTE).teLength;
+    long oldLen = gWindowEnd - gWindowStart;
+    long diff = newLen - oldLen;
+    Handle targetH;
+    long *targetLenPtr;
+    
+    if (gHideMarkdown) {
+        targetH = gWriterText;
+        targetLenPtr = &gWriterLen;
+    } else {
+        targetH = gMarkdownText;
+        targetLenPtr = &gMarkdownLen;
+    }
+    
+    if (targetH == NULL) return;
+    
+    if (diff != 0) {
+        SetHandleSize(targetH, *targetLenPtr + diff);
+        HLock(targetH);
+        if (gWindowEnd < *targetLenPtr) {
+            BlockMove(*targetH + gWindowEnd, *targetH + gWindowEnd + diff, *targetLenPtr - gWindowEnd);
+        }
+        HUnlock(targetH);
+        *targetLenPtr += diff;
+    }
+    
+    HLock(targetH);
+    BlockMove(*(**gActiveTE).hText, *targetH + gWindowStart, newLen);
+    HUnlock(targetH);
+    
+    if (gHideMarkdown && gWriterOpsH != NULL) {
+        /* 1. Remove old style ops in this window range and adjust later ones */
+        short k;
+        short newCount = 0;
+        StyleOp *ops;
+        long oldWindowEnd = gWindowEnd;
+        
+        HLock(gWriterOpsH);
+        ops = (StyleOp *) *gWriterOpsH;
+        for (k = 0; k < gWriterOpCount; k++) {
+            if (ops[k].start < oldWindowEnd && ops[k].end > gWindowStart) {
+                continue;
+            }
+            if (ops[k].start >= oldWindowEnd) {
+                ops[k].start += diff;
+                ops[k].end += diff;
+            } else if (ops[k].end >= oldWindowEnd) {
+                ops[k].end += diff;
+            }
+            if (newCount != k) {
+                ops[newCount] = ops[k];
+            }
+            newCount++;
+        }
+        gWriterOpCount = newCount;
+        HUnlock(gWriterOpsH);
+        
+        /* 2. Extract current active TE style runs and add them to gWriterOpsH */
+        TEStyleHandle teStyles = TEGetStyleHandle(gActiveTE);
+        if (teStyles != NULL) {
+            short nRuns;
+            STHandle styleTab;
+            
+            HLock((Handle)teStyles);
+            nRuns = (**teStyles).nRuns;
+            styleTab = (**teStyles).styleTab;
+            HLock((Handle)styleTab);
+            
+            short r;
+            for (r = 0; r < nRuns; r++) {
+                short runStart = (**teStyles).runs[r].startChar;
+                short runEnd = (r + 1 < nRuns) ? (**teStyles).runs[r+1].startChar : (**gActiveTE).teLength;
+                
+                if (runEnd <= runStart) continue;
+                
+                short styleIdx = (**teStyles).runs[r].styleIndex;
+                STElement style = (*styleTab)[styleIdx];
+
+                
+                Boolean isBold = (style.stFace & bold) != 0;
+                Boolean isItalic = (style.stFace & italic) != 0;
+                Boolean isUnderline = (style.stFace & underline) != 0;
+                
+                short headerLevel = 0;
+                if (isBold && style.stSize > CurrentFontSize()) {
+                    short lvl;
+                    for (lvl = 1; lvl <= 3; lvl++) {
+                        if (style.stSize == CurrentFontSize() + (4 - lvl) * 4) {
+                            headerLevel = lvl;
+                            break;
+                        }
+                    }
+                }
+                
+                short monacoFontNum;
+                GetFNum("\pMonaco", &monacoFontNum);
+                Boolean isCode = (style.stFont == monacoFontNum);
+                
+                Boolean isHR = isBold && (style.stColor.blue == 1);
+                
+                short linkID = 0;
+                if (isUnderline && style.stColor.red > 0) {
+                    linkID = style.stColor.red;
+                }
+                
+                long globalStart = gWindowStart + runStart;
+                long globalEnd = gWindowStart + runEnd;
+                
+                HLock(gWriterOpsH);
+                ops = (StyleOp *) *gWriterOpsH;
+                
+                if (isHR) {
+                    if (gWriterOpCount < MAX_STYLE_OPS) {
+                        ops[gWriterOpCount].start = globalStart;
+                        ops[gWriterOpCount].end = globalEnd;
+                        ops[gWriterOpCount].kind = 'R';
+                        ops[gWriterOpCount].level = 0;
+                        ops[gWriterOpCount].linkID = 0;
+                        gWriterOpCount++;
+                    }
+                } else if (headerLevel > 0) {
+                    if (gWriterOpCount < MAX_STYLE_OPS) {
+                        ops[gWriterOpCount].start = globalStart;
+                        ops[gWriterOpCount].end = globalEnd;
+                        ops[gWriterOpCount].kind = 'H';
+                        ops[gWriterOpCount].level = headerLevel;
+                        ops[gWriterOpCount].linkID = 0;
+                        gWriterOpCount++;
+                    }
+                } else {
+                    if (isBold) {
+                        if (gWriterOpCount < MAX_STYLE_OPS) {
+                            ops[gWriterOpCount].start = globalStart;
+                            ops[gWriterOpCount].end = globalEnd;
+                            ops[gWriterOpCount].kind = 'B';
+                            ops[gWriterOpCount].level = 0;
+                            ops[gWriterOpCount].linkID = 0;
+                            gWriterOpCount++;
+                        }
+                    }
+                    if (isItalic) {
+                        if (gWriterOpCount < MAX_STYLE_OPS) {
+                            ops[gWriterOpCount].start = globalStart;
+                            ops[gWriterOpCount].end = globalEnd;
+                            ops[gWriterOpCount].kind = 'I';
+                            ops[gWriterOpCount].level = 0;
+                            ops[gWriterOpCount].linkID = 0;
+                            gWriterOpCount++;
+                        }
+                    }
+                    if (isCode) {
+                        if (gWriterOpCount < MAX_STYLE_OPS) {
+                            ops[gWriterOpCount].start = globalStart;
+                            ops[gWriterOpCount].end = globalEnd;
+                            ops[gWriterOpCount].kind = 'C';
+                            ops[gWriterOpCount].level = 0;
+                            ops[gWriterOpCount].linkID = 0;
+                            gWriterOpCount++;
+                        }
+                    }
+                    if (linkID > 0) {
+                        if (gWriterOpCount < MAX_STYLE_OPS) {
+                            ops[gWriterOpCount].start = globalStart;
+                            ops[gWriterOpCount].end = globalEnd;
+                            ops[gWriterOpCount].kind = 'L';
+                            ops[gWriterOpCount].level = 0;
+                            ops[gWriterOpCount].linkID = linkID;
+                            gWriterOpCount++;
+                        }
+                    }
+                }
+                HUnlock(gWriterOpsH);
+            }
+            HUnlock((Handle)styleTab);
+            HUnlock((Handle)teStyles);
+        }
+    }
+    
+    gWindowEnd += diff;
+}
+

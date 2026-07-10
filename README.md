@@ -15,6 +15,24 @@ A distraction-free Markdown writing app for classic 68k Macintosh computers (Sys
 
 Video overview: [Artful Type demo](https://youtu.be/HEheu_r9UGw)
 
+## ArtfulType Pro
+
+A version of ArtfulType that requires at least a 16MHz 68030 (SE/30), 16 MB of RAM, and Mac OS 7.1 or later.
+
+### Additional Features of the Pro version
+
+- Multi File Support - you can open multiple markdown files at once
+- Maximum file size increased to 256K
+- Bullet Point Lists / Numbered Lists
+- Resizable windows
+- Status Bar
+- Icon Bar for text formatting and view change
+
+### Planned Features
+
+- Full Basic Markdown support (excluding images)
+- Larger File Size (> 32,768 characters)
+
 ## Getting Started
 
 If your Mac can use [BlueSCSI](https://bluescsi.com), use the BlueSCSI image. If it can't (or you just want a physical floppy), use the 800K floppy image instead.
@@ -32,6 +50,7 @@ Write `ArtfulType-800K.dsk` to a real 800K floppy disk and boot from it directly
 ### In an emulator (Mini vMac)
 
 For trying ArtfulType without real hardware, use [Mini vMac](https://www.gryphel.com/c/minivmac/) configured for a Mac Plus, with either:
+
 - `ArtfulType-20MB.dsk` — the full HD setup (System 7.1, stripped down, with the app, Disk Copy, and the embedded floppy image)
 - `ArtfulType-800K.dsk` — a bootable 800K floppy (System 6.0.8) with just the app
 
@@ -47,7 +66,7 @@ Saved files are plain `.md` text, editable in any text editor.
 ### Keyboard shortcuts
 
 | Action | Shortcut |
-|---|---|
+| --- | --- |
 | New / Open / Save | ⌘N / ⌘O / ⌘S |
 | Quit | ⌘Q |
 | Undo / Redo | ⌘Z / ⇧⌘Z |

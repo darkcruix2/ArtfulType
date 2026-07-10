@@ -15,13 +15,27 @@ TEHandle gTE = NULL;
 TEHandle gHiddenTE = NULL;
 Handle gMarkdownText = NULL;
 long gMarkdownLen = 0;
+Handle gWriterText = NULL;
+long gWriterLen = 0;
+Handle gWriterOpsH = NULL;
+short gWriterOpCount = 0;
+long gWindowStart = 0;
+long gWindowEnd = 0;
+Handle gLineOffsetsH = NULL;
+long gNumLines = 0;
 long gLastCharCount = -1;
 short gLastLine = -1;
 short gLastCol = -1;
 Boolean gShowStatusBar = true;
 TEHandle gActiveTE;
 ControlHandle gScrollBar;
+ControlHandle gJumpToTopBtn = NULL;
+ControlHandle gJumpToEndBtn = NULL;
 Boolean gScrollBarVisible = false;
+
+
+
+
 Boolean gHaveFile = false;
 Boolean gDirty = false;
 Str255 gFileName;
@@ -45,6 +59,8 @@ short gLinkCount = 0;
 DocumentRecord *gDocumentList = NULL;
 DocumentRecord *gActiveDoc = NULL;
 MenuHandle gWindowMenu = NULL;
+Boolean gScrollbarDriven = false; /* set during scrollbar-driven loads to suppress caret-based window shifting */
+long gWindowStartLine = 1;        /* global line number at top of current TE window */
 
 DocumentRecord* GetDocumentForWindow(WindowPtr w)
 {
@@ -84,6 +100,10 @@ void DisposeDocument(DocumentRecord *doc)
                 curr->next = doc->next;
             }
         }
+        if (doc->markdownText) DisposeHandle(doc->markdownText);
+        if (doc->writerText) DisposeHandle(doc->writerText);
+        if (doc->writerOpsH) DisposeHandle(doc->writerOpsH);
+        if (doc->lineOffsetsH) DisposeHandle(doc->lineOffsetsH);
         if (doc->te) TEDispose(doc->te);
         if (doc->hiddenTE) TEDispose(doc->hiddenTE);
         DisposePtr((Ptr)doc);
@@ -208,8 +228,9 @@ static void MakeMenu(void)
        Cmd-Shift-Z for Redo is instead handled directly in EventLoop,
        intercepted before MenuKey ever sees it. */
     gEditMenu = NewMenu(mEdit, "\pEdit");
-    AppendMenu(gEditMenu, "\pUndo/Z;Redo;(-;Cut/X;Copy/C;Paste/V;(-;Select All/A");
+    AppendMenu(gEditMenu, "\pUndo/Z;Redo;(-;Cut/X;Copy/C;Paste/V;(-;Select All/A;(-;Search.../F;Search and Replace...");
     InsertMenu(gEditMenu, 0);
+
     DisableItem(gEditMenu, iUndo);
     DisableItem(gEditMenu, iRedo);
 
@@ -308,7 +329,30 @@ void MakeWindow(void)
     sbRect.top -= 1;
     sbRect.bottom += 1;
     gScrollBar = NewControl(gWindow, &sbRect, "\p", false, 0, 0, 0, scrollBarProc, 0);
+
+    {
+        Rect btnRect;
+        
+        /* Jump to Top Button (Top Left) */
+        btnRect.top = 2;
+        btnRect.bottom = 22;
+        btnRect.left = viewRect.left;
+        btnRect.right = btnRect.left + 90;
+        gJumpToTopBtn = NewControl(gWindow, &btnRect, "\pJump to Top", true, 0, 0, 0, pushButProc, 0);
+
+        /* Jump to End Button (Top Right) */
+        btnRect.top = 2;
+        btnRect.bottom = 22;
+        btnRect.right = viewRect.right;
+        btnRect.left = btnRect.right - 90;
+        gJumpToEndBtn = NewControl(gWindow, &btnRect, "\pJump to End", true, 0, 0, 0, pushButProc, 0);
+
+    }
 }
+
+
+
+
 static void UpdateStatusBar(WindowPtr w, Boolean forceDraw)
 {
     long chars;
@@ -324,23 +368,31 @@ static void UpdateStatusBar(WindowPtr w, Boolean forceDraw)
 
     if (!gActiveTE || !gShowStatusBar) return;
     
-    chars = (**gActiveTE).teLength;
+    chars = TotalLength();
     caret = (**gActiveTE).selStart;
 
-    for (i = 0; i < (**gActiveTE).nLines; i++) {
-        if ((**gActiveTE).lineStarts[i] <= caret) {
-            line = i + 1;
-        } else {
-            break;
+    line = 1;
+    col = 1;
+    {
+        short scan;
+        short newlines = 0;
+        Handle hText = (Handle)(**gActiveTE).hText;
+        HLock(hText);
+        for (scan = 0; scan < caret; scan++) {
+            if ((*hText)[scan] == '\r') {
+                newlines++;
+            }
         }
+        
+        scan = caret;
+        while (scan > 0 && (*hText)[scan - 1] != '\r') {
+            scan--;
+            col++;
+        }
+        HUnlock(hText);
+        line = (short)((long)gWindowStartLine + newlines);
     }
-    
-    if (line > 0) {
-        col = caret - (**gActiveTE).lineStarts[line - 1] + 1;
-    } else {
-        line = 1;
-        col = 1;
-    }
+
 
     if (!forceDraw && chars == gLastCharCount && line == gLastLine && col == gLastCol && gHideMarkdown == lastMode)
         return;
@@ -364,6 +416,8 @@ static void UpdateStatusBar(WindowPtr w, Boolean forceDraw)
 
     modeStr = gHideMarkdown ? "Writer" : "Markdown";
     sprintf(statusStr, "[%s]    Chars: %ld    Line: %d    Col: %d", modeStr, chars, line, col);
+
+
     pStatusStr[0] = strlen(statusStr);
     BlockMove(statusStr, pStatusStr + 1, pStatusStr[0]);
 
@@ -387,6 +441,52 @@ static void UpdateStatusBar(WindowPtr w, Boolean forceDraw)
     SetPort(savedPort);
 }
 
+static void DrawTopMiddleButtons(WindowPtr w)
+{
+    Rect r;
+    short centerX = (w->portRect.right - w->portRect.left) / 2;
+    short startX = centerX - 56;
+    Str255 s;
+    short textWidth;
+    
+    GrafPtr savedPort;
+    GetPort(&savedPort);
+    SetPort(w);
+    
+    TextFont(0); /* System Font */
+    TextSize(0);
+    
+    /* 1. Draw B Button */
+    SetRect(&r, startX, 2, startX + 25, 22);
+    FrameRoundRect(&r, 6, 6);
+    TextFace(bold);
+    BlockMove("\pB", s, 2);
+    textWidth = StringWidth(s);
+    MoveTo(r.left + (r.right - r.left - textWidth) / 2, r.top + 14);
+    DrawString(s);
+    
+    /* 2. Draw I Button */
+    SetRect(&r, startX + 31, 2, startX + 56, 22);
+    FrameRoundRect(&r, 6, 6);
+    TextFace(italic);
+    BlockMove("\pI", s, 2);
+    textWidth = StringWidth(s);
+    MoveTo(r.left + (r.right - r.left - textWidth) / 2, r.top + 14);
+    DrawString(s);
+    
+    /* 3. Draw View Button */
+    SetRect(&r, startX + 62, 2, startX + 112, 22);
+    FrameRoundRect(&r, 6, 6);
+    TextFace(normal);
+    BlockMove("\pView", s, 5);
+    textWidth = StringWidth(s);
+    MoveTo(r.left + (r.right - r.left - textWidth) / 2, r.top + 14);
+    DrawString(s);
+    
+    TextFace(normal); /* restore */
+    SetPort(savedPort);
+}
+
 static void DoUpdate(WindowPtr w)
 {
     GrafPtr savedPort;
@@ -397,12 +497,14 @@ static void DoUpdate(WindowPtr w)
     EraseRect(&w->portRect);
     TEUpdate(&w->portRect, gActiveTE);
     DrawControls(w);
+    DrawTopMiddleButtons(w);
     DrawGrowIcon(w);
     UpdateStatusBar(w, true);
     EndUpdate(w);
     
     SetPort(savedPort);
 }
+
 
 static void ToggleStatusBar(void)
 {
@@ -426,7 +528,299 @@ static void ToggleStatusBar(void)
 #endif
 }
 
+static char LowerCase(char c)
+{
+    if (c >= 'A' && c <= 'Z')
+        return c - 'A' + 'a';
+    return c;
+}
+
+static void GetActiveBackingStore(Handle *targetH, long **targetLenPtr)
+{
+    if (gHideMarkdown) {
+        *targetH = gWriterText;
+        *targetLenPtr = &gWriterLen;
+    } else {
+        *targetH = gMarkdownText;
+        *targetLenPtr = &gMarkdownLen;
+    }
+}
+
+static Boolean FindTextInHandle(Handle targetH, long targetLen, unsigned char *target, long startOffset, long *foundStart, long *foundEnd)
+{
+    long targetLenParam = target[0];
+    if (targetLenParam == 0) return false;
+    
+    HLock(targetH);
+    long i;
+    /* Search from startOffset to end */
+    for (i = startOffset; i <= targetLen - targetLenParam; i++) {
+        short j;
+        Boolean match = true;
+        for (j = 0; j < targetLenParam; j++) {
+            if (LowerCase((*targetH)[i + j]) != LowerCase(target[1 + j])) {
+                match = false;
+                break;
+            }
+        }
+        if (match) {
+            *foundStart = i;
+            *foundEnd = i + targetLenParam;
+            HUnlock(targetH);
+            return true;
+        }
+    }
+    
+    /* Wrap around: search from 0 to startOffset */
+    for (i = 0; i < startOffset && i <= targetLen - targetLenParam; i++) {
+        short j;
+        Boolean match = true;
+        for (j = 0; j < targetLenParam; j++) {
+            if (LowerCase((*targetH)[i + j]) != LowerCase(target[1 + j])) {
+                match = false;
+                break;
+            }
+        }
+        if (match) {
+            *foundStart = i;
+            *foundEnd = i + targetLenParam;
+            HUnlock(targetH);
+            return true;
+        }
+    }
+    
+    HUnlock(targetH);
+    return false;
+}
+
+void DoSearch(void)
+{
+    DialogPtr dlg;
+    short item;
+    DialogItemType type;
+    Handle itemH;
+    Rect box;
+    Str255 target;
+    
+    if (!gActiveTE) return;
+    
+    dlg = GetNewDialog(kSearchDialog, NULL, (WindowPtr) -1L);
+    if (dlg == NULL) return;
+    
+    SelectDialogItemText(dlg, iSearchField, 0, 32767);
+    
+    do {
+        ModalDialog(NULL, &item);
+    } while (item != iSearchOK && item != iSearchCancel);
+    
+    if (item == iSearchOK) {
+        GetDialogItem(dlg, iSearchField, &type, &itemH, &box);
+        GetDialogItemText(itemH, target);
+        
+        if (target[0] > 0) {
+            Handle backingH;
+            long *backingLenPtr;
+            GetActiveBackingStore(&backingH, &backingLenPtr);
+            
+            if (backingH != NULL) {
+                SyncWindowToBacking();
+                
+                long matchStart, matchEnd;
+                long currentGlobalPos = gWindowStart + (**gActiveTE).selEnd;
+                if (FindTextInHandle(backingH, *backingLenPtr, target, currentGlobalPos, &matchStart, &matchEnd)) {
+                    if (matchStart < gWindowStart || matchEnd > gWindowEnd) {
+                        LoadTextWindow(matchStart);
+                    }
+                    
+                    short localStart = matchStart - gWindowStart;
+                    short localEnd = matchEnd - gWindowStart;
+                    TESetSelect(localStart, localEnd, gActiveTE);
+                    ScrollCaretIntoView(false);
+                } else {
+                    SysBeep(30);
+                }
+            }
+        }
+    }
+    DisposeDialog(dlg);
+    SetPort(gWindow);
+    UpdateMenuBarLook();
+}
+
+void DoSearchReplace(void)
+{
+    DialogPtr dlg;
+    short item;
+    DialogItemType type;
+    Handle itemH;
+    Rect box;
+    Str255 findTarget;
+    Str255 replaceWith;
+    
+    if (!gActiveTE) return;
+    
+    dlg = GetNewDialog(kSearchReplaceDialog, NULL, (WindowPtr) -1L);
+    if (dlg == NULL) return;
+    
+    SelectDialogItemText(dlg, iReplaceFindField, 0, 32767);
+    
+    do {
+        ModalDialog(NULL, &item);
+    } while (item != iReplaceOK && item != iReplaceCancel && item != iReplaceAll);
+    
+    if (item == iReplaceOK || item == iReplaceAll) {
+        GetDialogItem(dlg, iReplaceFindField, &type, &itemH, &box);
+        GetDialogItemText(itemH, findTarget);
+        
+        GetDialogItem(dlg, iReplaceWithField, &type, &itemH, &box);
+        GetDialogItemText(itemH, replaceWith);
+        
+        if (findTarget[0] > 0) {
+            Handle backingH;
+            long *backingLenPtr;
+            GetActiveBackingStore(&backingH, &backingLenPtr);
+            
+            if (backingH != NULL) {
+                SyncWindowToBacking();
+                
+                if (item == iReplaceOK) {
+                    /* Single Replace */
+                    long matchStart, matchEnd;
+                    long currentGlobalPos = gWindowStart + (**gActiveTE).selStart;
+                    if (FindTextInHandle(backingH, *backingLenPtr, findTarget, currentGlobalPos, &matchStart, &matchEnd)) {
+                        PushUndoSnapshot();
+                        gTypingRunActive = false;
+                        
+                        long diff = replaceWith[0] - findTarget[0];
+                        
+                        if (diff != 0) {
+                            SetHandleSize(backingH, *backingLenPtr + diff);
+                            HLock(backingH);
+                            if (matchStart + findTarget[0] < *backingLenPtr) {
+                                BlockMove(*backingH + matchStart + findTarget[0],
+                                          *backingH + matchStart + findTarget[0] + diff,
+                                          *backingLenPtr - (matchStart + findTarget[0]));
+                            }
+                            HUnlock(backingH);
+                            *backingLenPtr += diff;
+                            
+                            if (gHideMarkdown && gWriterOpsH != NULL) {
+                                short k;
+                                StyleOp *ops;
+                                HLock(gWriterOpsH);
+                                ops = (StyleOp *) *gWriterOpsH;
+                                for (k = 0; k < gWriterOpCount; k++) {
+                                    if (ops[k].start >= matchStart + findTarget[0]) {
+                                        ops[k].start += diff;
+                                        ops[k].end += diff;
+                                    } else if (ops[k].end > matchStart) {
+                                        ops[k].end += diff;
+                                        if (ops[k].end < ops[k].start) ops[k].end = ops[k].start;
+                                    }
+                                }
+                                HUnlock(gWriterOpsH);
+                            }
+                        }
+                        
+                        HLock(backingH);
+                        BlockMove(&replaceWith[1], *backingH + matchStart, replaceWith[0]);
+                        HUnlock(backingH);
+                        
+                        gDirty = true;
+                        LoadTextWindow(matchStart);
+                        
+                        short localStart = matchStart - gWindowStart;
+                        short localEnd = localStart + replaceWith[0];
+                        TESetSelect(localStart, localEnd, gActiveTE);
+                        ScrollCaretIntoView(false);
+                        AdjustScrollbar();
+                    } else {
+                        SysBeep(30);
+                    }
+                } else if (item == iReplaceAll) {
+                    /* Replace Everywhere (Replace All) */
+                    PushUndoSnapshot();
+                    gTypingRunActive = false;
+                    
+                    long findLen = findTarget[0];
+                    long replaceLen = replaceWith[0];
+                    long diff = replaceLen - findLen;
+                    long searchOffset = 0;
+                    long replaceCount = 0;
+                    
+                    while (searchOffset <= *backingLenPtr - findLen) {
+                        Boolean match = true;
+                        long j;
+                        
+                        HLock(backingH);
+                        for (j = 0; j < findLen; j++) {
+                            if (LowerCase((*backingH)[searchOffset + j]) != LowerCase(findTarget[1 + j])) {
+                                match = false;
+                                break;
+                            }
+                        }
+                        HUnlock(backingH);
+                        
+                        if (match) {
+                            if (diff != 0) {
+                                SetHandleSize(backingH, *backingLenPtr + diff);
+                                HLock(backingH);
+                                if (searchOffset + findLen < *backingLenPtr) {
+                                    BlockMove(*backingH + searchOffset + findLen,
+                                              *backingH + searchOffset + findLen + diff,
+                                              *backingLenPtr - (searchOffset + findLen));
+                                }
+                                HUnlock(backingH);
+                                *backingLenPtr += diff;
+                                
+                                if (gHideMarkdown && gWriterOpsH != NULL) {
+                                    short k;
+                                    StyleOp *ops;
+                                    HLock(gWriterOpsH);
+                                    ops = (StyleOp *) *gWriterOpsH;
+                                    for (k = 0; k < gWriterOpCount; k++) {
+                                        if (ops[k].start >= searchOffset + findLen) {
+                                            ops[k].start += diff;
+                                            ops[k].end += diff;
+                                        } else if (ops[k].end > searchOffset) {
+                                            ops[k].end += diff;
+                                            if (ops[k].end < ops[k].start) ops[k].end = ops[k].start;
+                                        }
+                                    }
+                                    HUnlock(gWriterOpsH);
+                                }
+                            }
+                            
+                            HLock(backingH);
+                            BlockMove(&replaceWith[1], *backingH + searchOffset, replaceLen);
+                            HUnlock(backingH);
+                            
+                            searchOffset += replaceLen;
+                            replaceCount++;
+                        } else {
+                            searchOffset++;
+                        }
+                    }
+                    
+                    if (replaceCount > 0) {
+                        gDirty = true;
+                        LoadTextWindow(gWindowStart);
+                    } else {
+                        SysBeep(30);
+                    }
+                }
+            }
+        }
+    }
+    DisposeDialog(dlg);
+    SetPort(gWindow);
+    UpdateMenuBarLook();
+}
+
+
+
 static void DoMenuCommand(long menuResult)
+
 {
     short menuID = HiWord(menuResult);
     short menuItem = LoWord(menuResult);
@@ -480,7 +874,10 @@ static void DoMenuCommand(long menuResult)
             case iCopy:      DoCopy(); break;
             case iPaste:     DoPaste(); break;
             case iSelectAll: DoSelectAll(); break;
+            case iSearch:    DoSearch(); break;
+            case iSearchReplace: DoSearchReplace(); break;
         }
+
     } else if (menuID == mStyle) {
         gDirty = true;
         PushUndoSnapshot();
@@ -550,6 +947,7 @@ static void DoMenuCommand(long menuResult)
 }
 
 static void GetCurrentLineRange(short *lineStart, short *lineEnd)
+
 {
     short caretPos = (**gActiveTE).selEnd;
     short numLines = (**gActiveTE).nLines;
@@ -667,9 +1065,65 @@ static void EventLoop(void)
                             ControlHandle hitControl;
                             SetPort(w);
                             GlobalToLocal(&event.where);
-                            if (FindControl(event.where, w, &hitControl) != 0 && hitControl == gScrollBar)
-                                DoScrollClick(event.where);
-                            else {
+                            
+                            /* Check custom top-middle buttons first */
+                            short centerX = (w->portRect.right - w->portRect.left) / 2;
+                            short startX = centerX - 56;
+                            Rect btnB, btnI, btnView;
+                            
+                            SetRect(&btnB, startX, 2, startX + 25, 22);
+                            SetRect(&btnI, startX + 31, 2, startX + 56, 22);
+                            SetRect(&btnView, startX + 62, 2, startX + 112, 22);
+                            
+                            if (PtInRect(event.where, &btnB)) {
+                                InvertRoundRect(&btnB, 6, 6);
+                                while (StillDown()) ;
+                                InvertRoundRect(&btnB, 6, 6);
+                                
+                                PushUndoSnapshot();
+                                gTypingRunActive = false;
+                                gDirty = true;
+                                if (gHideMarkdown) {
+                                    ToggleFace(bold);
+                                } else {
+                                    WrapSelection("**", "**");
+                                    ClearStyles();
+                                }
+                                AdjustScrollbar();
+                            } else if (PtInRect(event.where, &btnI)) {
+                                InvertRoundRect(&btnI, 6, 6);
+                                while (StillDown()) ;
+                                InvertRoundRect(&btnI, 6, 6);
+                                
+                                PushUndoSnapshot();
+                                gTypingRunActive = false;
+                                gDirty = true;
+                                if (gHideMarkdown) {
+                                    ToggleFace(italic);
+                                } else {
+                                    WrapSelection("*", "*");
+                                    ClearStyles();
+                                }
+                                AdjustScrollbar();
+                            } else if (PtInRect(event.where, &btnView)) {
+                                InvertRoundRect(&btnView, 6, 6);
+                                while (StillDown()) ;
+                                InvertRoundRect(&btnView, 6, 6);
+                                
+                                SetViewMode(!gHideMarkdown);
+                            } else if (FindControl(event.where, w, &hitControl) != 0) {
+                                if (hitControl == gScrollBar) {
+                                    DoScrollClick(event.where);
+                                } else if (hitControl == gJumpToTopBtn) {
+                                    if (TrackControl(gJumpToTopBtn, event.where, NULL) == inButton) {
+                                        HandleJumpToTop();
+                                    }
+                                } else if (hitControl == gJumpToEndBtn) {
+                                    if (TrackControl(gJumpToEndBtn, event.where, NULL) == inButton) {
+                                        HandleJumpToEnd();
+                                    }
+                                }
+                            } else {
                                 gTypingRunActive = false;
                                 TEClick(event.where, (event.modifiers & shiftKey) != 0, gActiveTE);
                             }
@@ -684,9 +1138,65 @@ static void EventLoop(void)
 
                         SetPort(w);
                         GlobalToLocal(&event.where);
-                        if (FindControl(event.where, w, &hitControl) != 0 && hitControl == gScrollBar)
-                            DoScrollClick(event.where);
-                        else {
+                        
+                        /* Check custom top-middle buttons first */
+                        short centerX = (w->portRect.right - w->portRect.left) / 2;
+                        short startX = centerX - 56;
+                        Rect btnB, btnI, btnView;
+                        
+                        SetRect(&btnB, startX, 2, startX + 25, 22);
+                        SetRect(&btnI, startX + 31, 2, startX + 56, 22);
+                        SetRect(&btnView, startX + 62, 2, startX + 112, 22);
+                        
+                        if (PtInRect(event.where, &btnB)) {
+                            InvertRoundRect(&btnB, 6, 6);
+                            while (StillDown()) ;
+                            InvertRoundRect(&btnB, 6, 6);
+                            
+                            PushUndoSnapshot();
+                            gTypingRunActive = false;
+                            gDirty = true;
+                            if (gHideMarkdown) {
+                                ToggleFace(bold);
+                            } else {
+                                WrapSelection("**", "**");
+                                ClearStyles();
+                            }
+                            AdjustScrollbar();
+                        } else if (PtInRect(event.where, &btnI)) {
+                            InvertRoundRect(&btnI, 6, 6);
+                            while (StillDown()) ;
+                            InvertRoundRect(&btnI, 6, 6);
+                            
+                            PushUndoSnapshot();
+                            gTypingRunActive = false;
+                            gDirty = true;
+                            if (gHideMarkdown) {
+                                ToggleFace(italic);
+                            } else {
+                                WrapSelection("*", "*");
+                                ClearStyles();
+                            }
+                            AdjustScrollbar();
+                        } else if (PtInRect(event.where, &btnView)) {
+                            InvertRoundRect(&btnView, 6, 6);
+                            while (StillDown()) ;
+                            InvertRoundRect(&btnView, 6, 6);
+                            
+                            SetViewMode(!gHideMarkdown);
+                        } else if (FindControl(event.where, w, &hitControl) != 0) {
+                            if (hitControl == gScrollBar) {
+                                DoScrollClick(event.where);
+                            } else if (hitControl == gJumpToTopBtn) {
+                                if (TrackControl(gJumpToTopBtn, event.where, NULL) == inButton) {
+                                    HandleJumpToTop();
+                                }
+                            } else if (hitControl == gJumpToEndBtn) {
+                                if (TrackControl(gJumpToEndBtn, event.where, NULL) == inButton) {
+                                    HandleJumpToEnd();
+                                }
+                            }
+                        } else {
                             gTypingRunActive = false;
                             TEClick(event.where, (event.modifiers & shiftKey) != 0, gActiveTE);
                         }
@@ -700,6 +1210,11 @@ static void EventLoop(void)
                     SetActiveDocument(GetDocumentForWindow(FrontWindow()));
                     if (!gActiveDoc && (event.modifiers & cmdKey) == 0) break;
 #endif
+                    /* User pressed a key: keyboard navigation is now in control.
+                       Clear the scrollbar-driven flag so ScrollCaretIntoView can
+                       do backward window shifts again if the caret reaches an edge. */
+                    gScrollbarDriven = false;
+                    
                     char key = event.message & charCodeMask;
                     char keyCode = (event.message & keyCodeMask) >> 8;
                     Boolean isContentKey = (key < 0x1C || key > 0x1F);
@@ -717,33 +1232,34 @@ static void EventLoop(void)
                                 TESetSelect(selStart, selStart + 1, gActiveTE);
                                 TEDelete(gActiveTE);
                             }
-                        } else {
+                         } else {
                             TEDelete(gActiveTE);
                         }
                         gDirty = true;
-                        ScrollCaretIntoView();
+                        ScrollCaretIntoView(false);
                         UpdateScrollbarRange();
                         handled = true;
                     } else if (keyCode == 0x73) { /* Home */
                         TESetSelect(0, 0, gActiveTE);
-                        ScrollCaretIntoView();
+                        ScrollCaretIntoView(true);
                         handled = true;
                     } else if (keyCode == 0x77) { /* End */
                         short len = (**gActiveTE).teLength;
                         TESetSelect(len, len, gActiveTE);
-                        ScrollCaretIntoView();
+                        ScrollCaretIntoView(false);
                         handled = true;
                     } else if ((event.modifiers & cmdKey) && keyCode == 0x7B) { /* Cmd+Cursor Left */
                         short lineStart, lineEnd;
                         GetCurrentLineRange(&lineStart, &lineEnd);
                         TESetSelect(lineStart, lineStart, gActiveTE);
-                        ScrollCaretIntoView();
+                        ScrollCaretIntoView(true);
                         handled = true;
                     } else if ((event.modifiers & cmdKey) && keyCode == 0x7C) { /* Cmd+Cursor Right */
                         short lineStart, lineEnd;
                         GetCurrentLineRange(&lineStart, &lineEnd);
                         TESetSelect(lineEnd, lineEnd, gActiveTE);
-                        ScrollCaretIntoView();
+                        ScrollCaretIntoView(false);
+
                         handled = true;
                     }
 
@@ -948,9 +1464,10 @@ static void EventLoop(void)
                                 }
                             }
                         }
-                        ScrollCaretIntoView();
+                        ScrollCaretIntoView(key == 0x1E || key == 0x1C || key == 0x08);
                         UpdateScrollbarRange();
                     }
+
                     break;
                 }
 

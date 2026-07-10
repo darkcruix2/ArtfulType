@@ -40,6 +40,9 @@
 #define iCopy    5
 #define iPaste   6
 #define iSelectAll 8
+#define iSearch 10
+#define iSearchReplace 11
+
 
 #define mStyle   129
 #define iBold    1
@@ -70,6 +73,19 @@
 #define kAboutDialog 133
 #define iAboutOK     1
 #define iAboutTitle  2
+
+#define kSearchDialog 134
+#define iSearchOK     1
+#define iSearchCancel 2
+#define iSearchField  4
+
+#define kSearchReplaceDialog 135
+#define iReplaceOK           1
+#define iReplaceCancel       2
+#define iReplaceFindField    4
+#define iReplaceWithField    6
+#define iReplaceAll          7
+
 
 #define mView        130
 #define iMarkdownView 1
@@ -135,6 +151,21 @@ typedef struct {
     a full reparse of gTE and re-derives whichever links currently exist.
 */
 #define MAX_LINKS 512
+#define WINDOW_SIZE 4000  /* max chars loaded into the TE at a time for large files */
+
+typedef struct {
+    long start, end;
+    short kind, level;
+    short linkID;
+} StyleOp;
+
+/* One-shot flag set during scrollbar-driven window loads to suppress
+   the caret-based auto-shift in ScrollCaretIntoView. Global (not per-doc). */
+extern Boolean gScrollbarDriven;
+
+/* First line of the document that gWindowStart maps to (1-based, global).
+   Computed by LoadTextWindow; used by UpdateStatusBar to show true line numbers. */
+extern long gWindowStartLine;
 
 #ifdef ARTFUL_PRO
 
@@ -144,7 +175,13 @@ typedef struct DocumentRecord {
     TEHandle hiddenTE;
     TEHandle activeTE;
     ControlHandle scrollBar;
+    ControlHandle jumpToTopBtn;
+    ControlHandle jumpToEndBtn;
     Boolean scrollBarVisible;
+
+
+
+
     Boolean haveFile;
     Boolean dirty;
     Str255 fileName;
@@ -152,6 +189,14 @@ typedef struct DocumentRecord {
     Boolean hideMarkdown;
     Handle markdownText;
     long markdownLen;
+    Handle writerText;
+    long writerLen;
+    Handle writerOpsH;
+    short writerOpCount;
+    long windowStart;
+    long windowEnd;
+    Handle lineOffsetsH;
+    long numLines;
     long lastCharCount;
     short lastLine;
     short lastCol;
@@ -177,7 +222,13 @@ extern DocumentRecord *gDocumentList;
 #define gHiddenTE (gActiveDoc->hiddenTE)
 #define gActiveTE (gActiveDoc->activeTE)
 #define gScrollBar (gActiveDoc->scrollBar)
+#define gJumpToTopBtn (gActiveDoc->jumpToTopBtn)
+#define gJumpToEndBtn (gActiveDoc->jumpToEndBtn)
 #define gScrollBarVisible (gActiveDoc->scrollBarVisible)
+
+
+
+
 #define gHaveFile (gActiveDoc->haveFile)
 #define gDirty (gActiveDoc->dirty)
 #define gFileName (gActiveDoc->fileName)
@@ -185,6 +236,14 @@ extern DocumentRecord *gDocumentList;
 #define gHideMarkdown (gActiveDoc->hideMarkdown)
 #define gMarkdownText (gActiveDoc->markdownText)
 #define gMarkdownLen (gActiveDoc->markdownLen)
+#define gWriterText (gActiveDoc->writerText)
+#define gWriterLen (gActiveDoc->writerLen)
+#define gWriterOpsH (gActiveDoc->writerOpsH)
+#define gWriterOpCount (gActiveDoc->writerOpCount)
+#define gWindowStart (gActiveDoc->windowStart)
+#define gWindowEnd (gActiveDoc->windowEnd)
+#define gLineOffsetsH (gActiveDoc->lineOffsetsH)
+#define gNumLines (gActiveDoc->numLines)
 #define gLastCharCount (gActiveDoc->lastCharCount)
 #define gLastLine (gActiveDoc->lastLine)
 #define gLastCol (gActiveDoc->lastCol)
@@ -213,6 +272,21 @@ extern TEHandle gTE;
 extern TEHandle gHiddenTE;
 extern Handle gMarkdownText;
 extern long gMarkdownLen;
+extern Handle gWriterText;
+extern long gWriterLen;
+extern Handle gWriterOpsH;
+extern short gWriterOpCount;
+extern ControlHandle gScrollBar;
+extern ControlHandle gJumpToTopBtn;
+extern ControlHandle gJumpToEndBtn;
+extern long gWindowStart;
+
+
+
+
+extern long gWindowEnd;
+extern Handle gLineOffsetsH;
+extern long gNumLines;
 extern long gLastCharCount;
 extern short gLastLine;
 extern short gLastCol;
@@ -256,7 +330,16 @@ void SetFontMode(Boolean useSans);
 /* scrolling.c */
 void UpdateScrollbarRange(void);
 void AdjustScrollbar(void);
-void ScrollCaretIntoView(void);
+void ScrollCaretIntoView(Boolean movingBackward);
+void HandleJumpToTop(void);
+void HandleJumpToEnd(void);
+
+
+
+
+long TotalLength(void);
+
+short CurrentFontSize(void);
 void DoScrollClick(Point pt);
 void InvalidateHeightCache(void);
 
@@ -279,6 +362,8 @@ void DetectInlineMarkdown(char justTyped);
 void ClearSelectionStyleHidden(void);
 void ClearMarkdownInSelection(void);
 short AddLinkURL(const unsigned char *url);
+void LoadTextWindow(long startOffset);
+void SyncWindowToBacking(void);
 
 /* undo.c */
 void ClearUndoRedoStacks(void);
