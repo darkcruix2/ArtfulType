@@ -29,7 +29,8 @@ void ClearStyles(void)
     ts.tsColor.red = ts.tsColor.green = ts.tsColor.blue = 0;
 
     TESetSelect(0, 32767, gTE);
-    TESetStyle(doFont + doFace + doSize + doColor, &ts, true, gTE);
+    TESetStyle(doFont + doFace + doSize + doColor, &ts, false, gTE);
+    TECalText(gTE);
 
     TESetSelect(savedStart, savedEnd, gTE);
 }
@@ -287,13 +288,12 @@ void BuildHiddenView(void)
     }
 
     HUnlock(srcH);
-    HUnlock(outH);
-
     SuppressDrawing(gHiddenTE, &savedViewRect);
 
     TESetSelect(0, 32767, gHiddenTE);
     TEDelete(gHiddenTE);
     TEInsert(*outH, outLen, gHiddenTE);
+    HUnlock(outH);
     DisposeHandle(outH);
 
     fontNum = GetDefaultFontNum();
@@ -302,7 +302,7 @@ void BuildHiddenView(void)
     ts.tsSize = CurrentFontSize();
     ts.tsColor.red = ts.tsColor.green = ts.tsColor.blue = 0;
     TESetSelect(0, 32767, gHiddenTE);
-    TESetStyle(doFont + doFace + doSize + doColor, &ts, true, gHiddenTE);
+    TESetStyle(doFont + doFace + doSize + doColor, &ts, false, gHiddenTE);
 
     for (k = 0; k < opCount; k++) {
         TextStyle opStyle;
@@ -317,37 +317,38 @@ void BuildHiddenView(void)
         switch (ops[k].kind) {
             case 'B':
                 opStyle.tsFace = bold;
-                TESetStyle(doFace, &opStyle, true, gHiddenTE);
+                TESetStyle(doFace, &opStyle, false, gHiddenTE);
                 break;
             case 'I':
                 opStyle.tsFace = italic;
-                TESetStyle(doFace, &opStyle, true, gHiddenTE);
+                TESetStyle(doFace, &opStyle, false, gHiddenTE);
                 break;
             case 'C':
                 GetFNum("\pMonaco", &opStyle.tsFont);
-                TESetStyle(doFont, &opStyle, true, gHiddenTE);
+                TESetStyle(doFont, &opStyle, false, gHiddenTE);
                 break;
             case 'L':
                 opStyle.tsFace = underline;
                 opStyle.tsColor.red = ops[k].linkID;
                 opStyle.tsColor.green = 0;
                 opStyle.tsColor.blue = 0;
-                TESetStyle(doFace + doColor, &opStyle, true, gHiddenTE);
+                TESetStyle(doFace + doColor, &opStyle, false, gHiddenTE);
                 break;
             case 'H':
                 opStyle.tsFace = bold;
                 opStyle.tsSize = CurrentFontSize() + (4 - ops[k].level) * 4;
-                TESetStyle(doFace + doSize, &opStyle, true, gHiddenTE);
+                TESetStyle(doFace + doSize, &opStyle, false, gHiddenTE);
                 break;
             case 'R':
                 opStyle.tsFace = bold;
                 opStyle.tsColor.blue = 1; /* special marker for horizontal rule */
-                TESetStyle(doFace + doColor, &opStyle, true, gHiddenTE);
+                TESetStyle(doFace + doColor, &opStyle, false, gHiddenTE);
                 break;
         }
     }
 
     TESetSelect(0, 0, gHiddenTE);
+    TECalText(gHiddenTE);
 
     RestoreDrawing(gHiddenTE, &savedViewRect);
 
@@ -387,7 +388,7 @@ void SyncHiddenToCanonical(void)
     urlSpace = 0;
     for (li = 1; li <= gLinkCount; li++)
         urlSpace += gLinkURLs[li][0];
-    outCap = len * 2 + 64 + urlSpace;
+    outCap = len * 5 + 1024 + urlSpace;
     outH = NewHandle(outCap);
     outLen = 0;
 
@@ -418,8 +419,20 @@ void SyncHiddenToCanonical(void)
 
             TEGetStyle((short) lineStart, &firstStyle, &dummyLH, &dummyFA, gHiddenTE);
             if (firstStyle.tsColor.blue == 1) {
-                isHR = true;
-            } else if (firstStyle.tsFace & bold) {
+                Boolean onlyDashes = true;
+                long d;
+                for (d = lineStart; d < lineEnd; d++) {
+                    if ((*srcH)[d] != '-') {
+                        onlyDashes = false;
+                        break;
+                    }
+                }
+                if (onlyDashes && lineEnd > lineStart) {
+                    isHR = true;
+                }
+            }
+            
+            if (!isHR && (firstStyle.tsFace & bold)) {
                 short lvl;
 
                 for (lvl = 1; lvl <= 3; lvl++) {
@@ -598,8 +611,12 @@ void SyncHiddenToCanonical(void)
 
     TESetSelect(0, 32767, gTE);
     TEDelete(gTE);
-    TEInsert(*outH, outLen, gTE);
-    DisposeHandle(outH);
+    // Removed TEInsert to fix O(N^2) delay and 32K truncation
+
+    if (gMarkdownText != NULL)
+        DisposeHandle(gMarkdownText);
+    gMarkdownText = outH;
+    gMarkdownLen = outLen;
 
     ClearStyles();
 
@@ -839,10 +856,10 @@ void InsertMarkdownAsStyled(Handle srcH, long srcLen, TEHandle te)
     }
 
     HUnlock(srcH);
-    HUnlock(outH);
 
     insertStart = (**te).selStart;
     TEInsert(*outH, outLen, te);
+    HUnlock(outH);
     DisposeHandle(outH);
 
     /* TEInsert's new text inherits whatever style was at the
@@ -855,7 +872,7 @@ void InsertMarkdownAsStyled(Handle srcH, long srcLen, TEHandle te)
     baseStyle.tsSize = CurrentFontSize();
     baseStyle.tsColor.red = baseStyle.tsColor.green = baseStyle.tsColor.blue = 0;
     TESetSelect(insertStart, (short) (insertStart + outLen), te);
-    TESetStyle(doFont + doFace + doSize + doColor, &baseStyle, true, te);
+    TESetStyle(doFont + doFace + doSize + doColor, &baseStyle, false, te);
 
     for (k = 0; k < opCount; k++) {
         TextStyle opStyle;
@@ -864,27 +881,28 @@ void InsertMarkdownAsStyled(Handle srcH, long srcLen, TEHandle te)
         switch (ops[k].kind) {
             case 'B':
                 opStyle.tsFace = bold;
-                TESetStyle(doFace, &opStyle, true, te);
+                TESetStyle(doFace, &opStyle, false, te);
                 break;
             case 'I':
                 opStyle.tsFace = italic;
-                TESetStyle(doFace, &opStyle, true, te);
+                TESetStyle(doFace, &opStyle, false, te);
                 break;
             case 'C':
                 GetFNum("\pMonaco", &opStyle.tsFont);
-                TESetStyle(doFont, &opStyle, true, te);
+                TESetStyle(doFont, &opStyle, false, te);
                 break;
             case 'L':
                 opStyle.tsFace = underline;
                 opStyle.tsColor.red = ops[k].linkID;
                 opStyle.tsColor.green = 0;
                 opStyle.tsColor.blue = 0;
-                TESetStyle(doFace + doColor, &opStyle, true, te);
+                TESetStyle(doFace + doColor, &opStyle, false, te);
                 break;
         }
     }
 
     TESetSelect((short) (insertStart + outLen), (short) (insertStart + outLen), te);
+    TECalText(te);
 }
 
 void WrapSelection(char *prefix, char *suffix)

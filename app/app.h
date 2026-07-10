@@ -79,13 +79,14 @@
 #define iZoomDefault 6
 #define iSerif       8
 #define iSansSerif   9
+#define iStatusBar   11
 
 #define mWindow  134
 
 #define mHelp    132
 #define iAbout   1
 
-#define MAX_STYLE_OPS 512
+#define MAX_STYLE_OPS 8192
 
 #define kNumZoomLevels 5
 #define kZoomBaselineIndex 2
@@ -116,7 +117,7 @@
     and on new/open -- simpler and more predictable than trying to
     make snapshots meaningful across two independently-edited buffers.
 */
-#define MAX_UNDO_LEVELS 15
+#define MAX_UNDO_LEVELS 100
 
 typedef struct {
     Handle textH;
@@ -133,7 +134,7 @@ typedef struct {
     (gLinkCount = 0) at the start of every BuildHiddenView, since that's
     a full reparse of gTE and re-derives whichever links currently exist.
 */
-#define MAX_LINKS 64
+#define MAX_LINKS 512
 
 #ifdef ARTFUL_PRO
 
@@ -149,6 +150,12 @@ typedef struct DocumentRecord {
     Str255 fileName;
     short vRefNum;
     Boolean hideMarkdown;
+    Handle markdownText;
+    long markdownLen;
+    long lastCharCount;
+    short lastLine;
+    short lastCol;
+    Boolean showStatusBar;
     UndoSnapshot undoStack[MAX_UNDO_LEVELS];
     short undoCount;
     UndoSnapshot redoStack[MAX_UNDO_LEVELS];
@@ -176,6 +183,12 @@ extern DocumentRecord *gDocumentList;
 #define gFileName (gActiveDoc->fileName)
 #define gVRefNum (gActiveDoc->vRefNum)
 #define gHideMarkdown (gActiveDoc->hideMarkdown)
+#define gMarkdownText (gActiveDoc->markdownText)
+#define gMarkdownLen (gActiveDoc->markdownLen)
+#define gLastCharCount (gActiveDoc->lastCharCount)
+#define gLastLine (gActiveDoc->lastLine)
+#define gLastCol (gActiveDoc->lastCol)
+#define gShowStatusBar (gActiveDoc->showStatusBar)
 #define gZoomIndex (gActiveDoc->zoomIndex)
 #define gUndoStack (gActiveDoc->undoStack)
 #define gUndoCount (gActiveDoc->undoCount)
@@ -198,6 +211,12 @@ void SetActiveDocument(DocumentRecord *doc);
 extern WindowPtr gWindow;
 extern TEHandle gTE;
 extern TEHandle gHiddenTE;
+extern Handle gMarkdownText;
+extern long gMarkdownLen;
+extern long gLastCharCount;
+extern short gLastLine;
+extern short gLastCol;
+extern Boolean gShowStatusBar;
 extern TEHandle gActiveTE;
 extern ControlHandle gScrollBar;
 extern Boolean gScrollBarVisible;

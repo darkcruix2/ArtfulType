@@ -22,6 +22,15 @@ void SetViewMode(Boolean hideMarkdown)
         gActiveTE = gHiddenTE;
     } else {
         SyncHiddenToCanonical();
+        
+        TESetSelect(0, 32767, gTE);
+        TEDelete(gTE);
+        if (gMarkdownText != NULL) {
+            HLock(gMarkdownText);
+            TEInsert(*gMarkdownText, gMarkdownLen > 32767 ? 32767 : gMarkdownLen, gTE);
+            HUnlock(gMarkdownText);
+        }
+        
         gActiveTE = gTE;
     }
 
@@ -48,7 +57,15 @@ static void WriteFile(StringPtr name, short vRefNum)
         return;
 
     SetEOF(refNum, 0);
-    count = (**gTE).teLength;
+
+    if (gHideMarkdown && gMarkdownText != NULL) {
+        count = gMarkdownLen;
+        textH = gMarkdownText;
+    } else {
+        count = (**gTE).teLength;
+        textH = (**gTE).hText;
+    }
+
     HLock(textH);
     FSWrite(refNum, &count, *textH);
     HUnlock(textH);

@@ -145,3 +145,17 @@ resource 'SIZE' (-1) {
     2000 * 1024,
     2000 * 1024
 };
+
+resource 'vers' (1, purgeable) {
+    0x00, 0x15, release, 0x00,
+    verUS,
+    "0.15",
+    "0.15, © 2026 Space Mil"
+};
+
+resource 'vers' (2, purgeable) {
+    0x00, 0x15, release, 0x00,
+    verUS,
+    "0.15",
+    "ArtfulType Pro 0.15"
+};

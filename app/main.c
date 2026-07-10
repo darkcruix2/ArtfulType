@@ -11,8 +11,14 @@
 #ifndef ARTFUL_PRO
 
 WindowPtr gWindow;
-TEHandle gTE;
-TEHandle gHiddenTE;
+TEHandle gTE = NULL;
+TEHandle gHiddenTE = NULL;
+Handle gMarkdownText = NULL;
+long gMarkdownLen = 0;
+long gLastCharCount = -1;
+short gLastLine = -1;
+short gLastCol = -1;
+Boolean gShowStatusBar = true;
 TEHandle gActiveTE;
 ControlHandle gScrollBar;
 Boolean gScrollBarVisible = false;
@@ -51,6 +57,12 @@ DocumentRecord* CreateNewDocument(void)
     DocumentRecord *doc = (DocumentRecord*) NewPtrClear(sizeof(DocumentRecord));
     if (doc) {
         doc->hideMarkdown = true;
+        doc->markdownText = NULL;
+        doc->markdownLen = 0;
+        doc->lastCharCount = -1;
+        doc->lastLine = -1;
+        doc->lastCol = -1;
+        doc->showStatusBar = true;
         doc->zoomIndex = gDefaultZoomIndex;
         doc->next = gDocumentList;
         gDocumentList = doc;
@@ -206,10 +218,11 @@ static void MakeMenu(void)
     InsertMenu(styleMenu, 0);
 
     gViewMenu = NewMenu(mView, "\pView");
-    AppendMenu(gViewMenu, "\pMarkdown;Writer;(-;Zoom In/=;Zoom Out/-;Default Size/0;(-;Serif;Sans Serif");
+    AppendMenu(gViewMenu, "\pMarkdown;Writer;(-;Zoom In/=;Zoom Out/-;Default Size/0;(-;Serif;Sans Serif;(-;Show Status Bar");
     InsertMenu(gViewMenu, 0);
     CheckItem(gViewMenu, iWriterView, true);
     CheckItem(gViewMenu, iSansSerif, true);
+    CheckItem(gViewMenu, iStatusBar, true);
 
 #ifdef ARTFUL_PRO
     gWindowMenu = NewMenu(mWindow, "\pWindow");
@@ -296,6 +309,83 @@ void MakeWindow(void)
     sbRect.bottom += 1;
     gScrollBar = NewControl(gWindow, &sbRect, "\p", false, 0, 0, 0, scrollBarProc, 0);
 }
+static void UpdateStatusBar(WindowPtr w, Boolean forceDraw)
+{
+    long chars;
+    long caret;
+    short line = 0, col = 0;
+    short i;
+    char statusStr[128];
+    Str255 pStatusStr;
+    Rect statusRect;
+    GrafPtr savedPort;
+    const char *modeStr;
+    static Boolean lastMode = -1;
+
+    if (!gActiveTE || !gShowStatusBar) return;
+    
+    chars = (**gActiveTE).teLength;
+    caret = (**gActiveTE).selStart;
+
+    for (i = 0; i < (**gActiveTE).nLines; i++) {
+        if ((**gActiveTE).lineStarts[i] <= caret) {
+            line = i + 1;
+        } else {
+            break;
+        }
+    }
+    
+    if (line > 0) {
+        col = caret - (**gActiveTE).lineStarts[line - 1] + 1;
+    } else {
+        line = 1;
+        col = 1;
+    }
+
+    if (!forceDraw && chars == gLastCharCount && line == gLastLine && col == gLastCol && gHideMarkdown == lastMode)
+        return;
+
+    gLastCharCount = chars;
+    gLastLine = line;
+    gLastCol = col;
+    lastMode = gHideMarkdown;
+
+    statusRect = w->portRect;
+    
+    GetPort(&savedPort);
+    SetPort(w);
+
+    statusRect.left = (**gActiveTE).viewRect.left;
+    statusRect.right = statusRect.left + 300;
+    statusRect.top = (**gActiveTE).viewRect.bottom;
+    statusRect.bottom = w->portRect.bottom;
+
+    EraseRect(&statusRect);
+
+    modeStr = gHideMarkdown ? "Writer" : "Markdown";
+    sprintf(statusStr, "[%s]    Chars: %ld    Line: %d    Col: %d", modeStr, chars, line, col);
+    pStatusStr[0] = strlen(statusStr);
+    BlockMove(statusStr, pStatusStr + 1, pStatusStr[0]);
+
+    MoveTo(statusRect.left, statusRect.top + 14);
+    
+    PenNormal();
+    TextFont(0);
+    TextSize(9);
+    TextMode(srcOr);
+    ForeColor(blackColor);
+    BackColor(whiteColor);
+    DrawString(pStatusStr);
+
+    {
+        short fontNum = 0;
+        GetFNum("\pTimes", &fontNum); /* Default is Times based on earlier logic, or use system default */
+        TextFont(fontNum);
+        TextSize(12);
+    }
+
+    SetPort(savedPort);
+}
 
 static void DoUpdate(WindowPtr w)
 {
@@ -307,9 +397,33 @@ static void DoUpdate(WindowPtr w)
     EraseRect(&w->portRect);
     TEUpdate(&w->portRect, gActiveTE);
     DrawControls(w);
+    DrawGrowIcon(w);
+    UpdateStatusBar(w, true);
     EndUpdate(w);
     
     SetPort(savedPort);
+}
+
+static void ToggleStatusBar(void)
+{
+    gShowStatusBar = !gShowStatusBar;
+    CheckItem(gViewMenu, iStatusBar, gShowStatusBar);
+    gLastCharCount = -1; /* force full redraw */
+#ifdef ARTFUL_PRO
+    if (gActiveDoc) {
+        Rect eraseRect = gWindow->portRect;
+        eraseRect.top = eraseRect.bottom - 24;
+        EraseRect(&eraseRect); /* Clean up old status bar area */
+        InvalRect(&gWindow->portRect);
+    }
+#else
+    {
+        Rect eraseRect = gWindow->portRect;
+        eraseRect.top = eraseRect.bottom - 24;
+        EraseRect(&eraseRect);
+        InvalRect(&gWindow->portRect);
+    }
+#endif
 }
 
 static void DoMenuCommand(long menuResult)
@@ -407,6 +521,7 @@ static void DoMenuCommand(long menuResult)
             case iZoomDefault:  DoZoomReset(); break;
             case iSerif:        SetFontMode(false); break;
             case iSansSerif:    SetFontMode(true); break;
+            case iStatusBar:    ToggleStatusBar(); break;
         }
     } else if (menuID == mHelp) {
         switch (menuItem) {
@@ -864,9 +979,13 @@ static void EventLoop(void)
         }
 #ifdef ARTFUL_PRO
         SetActiveDocument(GetDocumentForWindow(FrontWindow()));
-        if (gActiveDoc) TEIdle(gActiveTE);
+        if (gActiveDoc) {
+            TEIdle(gActiveTE);
+            UpdateStatusBar(FrontWindow(), false);
+        }
 #else
         TEIdle(gActiveTE);
+        UpdateStatusBar(gWindow, false);
 #endif
     }
 }

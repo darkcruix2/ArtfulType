@@ -83,7 +83,7 @@ void UpdateScrollbarRange(void)
     }
     viewHeight = (**gActiveTE).viewRect.bottom - (**gActiveTE).viewRect.top;
 
-    maxVal = (textHeight > viewHeight) ? (short) (textHeight - viewHeight) : 0;
+    maxVal = (textHeight > viewHeight / 2) ? (short) (textHeight - viewHeight / 2) : 0;
 
     if (maxVal != GetControlMaximum(gScrollBar))
         SetControlMaximum(gScrollBar, maxVal);
@@ -179,9 +179,10 @@ void ScrollCaretIntoView(void)
     viewTop = (**gActiveTE).viewRect.top;
     viewBottom = (**gActiveTE).viewRect.bottom;
 
-    if (lineBottom > viewBottom)
-        TEScroll(0, viewBottom - lineBottom, gActiveTE);
-    else if (lineTop < viewTop)
+    if (lineBottom > viewBottom) {
+        short halfScreen = (viewBottom - viewTop) / 2;
+        TEScroll(0, viewBottom - lineBottom - halfScreen, gActiveTE);
+    } else if (lineTop < viewTop)
         TEScroll(0, viewTop - lineTop, gActiveTE);
 
     SyncScrollbarToOffset();
