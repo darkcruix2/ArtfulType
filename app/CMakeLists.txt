@@ -7,6 +7,12 @@
 cmake_minimum_required(VERSION 3.10)
 project(ArtfulType C)
 
+# Explicitly include system headers so clangd picks them up in compile_commands.json
+include_directories(SYSTEM "/opt/Retro68-build/toolchain/m68k-apple-macos/include")
+include_directories(SYSTEM "/opt/Retro68-build/toolchain/multiversal/CIncludes")
+include_directories(SYSTEM "/opt/Retro68-build/toolchain/lib/gcc/m68k-apple-macos/16.1.0/include")
+include_directories(SYSTEM "/opt/Retro68-build/toolchain/lib/gcc/m68k-apple-macos/16.1.0/include-fixed")
+
 add_application(ArtfulType
     main.c
     scrolling.c

@@ -7,6 +7,8 @@
 */
 
 #include "app.h"
+#include <stdio.h>
+#include <string.h>
 
 #ifndef ARTFUL_PRO
 
@@ -59,8 +61,6 @@ short gLinkCount = 0;
 DocumentRecord *gDocumentList = NULL;
 DocumentRecord *gActiveDoc = NULL;
 MenuHandle gWindowMenu = NULL;
-Boolean gScrollbarDriven = false; /* set during scrollbar-driven loads to suppress caret-based window shifting */
-long gWindowStartLine = 1;        /* global line number at top of current TE window */
 
 DocumentRecord* GetDocumentForWindow(WindowPtr w)
 {
@@ -156,6 +156,9 @@ void UpdateWindowMenu(void)
 }
 
 #endif
+
+Boolean gScrollbarDriven = false; /* set during scrollbar-driven loads to suppress caret-based window shifting */
+long gWindowStartLine = 1;        /* global line number at top of current TE window */
 
 Boolean gDone = false;
 MenuHandle gViewMenu;
@@ -1016,7 +1019,7 @@ static void EventLoop(void)
 #endif
             switch (event.what) {
                 case updateEvt:
-                    w = (WindowPtr) event.message;
+                    w = (WindowPtr) (long) event.message;
 #ifdef ARTFUL_PRO
                     {
                         GrafPtr savedPort;

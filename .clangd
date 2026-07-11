@@ -1,0 +1,7 @@
+CompileFlags:
+  Add: 
+    - "-I/opt/Retro68-build/toolchain/lib/gcc/m68k-apple-macos/16.1.0/include"
+    - "-I/opt/Retro68-build/toolchain/lib/gcc/m68k-apple-macos/16.1.0/include-fixed"
+    - "-I/opt/Retro68-build/toolchain/m68k-apple-macos/include"
+    - "-I/opt/Retro68-build/toolchain/multiversal/CIncludes"
+    - "-Dmacintosh"

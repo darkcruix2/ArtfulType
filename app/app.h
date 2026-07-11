@@ -16,8 +16,7 @@
 #include <SegLoad.h>
 #include <TextUtils.h>
 #include <Multiverse.h>
-#include <string.h>
-#include <stdio.h>
+
 
 #define MARGIN_H     64
 #define MARGIN_TOP   32

@@ -251,8 +251,8 @@ void DoCopy(void)
 void DoPaste(void)
 {
     Handle scrapH;
-    long offset;
-    long len;
+    LONGINT offset;
+    LONGINT len;
 
     scrapH = NewHandle(0);
     len = GetScrap(scrapH, 'TEXT', &offset);

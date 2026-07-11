@@ -1,4 +1,5 @@
 #include "app.h"
+#include <string.h>
 
 short AddLinkURL(const unsigned char *url)
 {

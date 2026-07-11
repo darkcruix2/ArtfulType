@@ -46,7 +46,7 @@ void SetViewMode(Boolean hideMarkdown)
 static void WriteFile(StringPtr name, short vRefNum)
 {
     short refNum;
-    long count;
+    LONGINT count;
     Handle textH = (**gTE).hText;
     OSErr err;
 
@@ -79,8 +79,8 @@ static void WriteFile(StringPtr name, short vRefNum)
 static void ReadFile(StringPtr name, short vRefNum)
 {
     short refNum;
-    long count;
-    long eof;
+    LONGINT count;
+    LONGINT eof;
     Handle textH;
     OSErr err;
 
