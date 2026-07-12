@@ -233,13 +233,21 @@ void BuildHiddenView(void)
                 long lineStart = p + 2;
                 long lineEnd = lineStart;
                 long outStart = outLen;
+                short spaceCount = p - i;
+                short nestingLevel = spaceCount / 2;
+                char bulletChar = '\245';
+                if (nestingLevel == 1) {
+                    bulletChar = 'o';
+                } else if (nestingLevel >= 2) {
+                    bulletChar = '-';
+                }
 
                 long s;
                 for (s = i; s < p; s++) {
                     (*outH)[outLen++] = (*srcH)[s];
                 }
 
-                (*outH)[outLen++] = '\245';
+                (*outH)[outLen++] = bulletChar;
                 (*outH)[outLen++] = ' ';
 
                 while (lineEnd < len && (*srcH)[lineEnd] != '\r') {
@@ -514,7 +522,7 @@ void SyncHiddenToCanonical(void)
         if (!isHR && !isHeading && !isBlockquote) {
             long p = lineStart;
             while (p < lineEnd && ((*srcH)[p] == ' ' || (*srcH)[p] == '\t')) p++;
-            if (p < lineEnd && (*srcH)[p] == '\245' && p + 1 < lineEnd && (*srcH)[p + 1] == ' ') {
+            if (p < lineEnd && ((unsigned char)(*srcH)[p] == 0xA5 || (*srcH)[p] == 'o' || (*srcH)[p] == '-') && p + 1 < lineEnd && (*srcH)[p + 1] == ' ') {
                 isListItem = true;
             } else {
                 textOffset = p;
@@ -1451,11 +1459,29 @@ void DetectInlineMarkdown(char justTyped)
             }
         }
         
-        if (caret - 1 == lineStart + 1 && ((*textH)[lineStart] == '-' || (*textH)[lineStart] == '+' || (*textH)[lineStart] == '*')) {
+        short scan = lineStart;
+        while (scan < caret && ((*textH)[scan] == ' ' || (*textH)[scan] == '\t')) scan++;
+        
+        if (caret - 1 == scan + 1 && ((*textH)[scan] == '-' || (*textH)[scan] == '+' || (*textH)[scan] == '*')) {
+            short spaceCount = scan - lineStart;
+            short nestingLevel = spaceCount / 2;
+            char bulletChar = '\245';
+            if (nestingLevel == 1) {
+                bulletChar = 'o';
+            } else if (nestingLevel >= 2) {
+                bulletChar = '-';
+            }
+            
             HUnlock(textH);
-            TESetSelect((short) lineStart, (short) caret, gHiddenTE);
+            TESetSelect((short) scan, (short) caret, gHiddenTE);
             TEDelete(gHiddenTE);
-            char bulletStr[3] = "\245 ";
+            
+            char bulletStr[3];
+            bulletStr[0] = bulletChar;
+            bulletStr[1] = ' ';
+            bulletStr[2] = 0;
+            
+            TESetSelect((short) scan, (short) scan, gHiddenTE);
             TEInsert(bulletStr, 2, gHiddenTE);
             InvalidateHeightCache();
             return;
@@ -2118,8 +2144,8 @@ void SyncWindowToBacking(void)
                 short headerLevel = 0;
                 if (isBold && style.stSize > CurrentFontSize()) {
                     short lvl;
-                    for (lvl = 1; lvl <= 3; lvl++) {
-                        if (style.stSize == CurrentFontSize() + (4 - lvl) * 4) {
+                    for (lvl = 1; lvl <= 6; lvl++) {
+                        if (style.stSize == CurrentFontSize() + (7 - lvl) * 2) {
                             headerLevel = lvl;
                             break;
                         }

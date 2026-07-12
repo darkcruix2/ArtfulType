@@ -1243,12 +1243,24 @@ static void EventLoop(void)
                         UpdateScrollbarRange();
                         handled = true;
                     } else if (keyCode == 0x73) { /* Home */
-                        TESetSelect(0, 0, gActiveTE);
+                        short lineStart, lineEnd;
+                        GetCurrentLineRange(&lineStart, &lineEnd);
+                        
+                        short scan = lineStart;
+                        Handle hText = (**gActiveTE).hText;
+                        HLock(hText);
+                        while (scan < lineEnd && ((*hText)[scan] == ' ' || (*hText)[scan] == '\t')) {
+                            scan++;
+                        }
+                        HUnlock(hText);
+                        
+                        TESetSelect(scan, scan, gActiveTE);
                         ScrollCaretIntoView(true);
                         handled = true;
                     } else if (keyCode == 0x77) { /* End */
-                        short len = (**gActiveTE).teLength;
-                        TESetSelect(len, len, gActiveTE);
+                        short lineStart, lineEnd;
+                        GetCurrentLineRange(&lineStart, &lineEnd);
+                        TESetSelect(lineEnd, lineEnd, gActiveTE);
                         ScrollCaretIntoView(false);
                         handled = true;
                     } else if ((event.modifiers & cmdKey) && keyCode == 0x7B) { /* Cmd+Cursor Left */
@@ -1324,7 +1336,7 @@ static void EventLoop(void)
                                 while (scan < caret && ((*hText)[scan] == ' ' || (*hText)[scan] == '\t')) scan++;
                                 
                                 if (gHideMarkdown) {
-                                    if (scan < caret && (unsigned char)(*hText)[scan] == 0xA5 && 
+                                    if (scan < caret && ((unsigned char)(*hText)[scan] == 0xA5 || (*hText)[scan] == 'o' || (*hText)[scan] == '-') && 
                                         scan + 1 < caret && (*hText)[scan + 1] == ' ') {
                                         prefixLen = (scan + 2) - lineStart;
                                         if (prefixLen > 63) prefixLen = 63;
@@ -1360,11 +1372,23 @@ static void EventLoop(void)
                                     if (lineEnd == lineStart + prefixLen) {
                                         short spaceCount = scan - lineStart;
                                         if (spaceCount >= 2) {
+                                            char newBuf[64];
+                                            short newPrefixLen = prefixLen - 2;
+                                            BlockMove(prefixBuf + 2, newBuf, newPrefixLen);
+                                            
+                                            if (gHideMarkdown) {
+                                                short newSpaceCount = spaceCount - 2;
+                                                short newNesting = newSpaceCount / 2;
+                                                char newBullet = '\245';
+                                                if (newNesting == 1) newBullet = 'o';
+                                                else if (newNesting >= 2) newBullet = '-';
+                                                newBuf[newSpaceCount] = newBullet;
+                                            }
+                                            
                                             TESetSelect(lineStart, lineEnd, gActiveTE);
                                             TEDelete(gActiveTE);
-                                            prefixLen -= 2;
-                                            BlockMove(prefixBuf + 2, prefixBuf, prefixLen);
-                                            TEInsert(prefixBuf, prefixLen, gActiveTE);
+                                            TESetSelect(lineStart, lineStart, gActiveTE);
+                                            TEInsert(newBuf, newPrefixLen, gActiveTE);
                                             doInsertCR = false;
                                             gDirty = true;
                                         } else {
@@ -1434,7 +1458,7 @@ static void EventLoop(void)
                                 while (scan < caret && ((*hText)[scan] == ' ' || (*hText)[scan] == '\t')) scan++;
                                 
                                 if (gHideMarkdown) {
-                                    if (scan < caret && (unsigned char)(*hText)[scan] == 0xA5 && 
+                                    if (scan < caret && ((unsigned char)(*hText)[scan] == 0xA5 || (*hText)[scan] == 'o' || (*hText)[scan] == '-') && 
                                         scan + 1 < caret && (*hText)[scan + 1] == ' ') {
                                         prefixLen = (scan + 2) - lineStart;
                                         if (prefixLen > 63) prefixLen = 63;
@@ -1450,14 +1474,28 @@ static void EventLoop(void)
                                 }
                                 HUnlock(hText);
                                 
-                                if (prefixLen > 0 && lineEnd == lineStart + prefixLen && prefixLen + 2 <= 63) {
-                                    TESetSelect(lineStart, lineEnd, gActiveTE);
-                                    TEDelete(gActiveTE);
-                                    
+                                if (prefixLen > 0 && prefixLen + 2 <= 63) {
+                                    short bulletOffset = scan - lineStart;
                                     char newBuf[64];
                                     newBuf[0] = ' '; newBuf[1] = ' ';
                                     BlockMove(prefixBuf, newBuf + 2, prefixLen);
+                                    
+                                    if (gHideMarkdown) {
+                                        short newSpaceCount = bulletOffset + 2;
+                                        short newNesting = newSpaceCount / 2;
+                                        char newBullet = '\245';
+                                        if (newNesting == 1) newBullet = 'o';
+                                        else if (newNesting >= 2) newBullet = '-';
+                                        newBuf[2 + bulletOffset] = newBullet;
+                                    }
+                                    
+                                    TESetSelect(lineStart, lineStart + prefixLen, gActiveTE);
+                                    TEDelete(gActiveTE);
+                                    TESetSelect(lineStart, lineStart, gActiveTE);
                                     TEInsert(newBuf, prefixLen + 2, gActiveTE);
+                                    
+                                    short newCaret = caret + 2;
+                                    TESetSelect(newCaret, newCaret, gActiveTE);
                                     gDirty = true;
                                 } else {
                                     TEKey(key, gActiveTE);
