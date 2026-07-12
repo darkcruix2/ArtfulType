@@ -1395,6 +1395,26 @@ static void EventLoop(void)
                                 }
                                 
                                 if (doInsertCR) {
+                                    if (lineEnd == lineStart) {
+                                        TextStyle ts;
+                                        short lh, fa;
+                                        TEGetStyle((short) lineStart, &ts, &lh, &fa, gActiveTE);
+                                        if (ts.tsColor.blue >= 2) {
+                                            if (ts.tsColor.blue > 2) {
+                                                ts.tsColor.blue--;
+                                            } else {
+                                                ts.tsColor.blue = 0;
+                                                ts.tsFace &= ~italic;
+                                            }
+                                            TESetSelect((short) lineStart, (short) lineEnd, gActiveTE);
+                                            TESetStyle(doFace + doColor, &ts, false, gActiveTE);
+                                            doInsertCR = false;
+                                            gDirty = true;
+                                        }
+                                    }
+                                }
+                                
+                                if (doInsertCR) {
                                     TEKey(key, gActiveTE);
                                     if (prefixLen > 0) {
                                         TEInsert(prefixBuf, prefixLen, gActiveTE);

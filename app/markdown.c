@@ -189,6 +189,7 @@ void BuildHiddenView(void)
                         ops[gWriterOpCount].start = outStart;
                         ops[gWriterOpCount].end = outLen;
                         ops[gWriterOpCount].kind = 'Q';
+                        ops[gWriterOpCount].level = blockquoteDepth;
                         gWriterOpCount++;
                     }
                     if (lineEnd < len && (*srcH)[lineEnd] == '\r') {
@@ -442,6 +443,7 @@ void SyncHiddenToCanonical(void)
     HLock(outH);
 
     Boolean prevWasBlockquote = false;
+    short prevBlockquoteDepth = 0;
     Boolean prevWasListItem = false;
     Boolean prevWasHeading = false;
 
@@ -456,6 +458,7 @@ void SyncHiddenToCanonical(void)
             lineEnd++;
 
         Boolean isBlockquote = false;
+        short blockquoteDepth = 0;
         if (lineEnd > lineStart) {
             short k;
             StyleOp *ops = (StyleOp *) *gWriterOpsH;
@@ -473,6 +476,7 @@ void SyncHiddenToCanonical(void)
                             firstStyle.tsColor.blue = 1;
                         } else if (ops[k].kind == 'Q') {
                             isBlockquote = true;
+                            blockquoteDepth = ops[k].level;
                         }
                     }
                 }
@@ -516,12 +520,13 @@ void SyncHiddenToCanonical(void)
                 textOffset = p;
             }
         }
-
         if (isHeading || isHR ||
             (isBlockquote && !prevWasBlockquote) ||
-            (!isBlockquote && prevWasBlockquote) ||
+            (!isBlockquote && prevWasBlockquote) || 
+            (isBlockquote && prevWasBlockquote && blockquoteDepth != prevBlockquoteDepth) ||
             (isListItem && !prevWasListItem) ||
             (!isListItem && prevWasListItem)) {
+            
             if (outLen >= 1 && (*outH)[outLen - 1] == '\r') {
                 if (outLen < 2 || (*outH)[outLen - 2] != '\r') {
                     (*outH)[outLen++] = '\r';
@@ -546,7 +551,10 @@ void SyncHiddenToCanonical(void)
                 }
             }
         } else if (isBlockquote) {
-            (*outH)[outLen++] = '>';
+            short depth;
+            for (depth = 0; depth < blockquoteDepth; depth++) {
+                (*outH)[outLen++] = '>';
+            }
             (*outH)[outLen++] = ' ';
         } else if (isListItem) {
             long p = lineStart;
@@ -659,6 +667,7 @@ void SyncHiddenToCanonical(void)
         }
 
         prevWasBlockquote = isBlockquote;
+        prevBlockquoteDepth = blockquoteDepth;
         prevWasListItem = isListItem;
         prevWasHeading = isHeading;
 
@@ -1024,6 +1033,13 @@ void InsertMarkdownAsStyled(Handle srcH, long srcLen, TEHandle te)
                 opStyle.tsColor.red = ops[k].linkID;
                 opStyle.tsColor.green = (ops[k].kind == 'M') ? 1 : 0;
                 opStyle.tsColor.blue = 0;
+                TESetStyle(doFace + doColor, &opStyle, false, te);
+                break;
+            case 'Q':
+                opStyle.tsFace = italic;
+                opStyle.tsColor.red = 0;
+                opStyle.tsColor.green = 0;
+                opStyle.tsColor.blue = 1 + ops[k].level;
                 TESetStyle(doFace + doColor, &opStyle, false, te);
                 break;
         }
@@ -1404,6 +1420,37 @@ void DetectInlineMarkdown(char justTyped)
             return;
         }
 
+        if (caret >= 2) {
+            long p2 = caret - 2;
+            long bqCount = 0;
+            while (p2 >= lineStart && (*textH)[p2] == '>') {
+                bqCount++;
+                p2--;
+            }
+            while (p2 >= lineStart && ((*textH)[p2] == ' ' || (*textH)[p2] == '\t')) {
+                p2--;
+            }
+            
+            if (p2 < lineStart && bqCount > 0) {
+                TextStyle ts;
+                HUnlock(textH);
+                
+                TESetSelect((short) lineStart, (short) caret, gHiddenTE);
+                TEDelete(gHiddenTE);
+                
+                ts.tsFace = italic;
+                ts.tsColor.red = 0;
+                ts.tsColor.green = 0;
+                ts.tsColor.blue = 1 + bqCount;
+                
+                TESetSelect((short) lineStart, (short) lineStart, gHiddenTE);
+                TESetStyle(doFace + doColor, &ts, true, gHiddenTE);
+                SetTypingStyleNormal((short) lineStart);
+                InvalidateHeightCache();
+                return;
+            }
+        }
+        
         if (caret - 1 == lineStart + 1 && ((*textH)[lineStart] == '-' || (*textH)[lineStart] == '+' || (*textH)[lineStart] == '*')) {
             HUnlock(textH);
             TESetSelect((short) lineStart, (short) caret, gHiddenTE);
@@ -1958,6 +2005,13 @@ void LoadTextWindow(long startOffset)
                     opStyle.tsColor.blue  = 1;
                     TESetStyle(doFace + doColor, &opStyle, false, te);
                     break;
+                case 'Q':
+                    opStyle.tsFace = italic;
+                    opStyle.tsColor.red   = 0;
+                    opStyle.tsColor.green = 0;
+                    opStyle.tsColor.blue  = 1 + ops[k].level;
+                    TESetStyle(doFace + doColor, &opStyle, false, te);
+                    break;
             }
         }
         HUnlock(gWriterOpsH);
@@ -2078,6 +2132,9 @@ void SyncWindowToBacking(void)
                 
                 Boolean isHR = isBold && (style.stColor.blue == 1);
                 
+                Boolean isBlockquote = (style.stColor.blue >= 2);
+                short bqDepth = isBlockquote ? (style.stColor.blue - 1) : 0;
+                
                 short linkID = 0;
                 if (isUnderline && style.stColor.red > 0) {
                     linkID = style.stColor.red;
@@ -2095,6 +2152,15 @@ void SyncWindowToBacking(void)
                         ops[gWriterOpCount].end = globalEnd;
                         ops[gWriterOpCount].kind = 'R';
                         ops[gWriterOpCount].level = 0;
+                        ops[gWriterOpCount].linkID = 0;
+                        gWriterOpCount++;
+                    }
+                } else if (isBlockquote) {
+                    if (gWriterOpCount < MAX_STYLE_OPS) {
+                        ops[gWriterOpCount].start = globalStart;
+                        ops[gWriterOpCount].end = globalEnd;
+                        ops[gWriterOpCount].kind = 'Q';
+                        ops[gWriterOpCount].level = bqDepth;
                         ops[gWriterOpCount].linkID = 0;
                         gWriterOpCount++;
                     }
