@@ -116,12 +116,26 @@ void BuildHiddenView(void)
 
     i = 0;
     while (i < len) {
+        if (i + 1 < len && (*srcH)[i] == '\\' && ((*srcH)[i+1] == '*' || (*srcH)[i+1] == '_' || (*srcH)[i+1] == '#' || (*srcH)[i+1] == '>' || (*srcH)[i+1] == '[' || (*srcH)[i+1] == '`' || (*srcH)[i+1] == '\\')) {
+            i += 2;
+            continue;
+        }
+
+
+        if (i + 1 < len && (*srcH)[i] == '\\' && ((*srcH)[i+1] == '*' || (*srcH)[i+1] == '_' || (*srcH)[i+1] == '#' || (*srcH)[i+1] == '>' || (*srcH)[i+1] == '[' || (*srcH)[i+1] == '`' || (*srcH)[i+1] == '\\')) {
+            (*outH)[outLen++] = (*srcH)[i+1];
+            i += 2;
+            continue;
+        }
+
         if (i == 0 || (*srcH)[i - 1] == '\r') {
+            long p = i;
+            while (p < len && ((*srcH)[p] == ' ' || (*srcH)[p] == '\t')) p++;
             short level = 0;
-            while (level < 6 && i + level < len && (*srcH)[i + level] == '#')
+            while (level < 6 && p + level < len && (*srcH)[p + level] == '#')
                 level++;
-            if (level > 0 && i + level < len && (*srcH)[i + level] == ' ') {
-                long lineStart = i + level + 1;
+            if (level > 0 && p + level < len && (*srcH)[p + level] == ' ') {
+                long lineStart = p + level + 1;
                 long lineEnd = lineStart;
                 long outStart = outLen;
 
@@ -148,37 +162,52 @@ void BuildHiddenView(void)
                 continue;
             }
 
-            if (i + 1 < len && (*srcH)[i] == '>' && (*srcH)[i + 1] == ' ') {
-                long lineStart = i + 2;
-                long lineEnd = lineStart;
-                long outStart = outLen;
 
-                while (lineEnd < len && (*srcH)[lineEnd] != '\r') {
-                    (*outH)[outLen++] = (*srcH)[lineEnd];
-                    lineEnd++;
-                }
-                if (gWriterOpCount < MAX_STYLE_OPS) {
-                    ops[gWriterOpCount].start = outStart;
-                    ops[gWriterOpCount].end = outLen;
-                    ops[gWriterOpCount].kind = 'Q';
-                    gWriterOpCount++;
-                }
-                if (lineEnd < len && (*srcH)[lineEnd] == '\r') {
-                    (*outH)[outLen++] = '\r';
-                    i = lineEnd + 1;
-                    if (i < len && (*srcH)[i] == '\r') {
-                        i++;
+            {
+                long blockquoteDepth = 0;
+                long q = p;
+                while (q < len) {
+                    if ((*srcH)[q] == ' ' || (*srcH)[q] == '\t') {
+                        q++;
+                    } else if ((*srcH)[q] == '>') {
+                        blockquoteDepth++;
+                        q++;
+                    } else {
+                        break;
                     }
-                } else {
-                    i = lineEnd;
                 }
-                continue;
+                if (blockquoteDepth > 0) {
+                    long lineStart = q;
+                    long lineEnd = lineStart;
+                    long outStart = outLen;
+
+                    while (lineEnd < len && (*srcH)[lineEnd] != '\r') {
+                        (*outH)[outLen++] = (*srcH)[lineEnd];
+                        lineEnd++;
+                    }
+                    if (gWriterOpCount < MAX_STYLE_OPS) {
+                        ops[gWriterOpCount].start = outStart;
+                        ops[gWriterOpCount].end = outLen;
+                        ops[gWriterOpCount].kind = 'Q';
+                        gWriterOpCount++;
+                    }
+                    if (lineEnd < len && (*srcH)[lineEnd] == '\r') {
+                        (*outH)[outLen++] = '\r';
+                        i = lineEnd + 1;
+                        if (i < len && (*srcH)[i] == '\r') {
+                            i++;
+                        }
+                    } else {
+                        i = lineEnd;
+                    }
+                    continue;
+                }
             }
 
-            if (i + 2 < len && (((*srcH)[i] == '-' && (*srcH)[i+1] == '-' && (*srcH)[i+2] == '-') ||
-                                ((*srcH)[i] == '*' && (*srcH)[i+1] == '*' && (*srcH)[i+2] == '*') ||
-                                ((*srcH)[i] == '_' && (*srcH)[i+1] == '_' && (*srcH)[i+2] == '_'))) {
-                long end = i + 3;
+            if (p + 2 < len && (((*srcH)[p] == '-' && (*srcH)[p+1] == '-' && (*srcH)[p+2] == '-') ||
+                                ((*srcH)[p] == '*' && (*srcH)[p+1] == '*' && (*srcH)[p+2] == '*') ||
+                                ((*srcH)[p] == '_' && (*srcH)[p+1] == '_' && (*srcH)[p+2] == '_'))) {
+                long end = p + 3;
                 while (end < len && (*srcH)[end] == ' ') end++;
                 if (end == len || (*srcH)[end] == '\r') {
                     long outStart = outLen;
@@ -199,10 +228,15 @@ void BuildHiddenView(void)
                 }
             }
 
-            if (i + 1 < len && ((*srcH)[i] == '-' || (*srcH)[i] == '+' || (*srcH)[i] == '*') && (*srcH)[i + 1] == ' ') {
-                long lineStart = i + 2;
+            if (p + 1 < len && ((*srcH)[p] == '-' || (*srcH)[p] == '+' || (*srcH)[p] == '*') && (*srcH)[p + 1] == ' ') {
+                long lineStart = p + 2;
                 long lineEnd = lineStart;
                 long outStart = outLen;
+
+                long s;
+                for (s = i; s < p; s++) {
+                    (*outH)[outLen++] = (*srcH)[s];
+                }
 
                 (*outH)[outLen++] = '\245';
                 (*outH)[outLen++] = ' ';
@@ -220,6 +254,26 @@ void BuildHiddenView(void)
                 } else {
                     i = lineEnd;
                 }
+                continue;
+            }
+        }
+
+        if (i + 2 < len && ((*srcH)[i] == '*' || (*srcH)[i] == '_') && (*srcH)[i] == (*srcH)[i + 1] && (*srcH)[i] == (*srcH)[i + 2]) {
+            char delim = (*srcH)[i];
+            long j = i + 3;
+            while (j + 2 < len && ((*srcH)[j] != delim || (*srcH)[j + 1] != delim || (*srcH)[j + 2] != delim))
+                j++;
+            if (j + 2 < len) {
+                long outStart = outLen, m;
+                for (m = i + 3; m < j; m++)
+                    (*outH)[outLen++] = (*srcH)[m];
+                if (gWriterOpCount < MAX_STYLE_OPS) {
+                    ops[gWriterOpCount].start = outStart;
+                    ops[gWriterOpCount].end = outLen;
+                    ops[gWriterOpCount].kind = 'X';
+                    gWriterOpCount++;
+                }
+                i = j + 3;
                 continue;
             }
         }
@@ -280,6 +334,36 @@ void BuildHiddenView(void)
                 continue;
             }
         }
+        if ((*srcH)[i] == '<') {
+            long closeAngle = i + 1;
+            while (closeAngle < len && (*srcH)[closeAngle] != '>')
+                closeAngle++;
+            if (closeAngle < len) {
+                long urlLen = closeAngle - (i + 1);
+                if (urlLen > 7 && urlLen < 255) {
+                    // check if starts with http
+                    if (((*srcH)[i+1] == 'h' && (*srcH)[i+2] == 't' && (*srcH)[i+3] == 't' && (*srcH)[i+4] == 'p') ||
+                        ((*srcH)[i+1] == 'm' && (*srcH)[i+2] == 'a' && (*srcH)[i+3] == 'i' && (*srcH)[i+4] == 'l')) {
+                        long outStart = outLen, m;
+                        Str255 url;
+                        for (m = i + 1; m < closeAngle; m++)
+                            (*outH)[outLen++] = (*srcH)[m];
+                        url[0] = (unsigned char) urlLen;
+                        BlockMove(*srcH + i + 1, url + 1, urlLen);
+                        if (gWriterOpCount < MAX_STYLE_OPS) {
+                            ops[gWriterOpCount].start = outStart;
+                            ops[gWriterOpCount].end = outLen;
+                            ops[gWriterOpCount].kind = 'L';
+                            ops[gWriterOpCount].linkID = AddLinkURL(url);
+                            gWriterOpCount++;
+                        }
+                        i = closeAngle + 1;
+                        continue;
+                    }
+                }
+            }
+        }
+
         if ((*srcH)[i] == '[' || ((*srcH)[i] == '!' && i + 1 < len && (*srcH)[i+1] == '[')) {
             Boolean isImage = ((*srcH)[i] == '!');
             long openBracket = isImage ? i + 1 : i;
@@ -357,6 +441,10 @@ void SyncHiddenToCanonical(void)
     HLock(srcH);
     HLock(outH);
 
+    Boolean prevWasBlockquote = false;
+    Boolean prevWasListItem = false;
+    Boolean prevWasHeading = false;
+
     lineStart = 0;
     while (lineStart < len) {
         Boolean isHR = false;
@@ -404,38 +492,6 @@ void SyncHiddenToCanonical(void)
                     isHR = true;
                 }
             }
-            
-            if (!isHR && (firstStyle.tsFace & bold)) {
-                short lvl;
-                for (lvl = 1; lvl <= 6; lvl++) {
-                    if (firstStyle.tsSize == CurrentFontSize() + (7 - lvl) * 2) {
-                        short s;
-                        for (s = 0; s < lvl; s++)
-                            (*outH)[outLen++] = '#';
-                        (*outH)[outLen++] = ' ';
-                        break;
-                    }
-                }
-            }
-        }
-
-        if (isHR) {
-            if (outLen >= 1 && (*outH)[outLen - 1] == '\r') {
-                if (outLen < 2 || (*outH)[outLen - 2] != '\r') {
-                    (*outH)[outLen++] = '\r';
-                }
-            }
-            (*outH)[outLen++] = '-';
-            (*outH)[outLen++] = '-';
-            (*outH)[outLen++] = '-';
-            (*outH)[outLen++] = '\r';
-        } else if (isBlockquote) {
-            (*outH)[outLen++] = '>';
-            (*outH)[outLen++] = ' ';
-        } else if (lineEnd > lineStart && (*srcH)[lineStart] == '\245' && (*srcH)[lineStart + 1] == ' ') {
-            (*outH)[outLen++] = '-';
-            (*outH)[outLen++] = ' ';
-            textOffset = lineStart + 2;
         }
 
         Boolean isHeading = false;
@@ -452,13 +508,55 @@ void SyncHiddenToCanonical(void)
         }
         
         if (!isHR && !isHeading && !isBlockquote) {
-            if (lineEnd > lineStart && (*srcH)[lineStart] == '\245' && (*srcH)[lineStart + 1] == ' ') {
+            long p = lineStart;
+            while (p < lineEnd && ((*srcH)[p] == ' ' || (*srcH)[p] == '\t')) p++;
+            if (p < lineEnd && (*srcH)[p] == '\245' && p + 1 < lineEnd && (*srcH)[p + 1] == ' ') {
                 isListItem = true;
             } else {
-                while (textOffset < lineEnd && ((*srcH)[textOffset] == ' ' || (*srcH)[textOffset] == '\t')) {
-                    textOffset++;
+                textOffset = p;
+            }
+        }
+
+        if (isHeading || isHR ||
+            (isBlockquote && !prevWasBlockquote) ||
+            (!isBlockquote && prevWasBlockquote) ||
+            (isListItem && !prevWasListItem) ||
+            (!isListItem && prevWasListItem)) {
+            if (outLen >= 1 && (*outH)[outLen - 1] == '\r') {
+                if (outLen < 2 || (*outH)[outLen - 2] != '\r') {
+                    (*outH)[outLen++] = '\r';
                 }
             }
+        }
+
+        if (isHR) {
+            (*outH)[outLen++] = '-';
+            (*outH)[outLen++] = '-';
+            (*outH)[outLen++] = '-';
+            (*outH)[outLen++] = '\r';
+        } else if (isHeading) {
+            short lvl;
+            for (lvl = 1; lvl <= 6; lvl++) {
+                if (firstStyle.tsSize == CurrentFontSize() + (7 - lvl) * 2) {
+                    short s;
+                    for (s = 0; s < lvl; s++)
+                        (*outH)[outLen++] = '#';
+                    (*outH)[outLen++] = ' ';
+                    break;
+                }
+            }
+        } else if (isBlockquote) {
+            (*outH)[outLen++] = '>';
+            (*outH)[outLen++] = ' ';
+        } else if (isListItem) {
+            long p = lineStart;
+            while (p < lineEnd && ((*srcH)[p] == ' ' || (*srcH)[p] == '\t')) {
+                (*outH)[outLen++] = (*srcH)[p];
+                p++;
+            }
+            (*outH)[outLen++] = '-';
+            (*outH)[outLen++] = ' ';
+            textOffset = p + 2;
         }
 
         if (!isHR) {
@@ -466,7 +564,7 @@ void SyncHiddenToCanonical(void)
             while (runStart < lineEnd) {
                 long runEnd = runStart + 1;
                 short linkID = 0;
-                Boolean isBold = false, isItalic = false, isCode = false, isImageLink = false;
+                Boolean isBold = false, isItalic = false, isCode = false, isImageLink = false, isBoldItalic = false;
                 
                 if (gWriterOpsH) {
                     short k;
@@ -476,6 +574,7 @@ void SyncHiddenToCanonical(void)
                     
                     for (k = 0; k < gWriterOpCount; k++) {
                         if (ops[k].start <= runStart && ops[k].end > runStart) {
+                            if (ops[k].kind == 'X') isBoldItalic = true;
                             if (ops[k].kind == 'B') isBold = true;
                             if (ops[k].kind == 'I') isItalic = true;
                             if (ops[k].kind == 'C') isCode = true;
@@ -498,6 +597,7 @@ void SyncHiddenToCanonical(void)
                     runEnd = lineEnd;
                 }
 
+                if (isBoldItalic) { (*outH)[outLen++] = '*'; (*outH)[outLen++] = '*'; (*outH)[outLen++] = '*'; }
                 if (isBold) { (*outH)[outLen++] = '*'; (*outH)[outLen++] = '*'; }
                 if (isItalic) (*outH)[outLen++] = '*';
                 if (isCode) (*outH)[outLen++] = '`';
@@ -524,6 +624,7 @@ void SyncHiddenToCanonical(void)
                 if (isCode) (*outH)[outLen++] = '`';
                 if (isItalic) (*outH)[outLen++] = '*';
                 if (isBold) { (*outH)[outLen++] = '*'; (*outH)[outLen++] = '*'; }
+                if (isBoldItalic) { (*outH)[outLen++] = '*'; (*outH)[outLen++] = '*'; (*outH)[outLen++] = '*'; }
             }
         }
 
@@ -551,7 +652,16 @@ void SyncHiddenToCanonical(void)
             (*outH)[outLen++] = '\r';
         }
 
-        
+        if (isHeading && outLen >= 1 && (*outH)[outLen - 1] == '\r') {
+            if (outLen < 2 || (*outH)[outLen - 2] != '\r') {
+                (*outH)[outLen++] = '\r';
+            }
+        }
+
+        prevWasBlockquote = isBlockquote;
+        prevWasListItem = isListItem;
+        prevWasHeading = isHeading;
+
         lineStart = lineEnd + 1;
     }
 
@@ -577,7 +687,7 @@ Handle EncodeSelectionAsMarkdown(short start, short end, TEHandle te)
     short li;
     short monacoFont;
     long i;
-    Boolean inBold = false, inItalic = false, inCode = false, inLink = false, isImageLink = false;
+    Boolean inBold = false, inItalic = false, inCode = false, inLink = false, isImageLink = false, inBoldItalic = false;
     Str255 curLinkURL;
 
     srcH = (**te).hText;
@@ -595,7 +705,7 @@ Handle EncodeSelectionAsMarkdown(short start, short end, TEHandle te)
 
     i = start;
     while (i <= end) {
-        Boolean wantBold = false, wantItalic = false, wantCode = false, wantLink = false;
+        Boolean wantBold = false, wantItalic = false, wantCode = false, wantLink = false, wantBoldItalic = false;
         short linkID = 0;
 
         if (i < end) {
@@ -603,8 +713,12 @@ Handle EncodeSelectionAsMarkdown(short start, short end, TEHandle te)
             short dlh, dfa;
 
             TEGetStyle((short) i, &st, &dlh, &dfa, te);
-            wantBold = (st.tsFace & bold) != 0;
-            wantItalic = (st.tsFace & italic) != 0;
+            if ((st.tsFace & bold) != 0 && (st.tsFace & italic) != 0) {
+                wantBoldItalic = true;
+            } else {
+                wantBold = (st.tsFace & bold) != 0;
+                wantItalic = (st.tsFace & italic) != 0;
+            }
             wantCode = (st.tsFont == monacoFont);
             wantLink = (st.tsFace & underline) != 0;
             linkID = st.tsColor.red;
@@ -614,6 +728,10 @@ Handle EncodeSelectionAsMarkdown(short start, short end, TEHandle te)
         }
 
         if (inCode && !wantCode) { (*outH)[outLen++] = '`'; inCode = false; }
+        if (inBoldItalic && !wantBoldItalic) { 
+            (*outH)[outLen++] = '*'; (*outH)[outLen++] = '*'; (*outH)[outLen++] = '*'; 
+            inBoldItalic = false; 
+        }
         if (inItalic && !wantItalic) { (*outH)[outLen++] = '*'; inItalic = false; }
         if (inBold && !wantBold) {
             (*outH)[outLen++] = '*';
@@ -637,6 +755,10 @@ Handle EncodeSelectionAsMarkdown(short start, short end, TEHandle te)
                 BlockMove(gLinkURLs[linkID], curLinkURL, gLinkURLs[linkID][0] + 1);
             else
                 curLinkURL[0] = 0;
+        }
+        if (!inBoldItalic && wantBoldItalic) {
+            (*outH)[outLen++] = '*'; (*outH)[outLen++] = '*'; (*outH)[outLen++] = '*';
+            inBoldItalic = true;
         }
         if (!inBold && wantBold) {
             (*outH)[outLen++] = '*';
@@ -695,10 +817,39 @@ void InsertMarkdownAsStyled(Handle srcH, long srcLen, TEHandle te)
 
     i = 0;
     while (i < srcLen) {
-        if (i + 1 < srcLen && (*srcH)[i] == '*' && (*srcH)[i + 1] == '*') {
+        if (i + 1 < srcLen && (*srcH)[i] == '\\' && ((*srcH)[i+1] == '*' || (*srcH)[i+1] == '_' || (*srcH)[i+1] == '#' || (*srcH)[i+1] == '>' || (*srcH)[i+1] == '[' || (*srcH)[i+1] == '`' || (*srcH)[i+1] == '\\')) {
+            (*outH)[outLen++] = (*srcH)[i+1];
+            i += 2;
+            continue;
+        }
+
+        if (i + 2 < srcLen && ((*srcH)[i] == '*' || (*srcH)[i] == '_') && (*srcH)[i] == (*srcH)[i + 1] && (*srcH)[i] == (*srcH)[i + 2]) {
+            char delim = (*srcH)[i];
+            long j = i + 3;
+
+            while (j + 2 < srcLen && !((*srcH)[j] == delim && (*srcH)[j + 1] == delim && (*srcH)[j + 2] == delim))
+                j++;
+            if (j + 2 < srcLen) {
+                long outStart = outLen, m;
+
+                for (m = i + 3; m < j; m++)
+                    (*outH)[outLen++] = (*srcH)[m];
+                if (opCount < MAX_STYLE_OPS) {
+                    ops[opCount].start = (short) outStart;
+                    ops[opCount].end = (short) outLen;
+                    ops[opCount].kind = 'X';
+                    opCount++;
+                }
+                i = j + 3;
+                continue;
+            }
+        }
+
+        if (i + 1 < srcLen && ((*srcH)[i] == '*' || (*srcH)[i] == '_') && (*srcH)[i] == (*srcH)[i + 1]) {
+            char delim = (*srcH)[i];
             long j = i + 2;
 
-            while (j + 1 < srcLen && !((*srcH)[j] == '*' && (*srcH)[j + 1] == '*'))
+            while (j + 1 < srcLen && !((*srcH)[j] == delim && (*srcH)[j + 1] == delim))
                 j++;
             if (j + 1 < srcLen) {
                 long outStart = outLen, m;
@@ -715,10 +866,11 @@ void InsertMarkdownAsStyled(Handle srcH, long srcLen, TEHandle te)
                 continue;
             }
         }
-        if ((*srcH)[i] == '*') {
+        if ((*srcH)[i] == '*' || (*srcH)[i] == '_') {
+            char delim = (*srcH)[i];
             long j = i + 1;
 
-            while (j < srcLen && (*srcH)[j] != '*')
+            while (j < srcLen && (*srcH)[j] != delim)
                 j++;
             if (j < srcLen) {
                 long outStart = outLen, m;
@@ -755,6 +907,35 @@ void InsertMarkdownAsStyled(Handle srcH, long srcLen, TEHandle te)
                 continue;
             }
         }
+        if ((*srcH)[i] == '<') {
+            long closeAngle = i + 1;
+            while (closeAngle < srcLen && (*srcH)[closeAngle] != '>')
+                closeAngle++;
+            if (closeAngle < srcLen) {
+                long urlLen = closeAngle - (i + 1);
+                if (urlLen > 7 && urlLen < 255) {
+                    if (((*srcH)[i+1] == 'h' && (*srcH)[i+2] == 't' && (*srcH)[i+3] == 't' && (*srcH)[i+4] == 'p') ||
+                        ((*srcH)[i+1] == 'm' && (*srcH)[i+2] == 'a' && (*srcH)[i+3] == 'i' && (*srcH)[i+4] == 'l')) {
+                        long outStart = outLen, m;
+                        Str255 url;
+                        for (m = i + 1; m < closeAngle; m++)
+                            (*outH)[outLen++] = (*srcH)[m];
+                        url[0] = (unsigned char) urlLen;
+                        BlockMove(*srcH + i + 1, url + 1, urlLen);
+                        if (opCount < MAX_STYLE_OPS) {
+                            ops[opCount].start = (short) outStart;
+                            ops[opCount].end = (short) outLen;
+                            ops[opCount].kind = 'L';
+                            ops[opCount].linkID = AddLinkURL(url);
+                            opCount++;
+                        }
+                        i = closeAngle + 1;
+                        continue;
+                    }
+                }
+            }
+        }
+
         if ((*srcH)[i] == '[' || ((*srcH)[i] == '!' && i + 1 < srcLen && (*srcH)[i+1] == '[')) {
             Boolean isImage = ((*srcH)[i] == '!');
             long openBracket = isImage ? i + 1 : i;
@@ -821,6 +1002,10 @@ void InsertMarkdownAsStyled(Handle srcH, long srcLen, TEHandle te)
 
         TESetSelect((short) (insertStart + ops[k].start), (short) (insertStart + ops[k].end), te);
         switch (ops[k].kind) {
+            case 'X':
+                opStyle.tsFace = bold | italic;
+                TESetStyle(doFace, &opStyle, false, te);
+                break;
             case 'B':
                 opStyle.tsFace = bold;
                 TESetStyle(doFace, &opStyle, false, te);
@@ -1182,6 +1367,10 @@ void DetectInlineMarkdown(char justTyped)
     textH = (**gHiddenTE).hText;
     len = (**gHiddenTE).teLength;
     caret = (**gHiddenTE).selEnd;
+    
+    if (caret >= 2 && (*textH)[caret - 2] == '\\') {
+        return; // justTyped is escaped, do not process
+    }
 
     HLock(textH);
 
@@ -1436,6 +1625,44 @@ void DetectInlineMarkdown(char justTyped)
                 return;
             }
         }
+    } else if (justTyped == '>') {
+        if (caret >= 2) {
+            long p = caret - 2;
+            while (p >= lineStart && (*textH)[p] != '<') p--;
+            if (p >= lineStart) {
+                long urlLen = caret - 1 - (p + 1);
+                if (urlLen > 7 && urlLen < 255) {
+                    if (((*textH)[p+1] == 'h' && (*textH)[p+2] == 't' && (*textH)[p+3] == 't' && (*textH)[p+4] == 'p') ||
+                        ((*textH)[p+1] == 'm' && (*textH)[p+2] == 'a' && (*textH)[p+3] == 'i' && (*textH)[p+4] == 'l')) {
+                        
+                        Str255 url;
+                        TextStyle ts;
+                        short linkID;
+                        
+                        url[0] = (unsigned char) urlLen;
+                        BlockMove(*textH + p + 1, url + 1, urlLen);
+                        linkID = AddLinkURL(url);
+
+                        HUnlock(textH);
+                        TESetSelect((short) (caret - 1), (short) caret, gHiddenTE);
+                        TEDelete(gHiddenTE);
+                        TESetSelect((short) p, (short) (p + 1), gHiddenTE);
+                        TEDelete(gHiddenTE);
+
+                        ts.tsFace = underline;
+                        ts.tsColor.red = linkID;
+                        ts.tsColor.green = 0;
+                        ts.tsColor.blue = 0;
+
+                        TESetSelect((short) p, (short) (caret - 2), gHiddenTE);
+                        TESetStyle(doFace + doColor, &ts, false, gHiddenTE);
+                        SetTypingStyleNormal((short) (caret - 2));
+                        InvalidateHeightCache();
+                        return;
+                    }
+                }
+            }
+        }
     }
 
     HUnlock(textH);
@@ -1605,6 +1832,16 @@ void LoadTextWindow(long startOffset)
     
     if (startOffset < 0) startOffset = 0;
     if (startOffset > len) startOffset = len;
+    
+    if (startOffset > 0 && startOffset < len) {
+        long scan = startOffset;
+        HLock(srcH);
+        while (scan > 0 && (*srcH)[scan - 1] != '\r') {
+            scan--;
+        }
+        HUnlock(srcH);
+        startOffset = scan;
+    }
     
     copyLen = len - startOffset;
     if (copyLen > WINDOW_SIZE) copyLen = WINDOW_SIZE;

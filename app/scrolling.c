@@ -38,18 +38,13 @@ void UpdateScrollbarRange(void)
 {
     long total = TotalLength();
     short maxVal = (total > 0) ? 32767 : 0;
-    Boolean shouldShow;
 
     if (maxVal != GetControlMaximum(gScrollBar))
         SetControlMaximum(gScrollBar, maxVal);
 
-    shouldShow = (maxVal > 0);
-    if (shouldShow != gScrollBarVisible) {
-        if (shouldShow)
-            ShowControl(gScrollBar);
-        else
-            HideControl(gScrollBar);
-        gScrollBarVisible = shouldShow;
+    if (!gScrollBarVisible) {
+        ShowControl(gScrollBar);
+        gScrollBarVisible = true;
     }
 }
 

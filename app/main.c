@@ -1313,36 +1313,43 @@ static void EventLoop(void)
                                 short lineStart, lineEnd, caret;
                                 Handle hText = (**gActiveTE).hText;
                                 short prefixLen = 0;
-                                char prefixBuf[16];
+                                char prefixBuf[64];
                                 Boolean doInsertCR = true;
                                 
                                 caret = (**gActiveTE).selStart;
                                 GetCurrentParagraphRange(&lineStart, &lineEnd);
                                 
                                 HLock(hText);
+                                short scan = lineStart;
+                                while (scan < caret && ((*hText)[scan] == ' ' || (*hText)[scan] == '\t')) scan++;
+                                
                                 if (gHideMarkdown) {
-                                    if (lineStart < caret && (unsigned char)(*hText)[lineStart] == 0xA5 && 
-                                        lineStart + 1 < caret && (*hText)[lineStart + 1] == ' ') {
-                                        prefixLen = 2;
+                                    if (scan < caret && (unsigned char)(*hText)[scan] == 0xA5 && 
+                                        scan + 1 < caret && (*hText)[scan + 1] == ' ') {
+                                        prefixLen = (scan + 2) - lineStart;
+                                        if (prefixLen > 63) prefixLen = 63;
                                         BlockMove(*hText + lineStart, prefixBuf, prefixLen);
                                     } else {
-                                        short i = lineStart;
+                                        short i = scan;
                                         while (i < caret && (*hText)[i] >= '0' && (*hText)[i] <= '9') i++;
-                                        if (i > lineStart && i < caret && (*hText)[i] == '.' && i + 1 < caret && (*hText)[i + 1] == ' ') {
+                                        if (i > scan && i < caret && (*hText)[i] == '.' && i + 1 < caret && (*hText)[i + 1] == ' ') {
                                             prefixLen = (i + 2) - lineStart;
+                                            if (prefixLen > 63) prefixLen = 63;
                                             BlockMove(*hText + lineStart, prefixBuf, prefixLen);
                                         }
                                     }
                                 } else {
-                                    if (lineStart < caret && (*hText)[lineStart] == '-' && 
-                                        lineStart + 1 < caret && (*hText)[lineStart + 1] == ' ') {
-                                        prefixLen = 2;
+                                    if (scan < caret && (*hText)[scan] == '-' && 
+                                        scan + 1 < caret && (*hText)[scan + 1] == ' ') {
+                                        prefixLen = (scan + 2) - lineStart;
+                                        if (prefixLen > 63) prefixLen = 63;
                                         BlockMove(*hText + lineStart, prefixBuf, prefixLen);
                                     } else {
-                                        short i = lineStart;
+                                        short i = scan;
                                         while (i < caret && (*hText)[i] >= '0' && (*hText)[i] <= '9') i++;
-                                        if (i > lineStart && i < caret && (*hText)[i] == '.' && i + 1 < caret && (*hText)[i + 1] == ' ') {
+                                        if (i > scan && i < caret && (*hText)[i] == '.' && i + 1 < caret && (*hText)[i + 1] == ' ') {
                                             prefixLen = (i + 2) - lineStart;
+                                            if (prefixLen > 63) prefixLen = 63;
                                             BlockMove(*hText + lineStart, prefixBuf, prefixLen);
                                         }
                                     }
@@ -1351,10 +1358,21 @@ static void EventLoop(void)
                                 
                                 if (prefixLen > 0) {
                                     if (lineEnd == lineStart + prefixLen) {
-                                        TESetSelect(lineStart, lineEnd, gActiveTE);
-                                        TEDelete(gActiveTE);
-                                        doInsertCR = false;
-                                        gDirty = true;
+                                        short spaceCount = scan - lineStart;
+                                        if (spaceCount >= 2) {
+                                            TESetSelect(lineStart, lineEnd, gActiveTE);
+                                            TEDelete(gActiveTE);
+                                            prefixLen -= 2;
+                                            BlockMove(prefixBuf + 2, prefixBuf, prefixLen);
+                                            TEInsert(prefixBuf, prefixLen, gActiveTE);
+                                            doInsertCR = false;
+                                            gDirty = true;
+                                        } else {
+                                            TESetSelect(lineStart, lineEnd, gActiveTE);
+                                            TEDelete(gActiveTE);
+                                            doInsertCR = false;
+                                            gDirty = true;
+                                        }
                                     } else {
                                         Boolean isNumbered = false;
                                         short i;
@@ -1363,12 +1381,15 @@ static void EventLoop(void)
                                         }
                                         if (isNumbered) {
                                             long num;
-                                            char newNumBuf[16];
+                                            char newNumBuf[64];
+                                            short numStart = scan - lineStart;
                                             prefixBuf[prefixLen-2] = 0;
-                                            sscanf(prefixBuf, "%ld", &num);
+                                            sscanf(prefixBuf + numStart, "%ld", &num);
                                             sprintf(newNumBuf, "%ld. ", num + 1);
-                                            prefixLen = strlen(newNumBuf);
-                                            BlockMove(newNumBuf, prefixBuf, prefixLen);
+                                            
+                                            prefixLen = numStart + strlen(newNumBuf);
+                                            if (prefixLen > 63) prefixLen = 63;
+                                            BlockMove(newNumBuf, prefixBuf + numStart, strlen(newNumBuf));
                                         }
                                     }
                                 }
@@ -1378,6 +1399,48 @@ static void EventLoop(void)
                                     if (prefixLen > 0) {
                                         TEInsert(prefixBuf, prefixLen, gActiveTE);
                                     }
+                                }
+                            } else if (key == 0x09) {
+                                short lineStart, lineEnd, caret;
+                                Handle hText = (**gActiveTE).hText;
+                                short prefixLen = 0;
+                                char prefixBuf[64];
+                                
+                                caret = (**gActiveTE).selStart;
+                                GetCurrentParagraphRange(&lineStart, &lineEnd);
+                                
+                                HLock(hText);
+                                short scan = lineStart;
+                                while (scan < caret && ((*hText)[scan] == ' ' || (*hText)[scan] == '\t')) scan++;
+                                
+                                if (gHideMarkdown) {
+                                    if (scan < caret && (unsigned char)(*hText)[scan] == 0xA5 && 
+                                        scan + 1 < caret && (*hText)[scan + 1] == ' ') {
+                                        prefixLen = (scan + 2) - lineStart;
+                                        if (prefixLen > 63) prefixLen = 63;
+                                        BlockMove(*hText + lineStart, prefixBuf, prefixLen);
+                                    }
+                                } else {
+                                    if (scan < caret && (*hText)[scan] == '-' && 
+                                        scan + 1 < caret && (*hText)[scan + 1] == ' ') {
+                                        prefixLen = (scan + 2) - lineStart;
+                                        if (prefixLen > 63) prefixLen = 63;
+                                        BlockMove(*hText + lineStart, prefixBuf, prefixLen);
+                                    }
+                                }
+                                HUnlock(hText);
+                                
+                                if (prefixLen > 0 && lineEnd == lineStart + prefixLen && prefixLen + 2 <= 63) {
+                                    TESetSelect(lineStart, lineEnd, gActiveTE);
+                                    TEDelete(gActiveTE);
+                                    
+                                    char newBuf[64];
+                                    newBuf[0] = ' '; newBuf[1] = ' ';
+                                    BlockMove(prefixBuf, newBuf + 2, prefixLen);
+                                    TEInsert(newBuf, prefixLen + 2, gActiveTE);
+                                    gDirty = true;
+                                } else {
+                                    TEKey(key, gActiveTE);
                                 }
                             } else {
                                 TEKey(key, gActiveTE);
