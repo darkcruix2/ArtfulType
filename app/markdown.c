@@ -131,6 +131,59 @@ void BuildHiddenView(void)
         if (i == 0 || (*srcH)[i - 1] == '\r') {
             long p = i;
             while (p < len && ((*srcH)[p] == ' ' || (*srcH)[p] == '\t')) p++;
+            
+            if (p + 2 < len && (*srcH)[p] == '`' && (*srcH)[p + 1] == '`' && (*srcH)[p + 2] == '`') {
+                long j = p + 3;
+                while (j < len && (*srcH)[j] != '\r') j++;
+                long codeStart = j < len ? j + 1 : j;
+                long codeEnd = len;
+                long closingFenceStart = len;
+                long search = codeStart;
+                while (search < len) {
+                    long lineBegin = search;
+                    while (search < len && (*srcH)[search] != '\r') search++;
+                    long lineEnd = search;
+                    long sScan = lineBegin;
+                    while (sScan < lineEnd && ((*srcH)[sScan] == ' ' || (*srcH)[sScan] == '\t')) sScan++;
+                    if (sScan + 2 < lineEnd && (*srcH)[sScan] == '`' && (*srcH)[sScan + 1] == '`' && (*srcH)[sScan + 2] == '`') {
+                        long remain = sScan + 3;
+                        while (remain < lineEnd && ((*srcH)[remain] == ' ' || (*srcH)[remain] == '\t')) remain++;
+                        if (remain == lineEnd) {
+                            codeEnd = lineBegin > codeStart ? lineBegin - 1 : codeStart;
+                            closingFenceStart = lineBegin;
+                            break;
+                        }
+                    }
+                    if (search < len) search++;
+                }
+                
+                if (closingFenceStart < len) {
+                    long outStart = outLen;
+                    long m;
+                    for (m = codeStart; m < codeEnd; m++) {
+                        (*outH)[outLen++] = (*srcH)[m];
+                    }
+                    if (codeEnd < closingFenceStart) {
+                        (*outH)[outLen++] = '\r';
+                    }
+                    
+                    if (gWriterOpCount < MAX_STYLE_OPS) {
+                        ops[gWriterOpCount].start = outStart;
+                        ops[gWriterOpCount].end = outLen;
+                        ops[gWriterOpCount].kind = 'C';
+                        ops[gWriterOpCount].level = 0;
+                        ops[gWriterOpCount].linkID = 0;
+                        gWriterOpCount++;
+                    }
+                    
+                    j = closingFenceStart + 3;
+                    while (j < len && (*srcH)[j] != '\r') j++;
+                    if (j < len && (*srcH)[j] == '\r') j++;
+                    i = j;
+                    continue;
+                }
+            }
+            
             short level = 0;
             while (level < 6 && p + level < len && (*srcH)[p + level] == '#')
                 level++;
@@ -235,11 +288,12 @@ void BuildHiddenView(void)
                 long outStart = outLen;
                 short spaceCount = p - i;
                 short nestingLevel = spaceCount / 2;
-                char bulletChar = '\245';
-                if (nestingLevel == 1) {
-                    bulletChar = 'o';
-                } else if (nestingLevel >= 2) {
-                    bulletChar = '-';
+                
+                Boolean isTask = false;
+                Boolean isChecked = false;
+                if (p + 5 < len && (*srcH)[p + 2] == '[' && ((*srcH)[p + 3] == ' ' || (*srcH)[p + 3] == 'x' || (*srcH)[p + 3] == 'X') && (*srcH)[p + 4] == ']' && (*srcH)[p + 5] == ' ') {
+                    isTask = true;
+                    isChecked = ((*srcH)[p + 3] == 'x' || (*srcH)[p + 3] == 'X');
                 }
 
                 long s;
@@ -247,9 +301,24 @@ void BuildHiddenView(void)
                     (*outH)[outLen++] = (*srcH)[s];
                 }
 
-                (*outH)[outLen++] = bulletChar;
-                (*outH)[outLen++] = ' ';
+                if (isTask) {
+                    (*outH)[outLen++] = '[';
+                    (*outH)[outLen++] = isChecked ? 'x' : ' ';
+                    (*outH)[outLen++] = ']';
+                    (*outH)[outLen++] = ' ';
+                    lineStart = p + 6;
+                } else {
+                    char bulletChar = '\245';
+                    if (nestingLevel == 1) {
+                        bulletChar = 'o';
+                    } else if (nestingLevel >= 2) {
+                        bulletChar = '-';
+                    }
+                    (*outH)[outLen++] = bulletChar;
+                    (*outH)[outLen++] = ' ';
+                }
 
+                lineEnd = lineStart;
                 while (lineEnd < len && (*srcH)[lineEnd] != '\r') {
                     (*outH)[outLen++] = (*srcH)[lineEnd];
                     lineEnd++;
@@ -322,6 +391,42 @@ void BuildHiddenView(void)
                     gWriterOpCount++;
                 }
                 i = j + 1;
+                continue;
+            }
+        }
+        if (i + 1 < len && (*srcH)[i] == '~' && (*srcH)[i + 1] == '~') {
+            long j = i + 2;
+            while (j + 1 < len && ((*srcH)[j] != '~' || (*srcH)[j + 1] != '~'))
+                j++;
+            if (j + 1 < len) {
+                long outStart = outLen, m;
+                for (m = i + 2; m < j; m++)
+                    (*outH)[outLen++] = (*srcH)[m];
+                if (gWriterOpCount < MAX_STYLE_OPS) {
+                    ops[gWriterOpCount].start = outStart;
+                    ops[gWriterOpCount].end = outLen;
+                    ops[gWriterOpCount].kind = 'S';
+                    gWriterOpCount++;
+                }
+                i = j + 2;
+                continue;
+            }
+        }
+        if (i + 1 < len && (*srcH)[i] == '=' && (*srcH)[i + 1] == '=') {
+            long j = i + 2;
+            while (j + 1 < len && ((*srcH)[j] != '=' || (*srcH)[j + 1] != '='))
+                j++;
+            if (j + 1 < len) {
+                long outStart = outLen, m;
+                for (m = i + 2; m < j; m++)
+                    (*outH)[outLen++] = (*srcH)[m];
+                if (gWriterOpCount < MAX_STYLE_OPS) {
+                    ops[gWriterOpCount].start = outStart;
+                    ops[gWriterOpCount].end = outLen;
+                    ops[gWriterOpCount].kind = 'E';
+                    gWriterOpCount++;
+                }
+                i = j + 2;
                 continue;
             }
         }
@@ -454,6 +559,7 @@ void SyncHiddenToCanonical(void)
     short prevBlockquoteDepth = 0;
     Boolean prevWasListItem = false;
     Boolean prevWasHeading = false;
+    Boolean prevWasTaskItem = false;
 
     lineStart = 0;
     while (lineStart < len) {
@@ -519,21 +625,28 @@ void SyncHiddenToCanonical(void)
             }
         }
         
+        Boolean isTaskItem = false;
+        Boolean isCheckedTask = false;
         if (!isHR && !isHeading && !isBlockquote) {
             long p = lineStart;
             while (p < lineEnd && ((*srcH)[p] == ' ' || (*srcH)[p] == '\t')) p++;
-            if (p < lineEnd && ((unsigned char)(*srcH)[p] == 0xA5 || (*srcH)[p] == 'o' || (*srcH)[p] == '-') && p + 1 < lineEnd && (*srcH)[p + 1] == ' ') {
+            if (p + 3 < lineEnd && (*srcH)[p] == '[' && ((*srcH)[p + 1] == ' ' || (*srcH)[p + 1] == 'x' || (*srcH)[p + 1] == 'X') && (*srcH)[p + 2] == ']' && (*srcH)[p + 3] == ' ') {
+                isTaskItem = true;
+                isCheckedTask = ((*srcH)[p + 1] == 'x' || (*srcH)[p + 1] == 'X');
+            } else if (p < lineEnd && ((unsigned char)(*srcH)[p] == 0xA5 || (*srcH)[p] == 'o' || (*srcH)[p] == '-') && p + 1 < lineEnd && (*srcH)[p + 1] == ' ') {
                 isListItem = true;
             } else {
                 textOffset = p;
             }
         }
+        Boolean isAnyList = isListItem || isTaskItem;
+        Boolean prevWasAnyList = prevWasListItem || prevWasTaskItem;
         if (isHeading || isHR ||
             (isBlockquote && !prevWasBlockquote) ||
             (!isBlockquote && prevWasBlockquote) || 
             (isBlockquote && prevWasBlockquote && blockquoteDepth != prevBlockquoteDepth) ||
-            (isListItem && !prevWasListItem) ||
-            (!isListItem && prevWasListItem)) {
+            (isAnyList && !prevWasAnyList) ||
+            (!isAnyList && prevWasAnyList)) {
             
             if (outLen >= 1 && (*outH)[outLen - 1] == '\r') {
                 if (outLen < 2 || (*outH)[outLen - 2] != '\r') {
@@ -564,6 +677,19 @@ void SyncHiddenToCanonical(void)
                 (*outH)[outLen++] = '>';
             }
             (*outH)[outLen++] = ' ';
+        } else if (isTaskItem) {
+            long p = lineStart;
+            while (p < lineEnd && ((*srcH)[p] == ' ' || (*srcH)[p] == '\t')) {
+                (*outH)[outLen++] = (*srcH)[p];
+                p++;
+            }
+            (*outH)[outLen++] = '-';
+            (*outH)[outLen++] = ' ';
+            (*outH)[outLen++] = '[';
+            (*outH)[outLen++] = isCheckedTask ? 'x' : ' ';
+            (*outH)[outLen++] = ']';
+            (*outH)[outLen++] = ' ';
+            textOffset = p + 4;
         } else if (isListItem) {
             long p = lineStart;
             while (p < lineEnd && ((*srcH)[p] == ' ' || (*srcH)[p] == '\t')) {
@@ -580,7 +706,7 @@ void SyncHiddenToCanonical(void)
             while (runStart < lineEnd) {
                 long runEnd = runStart + 1;
                 short linkID = 0;
-                Boolean isBold = false, isItalic = false, isCode = false, isImageLink = false, isBoldItalic = false;
+                Boolean isBold = false, isItalic = false, isCode = false, isImageLink = false, isBoldItalic = false, isStrike = false, isHighlight = false, isMultilineCode = false;
                 
                 if (gWriterOpsH) {
                     short k;
@@ -594,6 +720,8 @@ void SyncHiddenToCanonical(void)
                             if (ops[k].kind == 'B') isBold = true;
                             if (ops[k].kind == 'I') isItalic = true;
                             if (ops[k].kind == 'C') isCode = true;
+                            if (ops[k].kind == 'S') isStrike = true;
+                            if (ops[k].kind == 'E') isHighlight = true;
                             if (ops[k].kind == 'L') { linkID = ops[k].linkID; isImageLink = false; }
                             if (ops[k].kind == 'M') { linkID = ops[k].linkID; isImageLink = true; }
                             if (ops[k].end < runEnd || runEnd == runStart + 1) {
@@ -613,10 +741,33 @@ void SyncHiddenToCanonical(void)
                     runEnd = lineEnd;
                 }
 
+                if (isCode) {
+                    long s;
+                    for (s = runStart; s < runEnd; s++) {
+                        if ((*srcH)[s] == '\r') {
+                            isMultilineCode = true;
+                            break;
+                        }
+                    }
+                }
                 if (isBoldItalic) { (*outH)[outLen++] = '*'; (*outH)[outLen++] = '*'; (*outH)[outLen++] = '*'; }
                 if (isBold) { (*outH)[outLen++] = '*'; (*outH)[outLen++] = '*'; }
                 if (isItalic) (*outH)[outLen++] = '*';
-                if (isCode) (*outH)[outLen++] = '`';
+                if (isStrike) { (*outH)[outLen++] = '~'; (*outH)[outLen++] = '~'; }
+                if (isHighlight) { (*outH)[outLen++] = '='; (*outH)[outLen++] = '='; }
+                if (isCode) {
+                    if (isMultilineCode) {
+                        if (outLen > 0 && (*outH)[outLen - 1] != '\r') {
+                            (*outH)[outLen++] = '\r';
+                        }
+                        (*outH)[outLen++] = '`';
+                        (*outH)[outLen++] = '`';
+                        (*outH)[outLen++] = '`';
+                        (*outH)[outLen++] = '\r';
+                    } else {
+                        (*outH)[outLen++] = '`';
+                    }
+                }
                 if (linkID > 0) {
                     if (isImageLink) (*outH)[outLen++] = '!';
                     (*outH)[outLen++] = '[';
@@ -637,7 +788,21 @@ void SyncHiddenToCanonical(void)
                     }
                     (*outH)[outLen++] = ')';
                 }
-                if (isCode) (*outH)[outLen++] = '`';
+                if (isCode) {
+                    if (isMultilineCode) {
+                        if (outLen > 0 && (*outH)[outLen - 1] != '\r') {
+                            (*outH)[outLen++] = '\r';
+                        }
+                        (*outH)[outLen++] = '`';
+                        (*outH)[outLen++] = '`';
+                        (*outH)[outLen++] = '`';
+                        (*outH)[outLen++] = '\r';
+                    } else {
+                        (*outH)[outLen++] = '`';
+                    }
+                }
+                if (isHighlight) { (*outH)[outLen++] = '='; (*outH)[outLen++] = '='; }
+                if (isStrike) { (*outH)[outLen++] = '~'; (*outH)[outLen++] = '~'; }
                 if (isItalic) (*outH)[outLen++] = '*';
                 if (isBold) { (*outH)[outLen++] = '*'; (*outH)[outLen++] = '*'; }
                 if (isBoldItalic) { (*outH)[outLen++] = '*'; (*outH)[outLen++] = '*'; (*outH)[outLen++] = '*'; }
@@ -652,7 +817,7 @@ void SyncHiddenToCanonical(void)
             if (lineStart > 0 && (*srcH)[lineStart - 1] == '\r' && lineEnd == lineStart) {
                 isSingleReturn = false;
             }
-            if (isHR || isHeading || isBlockquote || isListItem) {
+            if (isHR || isHeading || isBlockquote || isListItem || isTaskItem) {
                 isSingleReturn = false;
             }
             if (isSingleReturn) {
@@ -678,6 +843,7 @@ void SyncHiddenToCanonical(void)
         prevBlockquoteDepth = blockquoteDepth;
         prevWasListItem = isListItem;
         prevWasHeading = isHeading;
+        prevWasTaskItem = isTaskItem;
 
         lineStart = lineEnd + 1;
     }
@@ -704,7 +870,7 @@ Handle EncodeSelectionAsMarkdown(short start, short end, TEHandle te)
     short li;
     short monacoFont;
     long i;
-    Boolean inBold = false, inItalic = false, inCode = false, inLink = false, isImageLink = false, inBoldItalic = false;
+    Boolean inBold = false, inItalic = false, inCode = false, inLink = false, isImageLink = false, inBoldItalic = false, inStrike = false, inHighlight = false;
     Str255 curLinkURL;
 
     srcH = (**te).hText;
@@ -722,7 +888,7 @@ Handle EncodeSelectionAsMarkdown(short start, short end, TEHandle te)
 
     i = start;
     while (i <= end) {
-        Boolean wantBold = false, wantItalic = false, wantCode = false, wantLink = false, wantBoldItalic = false;
+        Boolean wantBold = false, wantItalic = false, wantCode = false, wantLink = false, wantBoldItalic = false, wantStrike = false, wantHighlight = false;
         short linkID = 0;
 
         if (i < end) {
@@ -740,11 +906,16 @@ Handle EncodeSelectionAsMarkdown(short start, short end, TEHandle te)
             wantLink = (st.tsFace & underline) != 0;
             linkID = st.tsColor.red;
             isImageLink = (st.tsColor.green == 1);
+            wantHighlight = (st.tsFace & outline) != 0;
         } else {
             isImageLink = false;
         }
 
         if (inCode && !wantCode) { (*outH)[outLen++] = '`'; inCode = false; }
+        if (inHighlight && !wantHighlight) {
+            (*outH)[outLen++] = '='; (*outH)[outLen++] = '=';
+            inHighlight = false;
+        }
         if (inBoldItalic && !wantBoldItalic) { 
             (*outH)[outLen++] = '*'; (*outH)[outLen++] = '*'; (*outH)[outLen++] = '*'; 
             inBoldItalic = false; 
@@ -772,6 +943,10 @@ Handle EncodeSelectionAsMarkdown(short start, short end, TEHandle te)
                 BlockMove(gLinkURLs[linkID], curLinkURL, gLinkURLs[linkID][0] + 1);
             else
                 curLinkURL[0] = 0;
+        }
+        if (!inHighlight && wantHighlight) {
+            (*outH)[outLen++] = '='; (*outH)[outLen++] = '=';
+            inHighlight = true;
         }
         if (!inBoldItalic && wantBoldItalic) {
             (*outH)[outLen++] = '*'; (*outH)[outLen++] = '*'; (*outH)[outLen++] = '*';
@@ -1462,6 +1637,27 @@ void DetectInlineMarkdown(char justTyped)
         short scan = lineStart;
         while (scan < caret && ((*textH)[scan] == ' ' || (*textH)[scan] == '\t')) scan++;
         
+        if (caret - 1 == scan + 5 && ((*textH)[scan] == '-' || (*textH)[scan] == '+' || (*textH)[scan] == '*') && (*textH)[scan + 1] == ' ' &&
+            (*textH)[scan + 2] == '[' && ((*textH)[scan + 3] == ' ' || (*textH)[scan + 3] == 'x' || (*textH)[scan + 3] == 'X') && (*textH)[scan + 4] == ']' && (*textH)[scan + 5] == ' ') {
+            
+            Boolean isChecked = ((*textH)[scan + 3] == 'x' || (*textH)[scan + 3] == 'X');
+            HUnlock(textH);
+            
+            TESetSelect((short) scan, (short) caret, gHiddenTE);
+            TEDelete(gHiddenTE);
+            
+            char taskStr[5];
+            taskStr[0] = '[';
+            taskStr[1] = isChecked ? 'x' : ' ';
+            taskStr[2] = ']';
+            taskStr[3] = ' ';
+            taskStr[4] = 0;
+            
+            TESetSelect((short) scan, (short) scan, gHiddenTE);
+            TEInsert(taskStr, 4, gHiddenTE);
+            InvalidateHeightCache();
+            return;
+        }
         if (caret - 1 == scan + 1 && ((*textH)[scan] == '-' || (*textH)[scan] == '+' || (*textH)[scan] == '*')) {
             short spaceCount = scan - lineStart;
             short nestingLevel = spaceCount / 2;
@@ -1736,6 +1932,56 @@ void DetectInlineMarkdown(char justTyped)
                 }
             }
         }
+    } else if (justTyped == '~') {
+        if (caret >= 4 && (*textH)[caret - 2] == '~' && (*textH)[caret - 1] == '~') {
+            long p = caret - 4;
+            while (p >= lineStart) {
+                if ((*textH)[p] == '~' && (*textH)[p + 1] == '~' && p + 2 < caret - 2) {
+                    long innerStart = p + 2;
+                    long innerEnd = caret - 2;
+                    TextStyle ts;
+
+                    HUnlock(textH);
+                    TESetSelect((short) innerEnd, (short) caret, gHiddenTE);
+                    TEDelete(gHiddenTE);
+                    TESetSelect((short) p, (short) innerStart, gHiddenTE);
+                    TEDelete(gHiddenTE);
+
+                    ts.tsFace = condense;
+                    TESetSelect((short) p, (short) (innerEnd - 2), gHiddenTE);
+                    TESetStyle(doFace, &ts, true, gHiddenTE);
+                    SetTypingStyleNormal((short) (innerEnd - 2));
+                    InvalidateHeightCache();
+                    return;
+                }
+                p--;
+            }
+        }
+    } else if (justTyped == '=') {
+        if (caret >= 4 && (*textH)[caret - 2] == '=' && (*textH)[caret - 1] == '=') {
+            long p = caret - 4;
+            while (p >= lineStart) {
+                if ((*textH)[p] == '=' && (*textH)[p + 1] == '=' && p + 2 < caret - 2) {
+                    long innerStart = p + 2;
+                    long innerEnd = caret - 2;
+                    TextStyle ts;
+
+                    HUnlock(textH);
+                    TESetSelect((short) innerEnd, (short) caret, gHiddenTE);
+                    TEDelete(gHiddenTE);
+                    TESetSelect((short) p, (short) innerStart, gHiddenTE);
+                    TEDelete(gHiddenTE);
+
+                    ts.tsFace = outline;
+                    TESetSelect((short) p, (short) (innerEnd - 2), gHiddenTE);
+                    TESetStyle(doFace, &ts, true, gHiddenTE);
+                    SetTypingStyleNormal((short) (innerEnd - 2));
+                    InvalidateHeightCache();
+                    return;
+                }
+                p--;
+            }
+        }
     }
 
     HUnlock(textH);
@@ -1999,6 +2245,10 @@ void LoadTextWindow(long startOffset)
             
             TESetSelect((short)opStart, (short)opEnd, te);
             switch (ops[k].kind) {
+                case 'X':
+                    opStyle.tsFace = bold | italic;
+                    TESetStyle(doFace, &opStyle, false, te);
+                    break;
                 case 'B':
                     opStyle.tsFace = bold;
                     TESetStyle(doFace, &opStyle, false, te);
@@ -2037,6 +2287,13 @@ void LoadTextWindow(long startOffset)
                     opStyle.tsColor.green = 0;
                     opStyle.tsColor.blue  = 1 + ops[k].level;
                     TESetStyle(doFace + doColor, &opStyle, false, te);
+                    break;
+                case 'S':
+                    /* Strikethrough is parsed but rendered as normal characters */
+                    break;
+                case 'E':
+                    opStyle.tsFace = outline;
+                    TESetStyle(doFace, &opStyle, false, te);
                     break;
             }
         }
@@ -2140,6 +2397,7 @@ void SyncWindowToBacking(void)
                 Boolean isBold = (style.stFace & bold) != 0;
                 Boolean isItalic = (style.stFace & italic) != 0;
                 Boolean isUnderline = (style.stFace & underline) != 0;
+                Boolean isHighlight = (style.stFace & outline) != 0;
                 
                 short headerLevel = 0;
                 if (isBold && style.stSize > CurrentFontSize()) {
@@ -2200,24 +2458,45 @@ void SyncWindowToBacking(void)
                         gWriterOpCount++;
                     }
                 } else {
-                    if (isBold) {
+                    if (isBold && isItalic) {
                         if (gWriterOpCount < MAX_STYLE_OPS) {
                             ops[gWriterOpCount].start = globalStart;
                             ops[gWriterOpCount].end = globalEnd;
-                            ops[gWriterOpCount].kind = 'B';
+                            ops[gWriterOpCount].kind = 'X';
                             ops[gWriterOpCount].level = 0;
                             ops[gWriterOpCount].linkID = 0;
                             gWriterOpCount++;
                         }
-                    }
-                    if (isItalic) {
-                        if (gWriterOpCount < MAX_STYLE_OPS) {
-                            ops[gWriterOpCount].start = globalStart;
-                            ops[gWriterOpCount].end = globalEnd;
-                            ops[gWriterOpCount].kind = 'I';
-                            ops[gWriterOpCount].level = 0;
-                            ops[gWriterOpCount].linkID = 0;
-                            gWriterOpCount++;
+                    } else {
+                        if (isBold) {
+                            if (gWriterOpCount < MAX_STYLE_OPS) {
+                                ops[gWriterOpCount].start = globalStart;
+                                ops[gWriterOpCount].end = globalEnd;
+                                ops[gWriterOpCount].kind = 'B';
+                                ops[gWriterOpCount].level = 0;
+                                ops[gWriterOpCount].linkID = 0;
+                                gWriterOpCount++;
+                            }
+                        }
+                        if (isItalic) {
+                            if (gWriterOpCount < MAX_STYLE_OPS) {
+                                ops[gWriterOpCount].start = globalStart;
+                                ops[gWriterOpCount].end = globalEnd;
+                                ops[gWriterOpCount].kind = 'I';
+                                ops[gWriterOpCount].level = 0;
+                                ops[gWriterOpCount].linkID = 0;
+                                gWriterOpCount++;
+                            }
+                        }
+                        if (isHighlight) {
+                            if (gWriterOpCount < MAX_STYLE_OPS) {
+                                ops[gWriterOpCount].start = globalStart;
+                                ops[gWriterOpCount].end = globalEnd;
+                                ops[gWriterOpCount].kind = 'E';
+                                ops[gWriterOpCount].level = 0;
+                                ops[gWriterOpCount].linkID = 0;
+                                gWriterOpCount++;
+                            }
                         }
                     }
                     if (isCode) {

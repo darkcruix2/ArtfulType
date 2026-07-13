@@ -238,7 +238,7 @@ static void MakeMenu(void)
     DisableItem(gEditMenu, iRedo);
 
     styleMenu = NewMenu(mStyle, "\pStyle");
-    AppendMenu(styleMenu, "\pBold/B;Italic/I;Code/K;Strikethrough;(-;Heading 1/1;Heading 2/2;Heading 3/3;(-;Link/L;(-;None");
+    AppendMenu(styleMenu, "\pBold/B;Italic/I;Code/K;Strikethrough;Highlight/H;(-;Heading 1/1;Heading 2/2;Heading 3/3;(-;Link/L;(-;None");
     InsertMenu(styleMenu, 0);
 
     gViewMenu = NewMenu(mView, "\pView");
@@ -890,7 +890,8 @@ static void DoMenuCommand(long menuResult)
                 case iBold:   ToggleFace(bold); break;
                 case iItalic: ToggleFace(italic); break;
                 case iCode:   ToggleCode(); break;
-                case iStrike: break; /* no native strikethrough on classic Mac text styles */
+                case iStrike: break;
+                case iHighlight: ToggleFace(outline); break;
                 case iH1:     ToggleHeadingHidden(1); break;
                 case iH2:     ToggleHeadingHidden(2); break;
                 case iH3:     ToggleHeadingHidden(3); break;
@@ -903,6 +904,7 @@ static void DoMenuCommand(long menuResult)
                 case iItalic: WrapSelection("*", "*"); break;
                 case iCode:   WrapSelection("`", "`"); break;
                 case iStrike: WrapSelection("~~", "~~"); break;
+                case iHighlight: WrapSelection("==", "=="); break;
                 case iH1:     ApplyHeading(1); break;
                 case iH2:     ApplyHeading(2); break;
                 case iH3:     ApplyHeading(3); break;
@@ -1339,49 +1341,102 @@ static void EventLoop(void)
                                     if (scan < caret && ((unsigned char)(*hText)[scan] == 0xA5 || (*hText)[scan] == 'o' || (*hText)[scan] == '-') && 
                                         scan + 1 < caret && (*hText)[scan + 1] == ' ') {
                                         prefixLen = (scan + 2) - lineStart;
-                                        if (prefixLen > 63) prefixLen = 63;
-                                        BlockMove(*hText + lineStart, prefixBuf, prefixLen);
-                                    } else {
-                                        short i = scan;
-                                        while (i < caret && (*hText)[i] >= '0' && (*hText)[i] <= '9') i++;
-                                        if (i > scan && i < caret && (*hText)[i] == '.' && i + 1 < caret && (*hText)[i + 1] == ' ') {
-                                            prefixLen = (i + 2) - lineStart;
-                                            if (prefixLen > 63) prefixLen = 63;
-                                            BlockMove(*hText + lineStart, prefixBuf, prefixLen);
-                                        }
                                     }
                                 } else {
                                     if (scan < caret && (*hText)[scan] == '-' && 
                                         scan + 1 < caret && (*hText)[scan + 1] == ' ') {
                                         prefixLen = (scan + 2) - lineStart;
-                                        if (prefixLen > 63) prefixLen = 63;
-                                        BlockMove(*hText + lineStart, prefixBuf, prefixLen);
+                                    }
+                                }
+                                
+                                if (prefixLen == 0) {
+                                    short i = scan;
+                                    while (i < caret && (*hText)[i] >= '0' && (*hText)[i] <= '9') i++;
+                                    if (i > scan && i < caret && (*hText)[i] == '.' && i + 1 < caret && (*hText)[i + 1] == ' ') {
+                                        prefixLen = (i + 2) - lineStart;
+                                    }
+                                }
+                                
+                                if (prefixLen == 0) {
+                                    short i = scan;
+                                    while (i < caret && (*hText)[i] == '>') i++;
+                                    if (i > scan && i < caret && (*hText)[i] == ' ') {
+                                        prefixLen = (i + 1) - lineStart;
+                                    }
+                                }
+                                
+                                if (prefixLen == 0) {
+                                    if (gHideMarkdown) {
+                                        if (scan + 3 < caret && (*hText)[scan] == '[' && ((*hText)[scan + 1] == ' ' || (*hText)[scan + 1] == 'x' || (*hText)[scan + 1] == 'X') && (*hText)[scan + 2] == ']' && (*hText)[scan + 3] == ' ') {
+                                            prefixLen = (scan + 4) - lineStart;
+                                        }
                                     } else {
-                                        short i = scan;
-                                        while (i < caret && (*hText)[i] >= '0' && (*hText)[i] <= '9') i++;
-                                        if (i > scan && i < caret && (*hText)[i] == '.' && i + 1 < caret && (*hText)[i + 1] == ' ') {
-                                            prefixLen = (i + 2) - lineStart;
-                                            if (prefixLen > 63) prefixLen = 63;
-                                            BlockMove(*hText + lineStart, prefixBuf, prefixLen);
+                                        if (scan + 5 < caret && ((*hText)[scan] == '-' || (*hText)[scan] == '+' || (*hText)[scan] == '*') && (*hText)[scan + 1] == ' ' &&
+                                            (*hText)[scan + 2] == '[' && ((*hText)[scan + 3] == ' ' || (*hText)[scan + 3] == 'x' || (*hText)[scan + 3] == 'X') && (*hText)[scan + 4] == ']' && (*hText)[scan + 5] == ' ') {
+                                            prefixLen = (scan + 6) - lineStart;
                                         }
                                     }
+                                }
+                                
+                                if (prefixLen > 0) {
+                                    if (prefixLen > 63) prefixLen = 63;
+                                    BlockMove(*hText + lineStart, prefixBuf, prefixLen);
                                 }
                                 HUnlock(hText);
                                 
                                 if (prefixLen > 0) {
                                     if (lineEnd == lineStart + prefixLen) {
                                         short spaceCount = scan - lineStart;
-                                        if (spaceCount >= 2) {
+                                        Boolean isQuote = prefixBuf[spaceCount] == '>';
+                                        if (isQuote) {
+                                            short quoteCount = 0;
+                                            while (prefixBuf[spaceCount + quoteCount] == '>') quoteCount++;
+                                            
+                                            if (quoteCount > 1) {
+                                                char newBuf[64];
+                                                short newPrefixLen = prefixLen - 1;
+                                                BlockMove(prefixBuf, newBuf, spaceCount);
+                                                BlockMove(prefixBuf + spaceCount + 1, newBuf + spaceCount, prefixLen - spaceCount - 1);
+                                                
+                                                TESetSelect(lineStart, lineEnd, gActiveTE);
+                                                TEDelete(gActiveTE);
+                                                TESetSelect(lineStart, lineStart, gActiveTE);
+                                                TEInsert(newBuf, newPrefixLen, gActiveTE);
+                                                doInsertCR = false;
+                                                gDirty = true;
+                                            } else {
+                                                TESetSelect(lineStart, lineEnd, gActiveTE);
+                                                TEDelete(gActiveTE);
+                                                doInsertCR = false;
+                                                gDirty = true;
+                                            }
+                                        } else if (spaceCount >= 2) {
                                             char newBuf[64];
                                             short newPrefixLen = prefixLen - 2;
                                             BlockMove(prefixBuf + 2, newBuf, newPrefixLen);
                                             
+                                            Boolean isUnordered = false;
                                             if (gHideMarkdown) {
+                                                unsigned char bulletChar = prefixBuf[spaceCount];
+                                                if (bulletChar == 0xA5 || bulletChar == 'o' || bulletChar == '-') {
+                                                    isUnordered = true;
+                                                }
+                                            } else {
+                                                if (prefixBuf[spaceCount] == '-') {
+                                                    isUnordered = true;
+                                                }
+                                            }
+                                            
+                                            if (isUnordered) {
                                                 short newSpaceCount = spaceCount - 2;
                                                 short newNesting = newSpaceCount / 2;
                                                 char newBullet = '\245';
-                                                if (newNesting == 1) newBullet = 'o';
-                                                else if (newNesting >= 2) newBullet = '-';
+                                                if (gHideMarkdown) {
+                                                    if (newNesting == 1) newBullet = 'o';
+                                                    else if (newNesting >= 2) newBullet = '-';
+                                                } else {
+                                                    newBullet = '-';
+                                                }
                                                 newBuf[newSpaceCount] = newBullet;
                                             }
                                             
@@ -1441,7 +1496,18 @@ static void EventLoop(void)
                                 if (doInsertCR) {
                                     TEKey(key, gActiveTE);
                                     if (prefixLen > 0) {
-                                        TEInsert(prefixBuf, prefixLen, gActiveTE);
+                                        char nextPrefix[64];
+                                        BlockMove(prefixBuf, nextPrefix, prefixLen);
+                                        if (gHideMarkdown) {
+                                            if (prefixLen >= 4 && nextPrefix[prefixLen - 4] == '[' && nextPrefix[prefixLen - 2] == ']') {
+                                                nextPrefix[prefixLen - 3] = ' ';
+                                            }
+                                        } else {
+                                            if (prefixLen >= 6 && nextPrefix[prefixLen - 4] == '[' && nextPrefix[prefixLen - 2] == ']') {
+                                                nextPrefix[prefixLen - 3] = ' ';
+                                            }
+                                        }
+                                        TEInsert(nextPrefix, prefixLen, gActiveTE);
                                     }
                                 }
                             } else if (key == 0x09) {
@@ -1461,16 +1527,38 @@ static void EventLoop(void)
                                     if (scan < caret && ((unsigned char)(*hText)[scan] == 0xA5 || (*hText)[scan] == 'o' || (*hText)[scan] == '-') && 
                                         scan + 1 < caret && (*hText)[scan + 1] == ' ') {
                                         prefixLen = (scan + 2) - lineStart;
-                                        if (prefixLen > 63) prefixLen = 63;
-                                        BlockMove(*hText + lineStart, prefixBuf, prefixLen);
                                     }
                                 } else {
                                     if (scan < caret && (*hText)[scan] == '-' && 
                                         scan + 1 < caret && (*hText)[scan + 1] == ' ') {
                                         prefixLen = (scan + 2) - lineStart;
-                                        if (prefixLen > 63) prefixLen = 63;
-                                        BlockMove(*hText + lineStart, prefixBuf, prefixLen);
                                     }
+                                }
+                                
+                                if (prefixLen == 0) {
+                                    short i = scan;
+                                    while (i < caret && (*hText)[i] >= '0' && (*hText)[i] <= '9') i++;
+                                    if (i > scan && i < caret && (*hText)[i] == '.' && i + 1 < caret && (*hText)[i + 1] == ' ') {
+                                        prefixLen = (i + 2) - lineStart;
+                                    }
+                                }
+                                
+                                if (prefixLen == 0) {
+                                    if (gHideMarkdown) {
+                                        if (scan + 3 < caret && (*hText)[scan] == '[' && ((*hText)[scan + 1] == ' ' || (*hText)[scan + 1] == 'x' || (*hText)[scan + 1] == 'X') && (*hText)[scan + 2] == ']' && (*hText)[scan + 3] == ' ') {
+                                            prefixLen = (scan + 4) - lineStart;
+                                        }
+                                    } else {
+                                        if (scan + 5 < caret && ((*hText)[scan] == '-' || (*hText)[scan] == '+' || (*hText)[scan] == '*') && (*hText)[scan + 1] == ' ' &&
+                                            (*hText)[scan + 2] == '[' && ((*hText)[scan + 3] == ' ' || (*hText)[scan + 3] == 'x' || (*hText)[scan + 3] == 'X') && (*hText)[scan + 4] == ']' && (*hText)[scan + 5] == ' ') {
+                                            prefixLen = (scan + 6) - lineStart;
+                                        }
+                                    }
+                                }
+                                
+                                if (prefixLen > 0) {
+                                    if (prefixLen > 63) prefixLen = 63;
+                                    BlockMove(*hText + lineStart, prefixBuf, prefixLen);
                                 }
                                 HUnlock(hText);
                                 
@@ -1480,12 +1568,28 @@ static void EventLoop(void)
                                     newBuf[0] = ' '; newBuf[1] = ' ';
                                     BlockMove(prefixBuf, newBuf + 2, prefixLen);
                                     
+                                    Boolean isUnordered = false;
                                     if (gHideMarkdown) {
+                                        unsigned char bulletChar = prefixBuf[bulletOffset];
+                                        if (bulletChar == 0xA5 || bulletChar == 'o' || bulletChar == '-') {
+                                            isUnordered = true;
+                                        }
+                                    } else {
+                                        if (prefixBuf[bulletOffset] == '-') {
+                                            isUnordered = true;
+                                        }
+                                    }
+                                    
+                                    if (isUnordered) {
                                         short newSpaceCount = bulletOffset + 2;
                                         short newNesting = newSpaceCount / 2;
                                         char newBullet = '\245';
-                                        if (newNesting == 1) newBullet = 'o';
-                                        else if (newNesting >= 2) newBullet = '-';
+                                        if (gHideMarkdown) {
+                                            if (newNesting == 1) newBullet = 'o';
+                                            else if (newNesting >= 2) newBullet = '-';
+                                        } else {
+                                            newBullet = '-';
+                                        }
                                         newBuf[2 + bulletOffset] = newBullet;
                                     }
                                     
