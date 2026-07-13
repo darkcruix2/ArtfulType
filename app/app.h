@@ -26,6 +26,27 @@
 #define FONT_SIZE 12
 #define SCROLLBAR_WIDTH 16
 
+// Memory pool for handle allocations to reduce overhead
+#define MEMORY_POOL_SIZE 10
+extern Handle gMemoryPool[MEMORY_POOL_SIZE];
+extern short gMemoryPoolCount;
+
+// Simple memory pool macros
+#define PoolNewHandle(size) \
+    (gMemoryPoolCount > 0 ? \
+     (HLock(gMemoryPool[--gMemoryPoolCount]), gMemoryPool[gMemoryPoolCount]) : \
+     NewHandle(size))
+
+#define PoolDisposeHandle(h) \
+    do { \
+        if (h && gMemoryPoolCount < MEMORY_POOL_SIZE) { \
+            HUnlock(h); \
+            gMemoryPool[gMemoryPoolCount++] = h; \
+        } else { \
+            DisposeHandle(h); \
+        } \
+    } while(0)
+
 #define mFile    128
 #define iNew     1
 #define iOpen    2

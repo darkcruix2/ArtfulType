@@ -15,6 +15,9 @@ static short CurrentScrollOffset(WEHandle te)
 
 static void SyncScrollbarToOffset(void)
 {
+    static long lastTotal = -1;
+    static short lastVal = -1;
+    
     long total = TotalLength();
     if (total == 0) {
         SetControlValue(gScrollBar, 0);
@@ -27,8 +30,13 @@ static void SyncScrollbarToOffset(void)
     // Convert currentOffset to a 0-32767 range
     short val = (short) (((double)currentOffset * 32767.0) / (double)total);
 
-    if (val != GetControlValue(gScrollBar))
-        SetControlValue(gScrollBar, val);
+    // Only update if value actually changed to avoid unnecessary updates
+    if (val != lastVal || total != lastTotal) {
+        if (val != GetControlValue(gScrollBar))
+            SetControlValue(gScrollBar, val);
+        lastVal = val;
+        lastTotal = total;
+    }
 }
 
 void InvalidateHeightCache(void)
@@ -38,22 +46,36 @@ void InvalidateHeightCache(void)
 
 void UpdateScrollbarRange(void)
 {
+    static long lastTotal = -1;
+    static short lastMaxVal = -1;
+    
     long total = TotalLength();
     short maxVal = (total > 0) ? 32767 : 0;
 
-    if (maxVal != GetControlMaximum(gScrollBar))
-        SetControlMaximum(gScrollBar, maxVal);
-
-    if (!gScrollBarVisible) {
-        ShowControl(gScrollBar);
-        gScrollBarVisible = true;
+    // Only update if value actually changed to avoid unnecessary updates
+    if (maxVal != lastMaxVal) {
+        if (maxVal != GetControlMaximum(gScrollBar))
+            SetControlMaximum(gScrollBar, maxVal);
+        lastMaxVal = maxVal;
+        
+        if (!gScrollBarVisible) {
+            ShowControl(gScrollBar);
+            gScrollBarVisible = true;
+        }
     }
 }
 
 void AdjustScrollbar(void)
 {
+    static Boolean lastUpdate = false;
+    
+    // Only update scrollbar range if needed
     UpdateScrollbarRange();
-    SyncScrollbarToOffset();
+    
+    // Only sync offset if it's not already being driven by the scrollbar
+    if (!gScrollbarDriven) {
+        SyncScrollbarToOffset();
+    }
 }
 
 static short LineContaining(WEHandle te, long pos)

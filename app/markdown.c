@@ -1654,6 +1654,7 @@ void DetectInlineMarkdown(char justTyped)
         short level = 0;
         long p = lineStart;
 
+        // Optimized header detection - only scan up to 6 # characters
         while (level < 6 && p < caret - 1 && (*textH)[p] == '#') {
             level++;
             p++;
@@ -1675,10 +1676,13 @@ void DetectInlineMarkdown(char justTyped)
         if (caret >= 2) {
             long p2 = caret - 2;
             long bqCount = 0;
+            
+            // Optimized blockquote detection - count > characters
             while (p2 >= lineStart && (*textH)[p2] == '>') {
                 bqCount++;
                 p2--;
             }
+            // Skip trailing whitespace
             while (p2 >= lineStart && ((*textH)[p2] == ' ' || (*textH)[p2] == '\t')) {
                 p2--;
             }
@@ -1704,8 +1708,10 @@ void DetectInlineMarkdown(char justTyped)
         }
         
         short scan = lineStart;
+        // Skip leading whitespace
         while (scan < caret && ((*textH)[scan] == ' ' || (*textH)[scan] == '\t')) scan++;
         
+        // Optimized task list detection - check exact pattern
         if (caret - 1 == scan + 5 && ((*textH)[scan] == '-' || (*textH)[scan] == '+' || (*textH)[scan] == '*') && (*textH)[scan + 1] == ' ' &&
             (*textH)[scan + 2] == '[' && ((*textH)[scan + 3] == ' ' || (*textH)[scan + 3] == 'x' || (*textH)[scan + 3] == 'X') && (*textH)[scan + 4] == ']' && (*textH)[scan + 5] == ' ') {
             

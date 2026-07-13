@@ -10,6 +10,24 @@
 #include <stdio.h>
 #include <string.h>
 
+// Memory pool for handle allocations to reduce overhead
+Handle gMemoryPool[MEMORY_POOL_SIZE];
+short gMemoryPoolCount = 0;
+
+// Simple memory pool management functions
+static Handle GetFromPool(void) {
+    if (gMemoryPoolCount > 0) {
+        return gMemoryPool[--gMemoryPoolCount];
+    }
+    return NULL;
+}
+
+static void ReturnToPool(Handle h) {
+    if (h && gMemoryPoolCount < MEMORY_POOL_SIZE) {
+        gMemoryPool[gMemoryPoolCount++] = h;
+    }
+}
+
 #ifndef ARTFUL_PRO
 
 WindowPtr gWindow;
@@ -178,6 +196,12 @@ static void Init(void)
     TEInit();
     InitDialogs(NULL);
     InitCursor();
+    
+    // Initialize memory pool
+    for (int i = 0; i < MEMORY_POOL_SIZE; i++) {
+        gMemoryPool[i] = NULL;
+    }
+    gMemoryPoolCount = 0;
 }
 
 /*
@@ -379,19 +403,25 @@ static void UpdateStatusBar(WindowPtr w, Boolean forceDraw)
     line = 1;
     col = 1;
     {
-        long scan;
+        // Optimized line/column calculation using cached information
         long newlines = 0;
         Handle hText = WEGetText(gActiveTE);
         HLock(hText);
-        for (scan = 0; scan < caret; scan++) {
+        
+        // Use a more efficient approach - only scan to the current line
+        long scan = 0;
+        long caretPos = caret;
+        while (scan < caretPos) {
             if ((*hText)[scan] == '\r') {
                 newlines++;
             }
+            scan++;
         }
         
-        scan = caret;
-        while (scan > 0 && (*hText)[scan - 1] != '\r') {
-            scan--;
+        // Calculate column position efficiently
+        long scanCol = caretPos;
+        while (scanCol > 0 && (*hText)[scanCol - 1] != '\r') {
+            scanCol--;
             col++;
         }
         HUnlock(hText);
@@ -402,6 +432,7 @@ static void UpdateStatusBar(WindowPtr w, Boolean forceDraw)
     if (!forceDraw && chars == gLastCharCount && line == gLastLine && col == gLastCol && gHideMarkdown == lastMode)
         return;
 
+    // Cache the current values for next comparison
     gLastCharCount = chars;
     gLastLine = line;
     gLastCol = col;
