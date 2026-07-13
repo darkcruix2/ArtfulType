@@ -6,6 +6,7 @@
 #include <Fonts.h>
 #include <Menus.h>
 #include <TextEdit.h>
+#include "WASTE.h"
 #include <Dialogs.h>
 #include <Events.h>
 #include <OSUtils.h>
@@ -171,9 +172,9 @@ extern long gWindowStartLine;
 
 typedef struct DocumentRecord {
     WindowPtr window;
-    TEHandle te;
-    TEHandle hiddenTE;
-    TEHandle activeTE;
+    WEHandle te;
+    WEHandle hiddenTE;
+    WEHandle activeTE;
     ControlHandle scrollBar;
     ControlHandle jumpToTopBtn;
     ControlHandle jumpToEndBtn;
@@ -268,8 +269,8 @@ void SetActiveDocument(DocumentRecord *doc);
 
 /* Global state -- actual storage lives in main.c */
 extern WindowPtr gWindow;
-extern TEHandle gTE;
-extern TEHandle gHiddenTE;
+extern WEHandle gTE;
+extern WEHandle gHiddenTE;
 extern Handle gMarkdownText;
 extern long gMarkdownLen;
 extern Handle gWriterText;
@@ -291,7 +292,7 @@ extern long gLastCharCount;
 extern short gLastLine;
 extern short gLastCol;
 extern Boolean gShowStatusBar;
-extern TEHandle gActiveTE;
+extern WEHandle gActiveTE;
 extern ControlHandle gScrollBar;
 extern Boolean gScrollBarVisible;
 extern Boolean gHaveFile;
@@ -337,26 +338,26 @@ void HandleJumpToEnd(void);
 
 
 
+void SuppressDrawing(WEHandle te, Rect *saved);
+void RestoreDrawing(WEHandle te, Rect *saved);
 long TotalLength(void);
-
 short CurrentFontSize(void);
 void DoScrollClick(Point pt);
 void InvalidateHeightCache(void);
 
 /* markdown.c */
 void ClearStyles(void);
-void SuppressDrawing(TEHandle te, Rect *saved);
-void RestoreDrawing(TEHandle te, Rect *saved);
 void BuildHiddenView(void);
 void SyncHiddenToCanonical(void);
-Handle EncodeSelectionAsMarkdown(short start, short end, TEHandle te);
-void InsertMarkdownAsStyled(Handle srcH, long srcLen, TEHandle te);
+Handle EncodeSelectionAsMarkdown(long start, long end, WEHandle te);
+void InsertMarkdownAsStyled(Handle srcH, long srcLen, WEHandle te);
 void WrapSelection(char *prefix, char *suffix);
 void ApplyHeading(short level);
 void DoLink(void);
 void ToggleFace(Style face);
 void DoLinkHidden(void);
 void ToggleCode(void);
+void ToggleStrike(void);
 void ToggleHeadingHidden(short level);
 void DetectInlineMarkdown(char justTyped);
 void ClearSelectionStyleHidden(void);

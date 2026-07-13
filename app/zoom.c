@@ -54,27 +54,28 @@ static void SaveZoomPref(void)
     never re-parses markdown and can't clobber unsynced edits in
     whichever buffer isn't currently canonical.
 */
-static void RescaleStyles(TEHandle te, short oldBase, short newBase)
+static void RescaleStyles(WEHandle te, short oldBase, short newBase)
 {
-    long len = (**te).teLength;
+    long len = WEGetTextLength(te);
     long i = 0;
-    short savedStart = (**te).selStart;
-    short savedEnd = (**te).selEnd;
+    long selStart, selEnd;
+    WEGetSelection(&selStart, &selEnd, te);
+    long savedStart = selStart;
+    long savedEnd = selEnd;
 
     while (i < len) {
-        TextStyle st;
-        short lh, fa;
+        WETextStyle st;
         long runStart = i;
         short oldSize;
         short newSize;
 
-        TEGetStyle((short) i, &st, &lh, &fa, te);
+        WEGetStyle(i, &st, te);
         oldSize = st.tsSize;
 
         while (i < len) {
-            TextStyle st2;
+            WETextStyle st2;
 
-            TEGetStyle((short) i, &st2, &lh, &fa, te);
+            WEGetStyle(i, &st2, te);
             if (st2.tsSize != oldSize)
                 break;
             i++;
@@ -87,15 +88,14 @@ static void RescaleStyles(TEHandle te, short oldBase, short newBase)
         else newSize = oldSize + (newBase - oldBase);
 
         if (newSize != oldSize) {
-            TextStyle ts;
-
+            WETextStyle ts;
             ts.tsSize = newSize;
-            TESetSelect((short) runStart, (short) i, te);
-            TESetStyle(doSize, &ts, true, te);
+            WESetSelect(runStart, i, te);
+            WESetStyle(weDoSize, &ts, te);
         }
     }
 
-    TESetSelect(savedStart, savedEnd, te);
+    WESetSelect(savedStart, savedEnd, te);
 }
 
 static void ApplyZoomIndex(short newIndex)

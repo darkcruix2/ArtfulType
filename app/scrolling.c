@@ -5,9 +5,12 @@ long TotalLength(void) {
     return gMarkdownLen;
 }
 
-static short CurrentScrollOffset(TEHandle te)
+static short CurrentScrollOffset(WEHandle te)
 {
-    return (**te).viewRect.top - (**te).destRect.top;
+    LongRect viewRect, destRect;
+    WEGetViewRect(&viewRect, te);
+    WEGetDestRect(&destRect, te);
+    return (short)(viewRect.top - destRect.top);
 }
 
 static void SyncScrollbarToOffset(void)
@@ -18,13 +21,12 @@ static void SyncScrollbarToOffset(void)
         return;
     }
     
-    // We are at gWindowStart in the document, plus the local TEScroll offset.
+    // We are at gWindowStart in the document, plus the local scroll offset.
     long currentOffset = gWindowStart;
     
     // Convert currentOffset to a 0-32767 range
     short val = (short) (((double)currentOffset * 32767.0) / (double)total);
 
-    
     if (val != GetControlValue(gScrollBar))
         SetControlValue(gScrollBar, val);
 }
@@ -54,20 +56,9 @@ void AdjustScrollbar(void)
     SyncScrollbarToOffset();
 }
 
-static short LineContaining(TEHandle te, short pos)
+static short LineContaining(WEHandle te, long pos)
 {
-    short low = 0;
-    short high = (**te).nLines - 1;
-
-    while (low < high) {
-        short mid = low + (high - low + 1) / 2;
-
-        if ((**te).lineStarts[mid] <= pos)
-            low = mid;
-        else
-            high = mid - 1;
-    }
-    return low;
+    return (short) WEOffsetToLine(pos, te);
 }
 
 void ScrollCaretIntoView(Boolean movingBackward)
@@ -76,70 +67,70 @@ void ScrollCaretIntoView(Boolean movingBackward)
     long heightToLine, heightToLineNext;
     short lineTop, lineBottom;
     short viewTop, viewBottom;
+    long selStart, selEnd;
 
     if (!gActiveTE) return;
 
-    caretLine = LineContaining(gActiveTE, (**gActiveTE).selEnd);
+    WEGetSelection(&selStart, &selEnd, gActiveTE);
+    caretLine = LineContaining(gActiveTE, selEnd);
 
-    heightToLine     = TEGetHeight(caretLine,     0, gActiveTE);
-    heightToLineNext = TEGetHeight(caretLine + 1, 0, gActiveTE);
+    heightToLine     = WEGetHeight(0, caretLine, gActiveTE);
+    heightToLineNext = WEGetHeight(0, caretLine + 1, gActiveTE);
     
-    lineTop    = (**gActiveTE).destRect.top + (short)heightToLine;
-    lineBottom = (**gActiveTE).destRect.top + (short)heightToLineNext;
+    LongRect viewRect, destRect;
+    WEGetViewRect(&viewRect, gActiveTE);
+    WEGetDestRect(&destRect, gActiveTE);
 
-    viewTop    = (**gActiveTE).viewRect.top;
-    viewBottom = (**gActiveTE).viewRect.bottom;
+    lineTop    = destRect.top + (short)heightToLine;
+    lineBottom = destRect.top + (short)heightToLineNext;
 
-    /* --- Step 1: use TEScroll to bring the caret into the visible rectangle --- */
+    viewTop    = viewRect.top;
+    viewBottom = viewRect.bottom;
+
+    /* --- Step 1: use WEPinScroll to bring the caret into the visible rectangle --- */
     if (lineBottom > viewBottom) {
         short halfScreen = (viewBottom - viewTop) / 2;
-        TEScroll(0, viewBottom - lineBottom - halfScreen, gActiveTE);
+        WEPinScroll(0, viewBottom - lineBottom - halfScreen, gActiveTE);
     } else if (lineTop < viewTop) {
-        TEScroll(0, viewTop - lineTop, gActiveTE);
+        WEPinScroll(0, viewTop - lineTop, gActiveTE);
     }
 
-    /* --- Step 2: window shift (only when caret is still off-screen) ---
-       Re-read lineTop *after* TEScroll -- destRect.top may have changed.
-       The backward shift must NOT fire just because selEnd < 200; that
-       caused a cascade snap-back every time an arrow key was pressed after
-       a scrollbar jump.  We only shift if the caret is actually above the
-       view even after TEScroll (i.e. we have scrolled within the window
-       so far that the beginning of the TE is above the visible area, which
-       means we need to load the *previous* backing-store chunk). */
+    /* --- Step 2: window shift (only when caret is still off-screen) --- */
     if (!gScrollbarDriven) {
-        /* re-compute lineTop after the possible TEScroll above */
-        lineTop = (**gActiveTE).destRect.top + (short)TEGetHeight(caretLine, 0, gActiveTE);
+        /* re-compute lineTop after the possible WEPinScroll above */
+        LongRect destRect2;
+        WEGetDestRect(&destRect2, gActiveTE);
+        lineTop = destRect2.top + (short)WEGetHeight(0, caretLine, gActiveTE);
 
-        if ((**gActiveTE).selEnd > WINDOW_SIZE - 200 && gWindowEnd < TotalLength()) {
-            /* Caret is near the end of the loaded window.
-               Save the global caret position, load the next chunk starting just
-               before the caret so it stays visible near the top of the new window. */
-            long globalCaretPos = gWindowStart + (long)(**gActiveTE).selEnd;
+        if (selEnd > WINDOW_SIZE - 200 && gWindowEnd < TotalLength()) {
+            /* Caret is near the end of the loaded window. */
+            long globalCaretPos = gWindowStart + selEnd;
             long newStart = globalCaretPos - WINDOW_SIZE / 8;
             if (newStart < 0) newStart = 0;
             SyncWindowToBacking();
             LoadTextWindow(newStart);
             /* Reposition caret to the same global document position */
             {
-                short localCaret = (short)(globalCaretPos - gWindowStart);
+                long localCaret = globalCaretPos - gWindowStart;
+                long len = WEGetTextLength(gActiveTE);
                 if (localCaret < 0) localCaret = 0;
-                if (localCaret > (**gActiveTE).teLength) localCaret = (**gActiveTE).teLength;
-                TESetSelect(localCaret, localCaret, gActiveTE);
+                if (localCaret > len) localCaret = len;
+                WESetSelect(localCaret, localCaret, gActiveTE);
             }
-        } else if (movingBackward && (**gActiveTE).selEnd < 200 && gWindowStart > 0) {
-            /* Caret is near the top of the loaded window and user is navigating backward:
-               load the previous chunk so it becomes visible. */
-            long globalCaretPos = gWindowStart + (long)(**gActiveTE).selEnd;
+        } else if (movingBackward && selEnd < 200 && gWindowStart > 0) {
+            /* Caret is near the top of the loaded window and user is navigating backward: */
+            long globalCaretPos = gWindowStart + selEnd;
             long newStart = globalCaretPos - (3 * WINDOW_SIZE / 4);
             if (newStart < 0) newStart = 0;
             SyncWindowToBacking();
             LoadTextWindow(newStart);
             /* Reposition caret to the same global document position */
             {
-                short localCaret = (short)(globalCaretPos - gWindowStart);
+                long localCaret = globalCaretPos - gWindowStart;
+                long len = WEGetTextLength(gActiveTE);
                 if (localCaret < 0) localCaret = 0;
-                if (localCaret > (**gActiveTE).teLength) localCaret = (**gActiveTE).teLength;
-                TESetSelect(localCaret, localCaret, gActiveTE);
+                if (localCaret > len) localCaret = len;
+                WESetSelect(localCaret, localCaret, gActiveTE);
             }
         }
     }
@@ -156,9 +147,7 @@ static pascal void ScrollAction(ControlHandle control, short part)
 
     if (part == 0 || total <= 0) return;
 
-    /* Scale delta dynamically so that:
-       - line scroll (Up/Down Arrow on scrollbar) scrolls by ~80 characters (1 line)
-       - page scroll (Page Up/Down on scrollbar track) scrolls by ~1600 characters (~20 lines) */
+    /* Scale delta dynamically */
     long lineDelta = (long) ((80.0 * 32767.0) / (double)total);
     if (lineDelta < 1) lineDelta = 1;
     long pageDelta = (long) ((1600.0 * 32767.0) / (double)total);
@@ -183,12 +172,7 @@ static pascal void ScrollAction(ControlHandle control, short part)
     gScrollbarDriven = true;
     SyncWindowToBacking();
     LoadTextWindow(newOffset);
-    /* NOTE: gScrollbarDriven stays true until the next key event clears it.
-       This prevents ScrollCaretIntoView (called from key events) from
-       mistaking the freshly-loaded caret at pos 0 as a request to shift
-       the window backward, which would cascade all the way to line 1. */
 }
-
 
 void DoScrollClick(Point pt)
 {
@@ -210,7 +194,6 @@ void DoScrollClick(Point pt)
         gScrollbarDriven = true;
         SyncWindowToBacking();
         LoadTextWindow(newOffset);
-        /* gScrollbarDriven stays true until next key event clears it */
     } else {
         TrackControl(gScrollBar, pt, NewControlActionUPP(ScrollAction));
     }
@@ -220,7 +203,7 @@ void HandleJumpToTop(void)
 {
     SyncWindowToBacking();
     LoadTextWindow(0);
-    TESetSelect(0, 0, gActiveTE);
+    WESetSelect(0, 0, gActiveTE);
     ScrollCaretIntoView(true);
     UpdateScrollbarRange();
 }
@@ -235,13 +218,10 @@ void HandleJumpToEnd(void)
     LoadTextWindow(newStart);
     
     {
-        short len = (**gActiveTE).teLength;
-        TESetSelect(len, len, gActiveTE);
+        long len = WEGetTextLength(gActiveTE);
+        WESetSelect(len, len, gActiveTE);
     }
     
     ScrollCaretIntoView(false);
     UpdateScrollbarRange();
 }
-
-
-

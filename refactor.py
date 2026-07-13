@@ -278,11 +278,11 @@ void LoadTextWindow(long startOffset)
     gWindowStart = startOffset;
     gWindowEnd = startOffset + copyLen;
     
-    TESetSelect(0, 32767, te);
-    TEDelete(te);
+    WESetSelect(0, 32767, te);
+    WEDelete(te);
     
     HLock(srcH);
-    TEInsert(*srcH + startOffset, copyLen, te);
+    WEInsert(*srcH + startOffset, copyLen, NULL, te);
     HUnlock(srcH);
     
     if (gHideMarkdown && gWriterOpsH != NULL) {
@@ -302,49 +302,49 @@ void LoadTextWindow(long startOffset)
             if (opStart < 0) opStart = 0;
             if (opEnd > copyLen) opEnd = copyLen;
             
-            TextStyle opStyle;
-            TESetSelect((short)opStart, (short)opEnd, te);
+            WETextStyle opStyle;
+            WESetSelect((short)opStart, (short)opEnd, te);
             switch (ops[k].kind) {
                 case 'B':
                     opStyle.tsFace = bold;
-                    TESetStyle(doFace, &opStyle, false, te);
+                    WESetStyle(weDoFace, &opStyle, te);
                     break;
                 case 'I':
                     opStyle.tsFace = italic;
-                    TESetStyle(doFace, &opStyle, false, te);
+                    WESetStyle(weDoFace, &opStyle, te);
                     break;
                 case 'C':
                     GetFNum("\pMonaco", &opStyle.tsFont);
-                    TESetStyle(doFont, &opStyle, false, te);
+                    WESetStyle(weDoFont, &opStyle, te);
                     break;
                 case 'L':
                     opStyle.tsFace = underline;
                     opStyle.tsColor.red = ops[k].linkID;
                     opStyle.tsColor.green = 0;
                     opStyle.tsColor.blue = 0;
-                    TESetStyle(doFace + doColor, &opStyle, false, te);
+                    WESetStyle(weDoFace + weDoColor, &opStyle, te);
                     break;
                 case 'H':
                     opStyle.tsFace = bold;
                     opStyle.tsSize = CurrentFontSize() + (4 - ops[k].level) * 4;
-                    TESetStyle(doFace + doSize, &opStyle, false, te);
+                    WESetStyle(weDoFace + weDoSize, &opStyle, te);
                     break;
                 case 'R':
                     opStyle.tsFace = bold;
                     opStyle.tsColor.blue = 1; 
-                    TESetStyle(doFace + doColor, &opStyle, false, te);
+                    WESetStyle(weDoFace + weDoColor, &opStyle, te);
                     break;
             }
         }
         HUnlock(gWriterOpsH);
-        TESetSelect(0, 0, te);
-        TECalText(te);
+        WESetSelect(0, 0, te);
+        WECalText(te);
     }
 }
 
 void SyncWindowToBacking(void)
 {
-    long newLen = (**gActiveTE).teLength;
+    long newLen = WEGetTextLength(gActiveTE);
     long oldLen = gWindowEnd - gWindowStart;
     long diff = newLen - oldLen;
     Handle targetH;
@@ -387,7 +387,7 @@ void SyncWindowToBacking(void)
     }
     
     HLock(targetH);
-    BlockMove(*(**gActiveTE).hText, *targetH + gWindowStart, newLen);
+    BlockMove(*(WEGetText(gActiveTE)), *targetH + gWindowStart, newLen);
     HUnlock(targetH);
     
     gWindowEnd += diff;

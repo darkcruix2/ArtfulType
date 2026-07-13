@@ -15,7 +15,7 @@ void SetViewMode(Boolean hideMarkdown)
 
     ClearUndoRedoStacks();
     UpdateEditMenuState();
-    TEDeactivate(gActiveTE);
+    WEDeactivate(gActiveTE);
 
     if (hideMarkdown) {
         /* Sync Markdown changes before switching */
@@ -34,7 +34,7 @@ void SetViewMode(Boolean hideMarkdown)
         LoadTextWindow(gWindowStart);
     }
 
-    TEActivate(gActiveTE);
+    WEActivate(gActiveTE);
     CheckItem(gViewMenu, iMarkdownView, !hideMarkdown);
     CheckItem(gViewMenu, iWriterView, hideMarkdown);
     UpdateMenuBarLook();
@@ -47,7 +47,7 @@ static void WriteFile(StringPtr name, short vRefNum)
 {
     short refNum;
     LONGINT count;
-    Handle textH = (**gTE).hText;
+    Handle textH = WEGetText(gTE);
     OSErr err;
 
     Create(name, vRefNum, 'ArtT', 'TEXT');
@@ -64,8 +64,8 @@ static void WriteFile(StringPtr name, short vRefNum)
         count = gMarkdownLen;
         textH = gMarkdownText;
     } else {
-        count = (**gTE).teLength;
-        textH = (**gTE).hText;
+        count = WEGetTextLength(gTE);
+        textH = WEGetText(gTE);
     }
 
     HLock(textH);
@@ -179,7 +179,7 @@ void DoStartupOpen(void)
 #ifdef ARTFUL_PRO
     for (short i = 1; i <= count; i++) {
         GetAppFiles(i, &theFile);
-        if (i > 1 || gHaveFile || gDirty || (**gTE).teLength > 0) {
+        if (i > 1 || gHaveFile || gDirty || WEGetTextLength(gTE) > 0) {
             MakeWindow();
         }
         if (gActiveDoc) {
@@ -292,7 +292,7 @@ Boolean DoOpenFile(void)
         return false;
 
 #ifdef ARTFUL_PRO
-    if (gHaveFile || gDirty || (**gTE).teLength > 0) {
+    if (gHaveFile || gDirty || WEGetTextLength(gTE) > 0) {
         MakeWindow();
         if (!gActiveDoc) return false;
     }
@@ -313,8 +313,8 @@ void DoNewFile(void)
 #endif
 
     SetPort(gWindow);
-    TESetSelect(0, 32767, gTE);
-    TEDelete(gTE);
+    WESetSelect(0, WEGetTextLength(gTE), gTE);
+    WEDelete(gTE);
     gHaveFile = false;
     gDirty = false;
     ClearUndoRedoStacks();

@@ -17,7 +17,7 @@
 #include "splash_image.h"
 
 /* Bump this on every release. */
-static const unsigned char kVersionString[] = "\pv0.15";
+static const unsigned char kVersionString[] = "\pv0.21";
 static const unsigned char kGitHubURL[] = "\pgithub.com/ActionRetro";
 
 static pascal void DrawSplashTitle(DialogPtr dlg, short itemNo)

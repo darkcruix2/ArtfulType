@@ -13,8 +13,8 @@
 #ifndef ARTFUL_PRO
 
 WindowPtr gWindow;
-TEHandle gTE = NULL;
-TEHandle gHiddenTE = NULL;
+WEHandle gTE = NULL;
+WEHandle gHiddenTE = NULL;
 Handle gMarkdownText = NULL;
 long gMarkdownLen = 0;
 Handle gWriterText = NULL;
@@ -29,7 +29,7 @@ long gLastCharCount = -1;
 short gLastLine = -1;
 short gLastCol = -1;
 Boolean gShowStatusBar = true;
-TEHandle gActiveTE;
+WEHandle gActiveTE;
 ControlHandle gScrollBar;
 ControlHandle gJumpToTopBtn = NULL;
 ControlHandle gJumpToEndBtn = NULL;
@@ -104,8 +104,8 @@ void DisposeDocument(DocumentRecord *doc)
         if (doc->writerText) DisposeHandle(doc->writerText);
         if (doc->writerOpsH) DisposeHandle(doc->writerOpsH);
         if (doc->lineOffsetsH) DisposeHandle(doc->lineOffsetsH);
-        if (doc->te) TEDispose(doc->te);
-        if (doc->hiddenTE) TEDispose(doc->hiddenTE);
+        if (doc->te) WEDispose(doc->te);
+        if (doc->hiddenTE) WEDispose(doc->hiddenTE);
         DisposePtr((Ptr)doc);
     }
 }
@@ -282,14 +282,14 @@ void MakeWindow(void)
     cascadeOffset += 20;
     if (cascadeOffset > 100) cascadeOffset = 0;
     
-    gWindow = NewWindow(NULL, &bounds, "\pUntitled", true, documentProc,
-                         (WindowPtr) -1L, true, (long)doc);
+    gWindow = NewCWindow(NULL, &bounds, "\pUntitled", true, documentProc,
+                          (WindowPtr) -1L, true, (long)doc);
 #else
     bounds = qd.screenBits.bounds;
     bounds.top += MENU_BAR_HEIGHT;
 
-    gWindow = NewWindow(NULL, &bounds, "\p", true, plainDBox,
-                         (WindowPtr) -1L, false, 0);
+    gWindow = NewCWindow(NULL, &bounds, "\p", true, plainDBox,
+                          (WindowPtr) -1L, false, 0);
 #endif
 
     SetPort(gWindow);
@@ -310,10 +310,10 @@ void MakeWindow(void)
         if (monoFont == 0) GetFNum("\pCourier", &monoFont);
         if (monoFont != 0) TextFont(monoFont);
     }
-    gTE = TEStyleNew(&viewRect, &viewRect);
+    WENew(&viewRect, &viewRect, 0, &gTE);
 
     TextFont(fontNum);
-    gHiddenTE = TEStyleNew(&viewRect, &viewRect);
+    WENew(&viewRect, &viewRect, 0, &gHiddenTE);
     gActiveTE = gHideMarkdown ? gHiddenTE : gTE;
 
 #ifdef ARTFUL_PRO
@@ -324,7 +324,7 @@ void MakeWindow(void)
     }
 #endif
 
-    TEActivate(gActiveTE);
+    WEActivate(gActiveTE);
 
     sbRect = viewRect;
     sbRect.left = viewRect.right + (MARGIN_H - SCROLLBAR_WIDTH) / 2;
@@ -372,14 +372,16 @@ static void UpdateStatusBar(WindowPtr w, Boolean forceDraw)
     if (!gActiveTE || !gShowStatusBar) return;
     
     chars = TotalLength();
-    caret = (**gActiveTE).selStart;
+    long selStart, selEnd;
+    WEGetSelection(&selStart, &selEnd, gActiveTE);
+    caret = selStart;
 
     line = 1;
     col = 1;
     {
-        short scan;
-        short newlines = 0;
-        Handle hText = (Handle)(**gActiveTE).hText;
+        long scan;
+        long newlines = 0;
+        Handle hText = WEGetText(gActiveTE);
         HLock(hText);
         for (scan = 0; scan < caret; scan++) {
             if ((*hText)[scan] == '\r') {
@@ -410,9 +412,11 @@ static void UpdateStatusBar(WindowPtr w, Boolean forceDraw)
     GetPort(&savedPort);
     SetPort(w);
 
-    statusRect.left = (**gActiveTE).viewRect.left;
+    LongRect viewRect;
+    WEGetViewRect(&viewRect, gActiveTE);
+    statusRect.left = viewRect.left;
     statusRect.right = statusRect.left + 300;
-    statusRect.top = (**gActiveTE).viewRect.bottom;
+    statusRect.top = viewRect.bottom;
     statusRect.bottom = w->portRect.bottom;
 
     EraseRect(&statusRect);
@@ -498,7 +502,7 @@ static void DoUpdate(WindowPtr w)
     
     BeginUpdate(w);
     EraseRect(&w->portRect);
-    TEUpdate(&w->portRect, gActiveTE);
+    WEUpdate(&w->portRect, gActiveTE);
     DrawControls(w);
     DrawTopMiddleButtons(w);
     DrawGrowIcon(w);
@@ -629,15 +633,17 @@ void DoSearch(void)
                 SyncWindowToBacking();
                 
                 long matchStart, matchEnd;
-                long currentGlobalPos = gWindowStart + (**gActiveTE).selEnd;
+                long selStart, selEnd;
+                WEGetSelection(&selStart, &selEnd, gActiveTE);
+                long currentGlobalPos = gWindowStart + selEnd;
                 if (FindTextInHandle(backingH, *backingLenPtr, target, currentGlobalPos, &matchStart, &matchEnd)) {
                     if (matchStart < gWindowStart || matchEnd > gWindowEnd) {
                         LoadTextWindow(matchStart);
                     }
                     
-                    short localStart = matchStart - gWindowStart;
-                    short localEnd = matchEnd - gWindowStart;
-                    TESetSelect(localStart, localEnd, gActiveTE);
+                    long localStart = matchStart - gWindowStart;
+                    long localEnd = matchEnd - gWindowStart;
+                    WESetSelect(localStart, localEnd, gActiveTE);
                     ScrollCaretIntoView(false);
                 } else {
                     SysBeep(30);
@@ -689,7 +695,9 @@ void DoSearchReplace(void)
                 if (item == iReplaceOK) {
                     /* Single Replace */
                     long matchStart, matchEnd;
-                    long currentGlobalPos = gWindowStart + (**gActiveTE).selStart;
+                    long selStart, selEnd;
+                    WEGetSelection(&selStart, &selEnd, gActiveTE);
+                    long currentGlobalPos = gWindowStart + selStart;
                     if (FindTextInHandle(backingH, *backingLenPtr, findTarget, currentGlobalPos, &matchStart, &matchEnd)) {
                         PushUndoSnapshot();
                         gTypingRunActive = false;
@@ -732,9 +740,9 @@ void DoSearchReplace(void)
                         gDirty = true;
                         LoadTextWindow(matchStart);
                         
-                        short localStart = matchStart - gWindowStart;
-                        short localEnd = localStart + replaceWith[0];
-                        TESetSelect(localStart, localEnd, gActiveTE);
+                        long localStart = matchStart - gWindowStart;
+                        long localEnd = localStart + replaceWith[0];
+                        WESetSelect(localStart, localEnd, gActiveTE);
                         ScrollCaretIntoView(false);
                         AdjustScrollbar();
                     } else {
@@ -890,7 +898,7 @@ static void DoMenuCommand(long menuResult)
                 case iBold:   ToggleFace(bold); break;
                 case iItalic: ToggleFace(italic); break;
                 case iCode:   ToggleCode(); break;
-                case iStrike: break;
+                case iStrike: ToggleStrike(); break;
                 case iHighlight: ToggleFace(outline); break;
                 case iH1:     ToggleHeadingHidden(1); break;
                 case iH2:     ToggleHeadingHidden(2); break;
@@ -952,40 +960,37 @@ static void DoMenuCommand(long menuResult)
 }
 
 static void GetCurrentLineRange(short *lineStart, short *lineEnd)
-
 {
-    short caretPos = (**gActiveTE).selEnd;
-    short numLines = (**gActiveTE).nLines;
-    short lineIdx = 0;
-
-    while (lineIdx < numLines - 1 && (**gActiveTE).lineStarts[lineIdx + 1] <= caretPos) {
-        lineIdx++;
-    }
-
-    *lineStart = (**gActiveTE).lineStarts[lineIdx];
-    if (lineIdx < numLines - 1) {
-        short end = (**gActiveTE).lineStarts[lineIdx + 1];
-        if (end > *lineStart) {
-            Handle hText = (**gActiveTE).hText;
+    long selStart, selEnd;
+    WEGetSelection(&selStart, &selEnd, gActiveTE);
+    long lineIdx = WEOffsetToLine(selEnd, gActiveTE);
+    long start = 0, end = 0;
+    if (WEGetLineRange(lineIdx, &start, &end, gActiveTE) == noErr) {
+        if (end > start) {
+            Handle hText = WEGetText(gActiveTE);
             HLock(hText);
             if ((*hText)[end - 1] == '\r') {
                 end--;
             }
             HUnlock(hText);
         }
-        *lineEnd = end;
+        *lineStart = (short) start;
+        *lineEnd = (short) end;
     } else {
-        *lineEnd = (**gActiveTE).teLength;
+        *lineStart = 0;
+        *lineEnd = 0;
     }
 }
 
 static void GetCurrentParagraphRange(short *paraStart, short *paraEnd)
 {
-    short caretPos = (**gActiveTE).selEnd;
-    Handle hText = (**gActiveTE).hText;
-    short len = (**gActiveTE).teLength;
-    short start = caretPos;
-    short end = caretPos;
+    long selStart, selEnd;
+    WEGetSelection(&selStart, &selEnd, gActiveTE);
+    long caretPos = selEnd;
+    Handle hText = WEGetText(gActiveTE);
+    long len = WEGetTextLength(gActiveTE);
+    long start = caretPos;
+    long end = caretPos;
 
     HLock(hText);
     while (start > 0 && (*hText)[start - 1] != '\r') {
@@ -996,8 +1001,8 @@ static void GetCurrentParagraphRange(short *paraStart, short *paraEnd)
     }
     HUnlock(hText);
 
-    *paraStart = start;
-    *paraEnd = end;
+    *paraStart = (short) start;
+    *paraEnd = (short) end;
 }
 
 
@@ -1130,7 +1135,7 @@ static void EventLoop(void)
                                 }
                             } else {
                                 gTypingRunActive = false;
-                                TEClick(event.where, (event.modifiers & shiftKey) != 0, gActiveTE);
+                                WEClick(event.where, (event.modifiers & shiftKey) != 0, gActiveTE);
                             }
                         }
                     }
@@ -1203,7 +1208,7 @@ static void EventLoop(void)
                             }
                         } else {
                             gTypingRunActive = false;
-                            TEClick(event.where, (event.modifiers & shiftKey) != 0, gActiveTE);
+                            WEClick(event.where, (event.modifiers & shiftKey) != 0, gActiveTE);
                         }
                     }
 #endif
@@ -1226,19 +1231,19 @@ static void EventLoop(void)
                     Boolean handled = false;
 
                     if (keyCode == 0x75) { /* Del (Forward Delete) */
-                        short selStart = (**gActiveTE).selStart;
-                        short selEnd = (**gActiveTE).selEnd;
+                        long selStart, selEnd;
+                        WEGetSelection(&selStart, &selEnd, gActiveTE);
 
                         PushUndoSnapshot();
                         gTypingRunActive = false;
 
                         if (selStart == selEnd) {
-                            if (selStart < (**gActiveTE).teLength) {
-                                TESetSelect(selStart, selStart + 1, gActiveTE);
-                                TEDelete(gActiveTE);
+                            if (selStart < WEGetTextLength(gActiveTE)) {
+                                WESetSelect(selStart, selStart + 1, gActiveTE);
+                                WEDelete(gActiveTE);
                             }
                          } else {
-                            TEDelete(gActiveTE);
+                            WEDelete(gActiveTE);
                         }
                         gDirty = true;
                         ScrollCaretIntoView(false);
@@ -1248,33 +1253,33 @@ static void EventLoop(void)
                         short lineStart, lineEnd;
                         GetCurrentLineRange(&lineStart, &lineEnd);
                         
-                        short scan = lineStart;
-                        Handle hText = (**gActiveTE).hText;
+                        long scan = lineStart;
+                        Handle hText = WEGetText(gActiveTE);
                         HLock(hText);
                         while (scan < lineEnd && ((*hText)[scan] == ' ' || (*hText)[scan] == '\t')) {
                             scan++;
                         }
                         HUnlock(hText);
                         
-                        TESetSelect(scan, scan, gActiveTE);
+                        WESetSelect(scan, scan, gActiveTE);
                         ScrollCaretIntoView(true);
                         handled = true;
                     } else if (keyCode == 0x77) { /* End */
                         short lineStart, lineEnd;
                         GetCurrentLineRange(&lineStart, &lineEnd);
-                        TESetSelect(lineEnd, lineEnd, gActiveTE);
+                        WESetSelect(lineEnd, lineEnd, gActiveTE);
                         ScrollCaretIntoView(false);
                         handled = true;
                     } else if ((event.modifiers & cmdKey) && keyCode == 0x7B) { /* Cmd+Cursor Left */
                         short lineStart, lineEnd;
                         GetCurrentLineRange(&lineStart, &lineEnd);
-                        TESetSelect(lineStart, lineStart, gActiveTE);
+                        WESetSelect(lineStart, lineStart, gActiveTE);
                         ScrollCaretIntoView(true);
                         handled = true;
                     } else if ((event.modifiers & cmdKey) && keyCode == 0x7C) { /* Cmd+Cursor Right */
                         short lineStart, lineEnd;
                         GetCurrentLineRange(&lineStart, &lineEnd);
-                        TESetSelect(lineEnd, lineEnd, gActiveTE);
+                        WESetSelect(lineEnd, lineEnd, gActiveTE);
                         ScrollCaretIntoView(false);
 
                         handled = true;
@@ -1303,21 +1308,24 @@ static void EventLoop(void)
                         }
 
                         if (isArrowKey && (event.modifiers & shiftKey)) {
-                            short activeEnd, newPos;
+                            long activeEnd, newPos;
+                            long selStart, selEnd;
+                            WEGetSelection(&selStart, &selEnd, gActiveTE);
                             if (!gShiftSelectionActive) {
                                 gShiftSelectionActive = true;
-                                gShiftAnchor = (**gActiveTE).selStart; 
+                                gShiftAnchor = selStart; 
                             }
-                            activeEnd = (gShiftAnchor == (**gActiveTE).selStart) ? (**gActiveTE).selEnd : (**gActiveTE).selStart;
-                            TESetSelect(activeEnd, activeEnd, gActiveTE);
+                            activeEnd = (gShiftAnchor == selStart) ? selEnd : selStart;
+                            WESetSelect(activeEnd, activeEnd, gActiveTE);
                             
-                            TEKey(key, gActiveTE);
-                            newPos = (**gActiveTE).selStart;
+                            WEKey(key, keyCode, event.modifiers, gActiveTE);
+                            WEGetSelection(&selStart, &selEnd, gActiveTE);
+                            newPos = selStart;
                             
                             if (newPos < gShiftAnchor) {
-                                TESetSelect(newPos, gShiftAnchor, gActiveTE);
+                                WESetSelect(newPos, gShiftAnchor, gActiveTE);
                             } else {
-                                TESetSelect(gShiftAnchor, newPos, gActiveTE);
+                                WESetSelect(gShiftAnchor, newPos, gActiveTE);
                             }
                         } else {
                             if (isArrowKey || key == 0x09 || key == 0x0D || key == 0x08 || isContentKey) {
@@ -1325,12 +1333,14 @@ static void EventLoop(void)
                             }
                             if (key == 0x0D) {
                                 short lineStart, lineEnd, caret;
-                                Handle hText = (**gActiveTE).hText;
+                                Handle hText = WEGetText(gActiveTE);
                                 short prefixLen = 0;
                                 char prefixBuf[64];
                                 Boolean doInsertCR = true;
                                 
-                                caret = (**gActiveTE).selStart;
+                                long selStart, selEnd;
+                                WEGetSelection(&selStart, &selEnd, gActiveTE);
+                                caret = (short) selStart;
                                 GetCurrentParagraphRange(&lineStart, &lineEnd);
                                 
                                 HLock(hText);
@@ -1398,15 +1408,15 @@ static void EventLoop(void)
                                                 BlockMove(prefixBuf, newBuf, spaceCount);
                                                 BlockMove(prefixBuf + spaceCount + 1, newBuf + spaceCount, prefixLen - spaceCount - 1);
                                                 
-                                                TESetSelect(lineStart, lineEnd, gActiveTE);
-                                                TEDelete(gActiveTE);
-                                                TESetSelect(lineStart, lineStart, gActiveTE);
-                                                TEInsert(newBuf, newPrefixLen, gActiveTE);
+                                                WESetSelect(lineStart, lineEnd, gActiveTE);
+                                                WEDelete(gActiveTE);
+                                                WESetSelect(lineStart, lineStart, gActiveTE);
+                                                WEInsert(newBuf, newPrefixLen, NULL, gActiveTE);
                                                 doInsertCR = false;
                                                 gDirty = true;
                                             } else {
-                                                TESetSelect(lineStart, lineEnd, gActiveTE);
-                                                TEDelete(gActiveTE);
+                                                WESetSelect(lineStart, lineEnd, gActiveTE);
+                                                WEDelete(gActiveTE);
                                                 doInsertCR = false;
                                                 gDirty = true;
                                             }
@@ -1440,15 +1450,15 @@ static void EventLoop(void)
                                                 newBuf[newSpaceCount] = newBullet;
                                             }
                                             
-                                            TESetSelect(lineStart, lineEnd, gActiveTE);
-                                            TEDelete(gActiveTE);
-                                            TESetSelect(lineStart, lineStart, gActiveTE);
-                                            TEInsert(newBuf, newPrefixLen, gActiveTE);
+                                            WESetSelect(lineStart, lineEnd, gActiveTE);
+                                            WEDelete(gActiveTE);
+                                            WESetSelect(lineStart, lineStart, gActiveTE);
+                                            WEInsert(newBuf, newPrefixLen, NULL, gActiveTE);
                                             doInsertCR = false;
                                             gDirty = true;
                                         } else {
-                                            TESetSelect(lineStart, lineEnd, gActiveTE);
-                                            TEDelete(gActiveTE);
+                                            WESetSelect(lineStart, lineEnd, gActiveTE);
+                                            WEDelete(gActiveTE);
                                             doInsertCR = false;
                                             gDirty = true;
                                         }
@@ -1475,18 +1485,17 @@ static void EventLoop(void)
                                 
                                 if (doInsertCR) {
                                     if (lineEnd == lineStart) {
-                                        TextStyle ts;
-                                        short lh, fa;
-                                        TEGetStyle((short) lineStart, &ts, &lh, &fa, gActiveTE);
-                                        if (ts.tsColor.blue >= 2) {
-                                            if (ts.tsColor.blue > 2) {
-                                                ts.tsColor.blue--;
-                                            } else {
-                                                ts.tsColor.blue = 0;
-                                                ts.tsFace &= ~italic;
-                                            }
-                                            TESetSelect((short) lineStart, (short) lineEnd, gActiveTE);
-                                            TESetStyle(doFace + doColor, &ts, false, gActiveTE);
+                                         WETextStyle ts;
+                                         WEGetStyle(lineStart, &ts, gActiveTE);
+                                         if (ts.tsColor.blue >= 2) {
+                                             if (ts.tsColor.blue > 2) {
+                                                 ts.tsColor.blue--;
+                                             } else {
+                                                 ts.tsColor.blue = 0;
+                                                 ts.tsFace &= ~italic;
+                                             }
+                                             WESetSelect(lineStart, lineEnd, gActiveTE);
+                                             WESetStyle(weDoFace + weDoColor, &ts, gActiveTE);
                                             doInsertCR = false;
                                             gDirty = true;
                                         }
@@ -1494,7 +1503,7 @@ static void EventLoop(void)
                                 }
                                 
                                 if (doInsertCR) {
-                                    TEKey(key, gActiveTE);
+                                    WEKey(key, keyCode, event.modifiers, gActiveTE);
                                     if (prefixLen > 0) {
                                         char nextPrefix[64];
                                         BlockMove(prefixBuf, nextPrefix, prefixLen);
@@ -1507,16 +1516,18 @@ static void EventLoop(void)
                                                 nextPrefix[prefixLen - 3] = ' ';
                                             }
                                         }
-                                        TEInsert(nextPrefix, prefixLen, gActiveTE);
+                                        WEInsert(nextPrefix, prefixLen, NULL, gActiveTE);
                                     }
                                 }
                             } else if (key == 0x09) {
                                 short lineStart, lineEnd, caret;
-                                Handle hText = (**gActiveTE).hText;
+                                Handle hText = WEGetText(gActiveTE);
                                 short prefixLen = 0;
                                 char prefixBuf[64];
                                 
-                                caret = (**gActiveTE).selStart;
+                                long selStart, selEnd;
+                                WEGetSelection(&selStart, &selEnd, gActiveTE);
+                                caret = (short) selStart;
                                 GetCurrentParagraphRange(&lineStart, &lineEnd);
                                 
                                 HLock(hText);
@@ -1593,19 +1604,19 @@ static void EventLoop(void)
                                         newBuf[2 + bulletOffset] = newBullet;
                                     }
                                     
-                                    TESetSelect(lineStart, lineStart + prefixLen, gActiveTE);
-                                    TEDelete(gActiveTE);
-                                    TESetSelect(lineStart, lineStart, gActiveTE);
-                                    TEInsert(newBuf, prefixLen + 2, gActiveTE);
+                                    WESetSelect(lineStart, lineStart + prefixLen, gActiveTE);
+                                    WEDelete(gActiveTE);
+                                    WESetSelect(lineStart, lineStart, gActiveTE);
+                                    WEInsert(newBuf, prefixLen + 2, NULL, gActiveTE);
                                     
                                     short newCaret = caret + 2;
-                                    TESetSelect(newCaret, newCaret, gActiveTE);
+                                    WESetSelect(newCaret, newCaret, gActiveTE);
                                     gDirty = true;
                                 } else {
-                                    TEKey(key, gActiveTE);
+                                    WEKey(key, keyCode, event.modifiers, gActiveTE);
                                 }
                             } else {
-                                TEKey(key, gActiveTE);
+                                WEKey(key, keyCode, event.modifiers, gActiveTE);
                             }
                             
                             if (isContentKey) {
@@ -1614,9 +1625,11 @@ static void EventLoop(void)
                                 if (gHideMarkdown)
                                     DetectInlineMarkdown(key);
                                 
-                                caret = (**gActiveTE).selStart;
+                                long selStart, selEnd;
+                                WEGetSelection(&selStart, &selEnd, gActiveTE);
+                                caret = (short) selStart;
                                 if (caret >= 5) {
-                                    Handle hText = (**gActiveTE).hText;
+                                    Handle hText = WEGetText(gActiveTE);
                                     Boolean isToday = false, isTime = false;
                                     HLock(hText);
                                     if (caret >= 6) {
@@ -1637,9 +1650,9 @@ static void EventLoop(void)
                                         dateStr[0] = strlen(tempBuf);
                                         BlockMove(tempBuf, dateStr + 1, dateStr[0]);
                                         
-                                        TESetSelect(caret - 6, caret, gActiveTE);
-                                        TEDelete(gActiveTE);
-                                        TEInsert(dateStr + 1, dateStr[0], gActiveTE);
+                                        WESetSelect(caret - 6, caret, gActiveTE);
+                                        WEDelete(gActiveTE);
+                                        WEInsert(dateStr + 1, dateStr[0], NULL, gActiveTE);
                                     } else if (isTime) {
                                         unsigned long secs;
                                         DateTimeRec date;
@@ -1651,45 +1664,13 @@ static void EventLoop(void)
                                         timeStr[0] = strlen(tempBuf);
                                         BlockMove(tempBuf, timeStr + 1, timeStr[0]);
                                         
-                                        TESetSelect(caret - 5, caret, gActiveTE);
-                                        TEDelete(gActiveTE);
-                                        TEInsert(timeStr + 1, timeStr[0], gActiveTE);
+                                        WESetSelect(caret - 5, caret, gActiveTE);
+                                        WEDelete(gActiveTE);
+                                        WEInsert(timeStr + 1, timeStr[0], NULL, gActiveTE);
                                     }
                                 }
 
-                                if (gHideMarkdown && caret >= 3) {
-                                    Handle hText = (**gActiveTE).hText;
-                                    Boolean isDashes;
-                                    short lineStart, lineEnd;
-                                    
-                                    GetCurrentParagraphRange(&lineStart, &lineEnd);
-                                    HLock(hText);
-                                    isDashes = (caret - lineStart == 3 && caret == lineEnd && memcmp(*hText + lineStart, "---", 3) == 0);
-                                    HUnlock(hText);
-                                    
-                                    if (isDashes) {
-                                        TextStyle opStyle;
-                                        opStyle.tsColor.red = 0;
-                                        opStyle.tsColor.green = 0;
-                                        opStyle.tsColor.blue = 0;
-                                        opStyle.tsFace = normal;
-                                        opStyle.tsSize = 0;
 
-                                        TESetSelect(lineStart, caret, gActiveTE);
-                                        TEDelete(gActiveTE);
-                                        TEInsert("--------------------", 20, gActiveTE);
-                                        
-                                        opStyle.tsFace = bold;
-                                        opStyle.tsColor.blue = 1;
-                                        TESetSelect(lineStart, lineStart + 20, gActiveTE);
-                                        TESetStyle(doFace + doColor, &opStyle, false, gActiveTE);
-                                        
-                                        TESetSelect(lineStart + 20, lineStart + 20, gActiveTE);
-                                        opStyle.tsFace = normal;
-                                        opStyle.tsColor.blue = 0;
-                                        TESetStyle(doFace + doColor, &opStyle, false, gActiveTE);
-                                    }
-                                }
                             }
                         }
                         ScrollCaretIntoView(key == 0x1E || key == 0x1C || key == 0x08);
@@ -1699,24 +1680,24 @@ static void EventLoop(void)
                     break;
                 }
 
-                case activateEvt:
+                 case activateEvt:
 #ifdef ARTFUL_PRO
                     SetActiveDocument(GetDocumentForWindow((WindowPtr) event.message));
                     if (gActiveDoc) {
                         if ((event.modifiers & activeFlag) != 0) {
                             SetPort(gWindow);
-                            TEActivate(gActiveTE);
+                            WEActivate(gActiveTE);
                             InvalRect(&gWindow->portRect); /* Force redraw when coming to front */
                         } else {
-                            TEDeactivate(gActiveTE);
+                            WEDeactivate(gActiveTE);
                         }
                     }
 #else
                     if ((event.modifiers & activeFlag) != 0) {
-                        TEActivate(gActiveTE);
+                        WEActivate(gActiveTE);
                         InvalRect(&gWindow->portRect);
                     } else {
-                        TEDeactivate(gActiveTE);
+                        WEDeactivate(gActiveTE);
                     }
 #endif
                     break;
@@ -1725,11 +1706,11 @@ static void EventLoop(void)
 #ifdef ARTFUL_PRO
         SetActiveDocument(GetDocumentForWindow(FrontWindow()));
         if (gActiveDoc) {
-            TEIdle(gActiveTE);
+            WEIdle(gActiveTE);
             UpdateStatusBar(FrontWindow(), false);
         }
 #else
-        TEIdle(gActiveTE);
+        WEIdle(gActiveTE);
         UpdateStatusBar(gWindow, false);
 #endif
     }
@@ -1756,10 +1737,12 @@ void SetFontMode(Boolean useSans)
     if (!gActiveDoc) return;
 #endif
 
+    SyncWindowToBacking();
+
     if (gHideMarkdown) {
         SyncHiddenToCanonical();
-        BuildHiddenView();
         ClearStyles();
+        BuildHiddenView();
     } else {
         ClearStyles();
         BuildHiddenView();

@@ -47,12 +47,13 @@ void PushUndoSnapshot(void)
     if (gHideMarkdown)
         SyncHiddenToCanonical();
 
-    len = (**gTE).teLength;
+    len = WEGetTextLength(gTE);
     textH = NewHandle(len);
     HLock(textH);
-    HLock((**gTE).hText);
-    BlockMove(*(**gTE).hText, *textH, len);
-    HUnlock((**gTE).hText);
+    Handle geText = WEGetText(gTE);
+    HLock(geText);
+    BlockMove(*geText, *textH, len);
+    HUnlock(geText);
     HUnlock(textH);
 
     if (gUndoCount == MAX_UNDO_LEVELS) {
@@ -62,11 +63,14 @@ void PushUndoSnapshot(void)
         gUndoCount--;
     }
 
+    long selStart, selEnd;
+    WEGetSelection(&selStart, &selEnd, gActiveTE);
+
     slot = &gUndoStack[gUndoCount++];
     slot->textH = textH;
     slot->length = len;
-    slot->selStart = (**gActiveTE).selStart;
-    slot->selEnd = (**gActiveTE).selEnd;
+    slot->selStart = (short) selStart;
+    slot->selEnd = (short) selEnd;
 
     for (i = 0; i < gRedoCount; i++)
         FreeSnapshot(&gRedoStack[i]);
@@ -87,12 +91,13 @@ static void PushRedoSnapshot(void)
     if (gHideMarkdown)
         SyncHiddenToCanonical();
 
-    len = (**gTE).teLength;
+    len = WEGetTextLength(gTE);
     textH = NewHandle(len);
     HLock(textH);
-    HLock((**gTE).hText);
-    BlockMove(*(**gTE).hText, *textH, len);
-    HUnlock((**gTE).hText);
+    Handle geText = WEGetText(gTE);
+    HLock(geText);
+    BlockMove(*geText, *textH, len);
+    HUnlock(geText);
     HUnlock(textH);
 
     if (gRedoCount == MAX_UNDO_LEVELS) {
@@ -102,11 +107,14 @@ static void PushRedoSnapshot(void)
         gRedoCount--;
     }
 
+    long selStart, selEnd;
+    WEGetSelection(&selStart, &selEnd, gActiveTE);
+
     slot = &gRedoStack[gRedoCount++];
     slot->textH = textH;
     slot->length = len;
-    slot->selStart = (**gActiveTE).selStart;
-    slot->selEnd = (**gActiveTE).selEnd;
+    slot->selStart = (short) selStart;
+    slot->selEnd = (short) selEnd;
 }
 
 /* Replaces gTE's text with a snapshot and, if Writer mode is active,
@@ -117,19 +125,19 @@ static void RestoreSnapshot(UndoSnapshot *snap)
     Rect savedViewRect;
 
     SuppressDrawing(gTE, &savedViewRect);
-    TESetSelect(0, 32767, gTE);
-    TEDelete(gTE);
+    WESetSelect(0, WEGetTextLength(gTE), gTE);
+    WEDelete(gTE);
     HLock(snap->textH);
-    TEInsert(*snap->textH, snap->length, gTE);
+    WEInsert(*snap->textH, snap->length, NULL, gTE);
     HUnlock(snap->textH);
     RestoreDrawing(gTE, &savedViewRect);
 
     if (gHideMarkdown) {
         BuildHiddenView();
-        TESetSelect(snap->selStart, snap->selEnd, gHiddenTE);
+        WESetSelect(snap->selStart, snap->selEnd, gHiddenTE);
     } else {
         ClearStyles();
-        TESetSelect(snap->selStart, snap->selEnd, gTE);
+        WESetSelect(snap->selStart, snap->selEnd, gTE);
     }
 
     gDirty = true;
@@ -182,15 +190,18 @@ void DoCut(void)
     long selLen;
     Handle scrapText;
 
-    selStart = (**gActiveTE).selStart;
-    selEnd = (**gActiveTE).selEnd;
+    long sStart, sEnd;
+    WEGetSelection(&sStart, &sEnd, gActiveTE);
+    selStart = (short) sStart;
+    selEnd = (short) sEnd;
+
     if (selStart == selEnd)
         return;
 
     if (gHideMarkdown) {
         scrapText = EncodeSelectionAsMarkdown(selStart, selEnd, gActiveTE);
     } else {
-        Handle textH = (**gActiveTE).hText;
+        Handle textH = WEGetText(gActiveTE);
 
         selLen = selEnd - selStart;
         scrapText = NewHandle(selLen);
@@ -209,7 +220,7 @@ void DoCut(void)
     HUnlock(scrapText);
     DisposeHandle(scrapText);
 
-    TEDelete(gActiveTE);
+    WEDelete(gActiveTE);
 
     gDirty = true;
     gTypingRunActive = false;
@@ -222,15 +233,18 @@ void DoCopy(void)
     long selLen;
     Handle scrapText;
 
-    selStart = (**gActiveTE).selStart;
-    selEnd = (**gActiveTE).selEnd;
+    long sStart, sEnd;
+    WEGetSelection(&sStart, &sEnd, gActiveTE);
+    selStart = (short) sStart;
+    selEnd = (short) sEnd;
+
     if (selStart == selEnd)
         return;
 
     if (gHideMarkdown) {
         scrapText = EncodeSelectionAsMarkdown(selStart, selEnd, gActiveTE);
     } else {
-        Handle textH = (**gActiveTE).hText;
+        Handle textH = WEGetText(gActiveTE);
 
         selLen = selEnd - selStart;
         scrapText = NewHandle(selLen);
@@ -268,7 +282,7 @@ void DoPaste(void)
         DisposeHandle(scrapH);
     } else {
         HLock(scrapH);
-        TEInsert(*scrapH, len, gActiveTE);
+        WEInsert(*scrapH, len, NULL, gActiveTE);
         HUnlock(scrapH);
         DisposeHandle(scrapH);
     }
@@ -280,6 +294,6 @@ void DoPaste(void)
 
 void DoSelectAll(void)
 {
-    TESetSelect(0, 32767, gActiveTE);
+    WESetSelect(0, WEGetTextLength(gActiveTE), gActiveTE);
     gTypingRunActive = false;
 }

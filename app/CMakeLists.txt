@@ -12,6 +12,7 @@ include_directories(SYSTEM "/opt/Retro68-build/toolchain/m68k-apple-macos/includ
 include_directories(SYSTEM "/opt/Retro68-build/toolchain/multiversal/CIncludes")
 include_directories(SYSTEM "/opt/Retro68-build/toolchain/lib/gcc/m68k-apple-macos/16.1.0/include")
 include_directories(SYSTEM "/opt/Retro68-build/toolchain/lib/gcc/m68k-apple-macos/16.1.0/include-fixed")
+include_directories(waste)
 
 add_application(ArtfulType
     main.c
@@ -21,6 +22,7 @@ add_application(ArtfulType
     zoom.c
     file.c
     splash.c
+    waste/WASTE.c
     main.r
     CREATOR "ArtT"
     )
@@ -40,6 +42,7 @@ add_application(ArtfulTypePro
     zoom.c
     file.c
     splash.c
+    waste/WASTE.c
     main_pro.r
     CREATOR "ArtT"
     )
