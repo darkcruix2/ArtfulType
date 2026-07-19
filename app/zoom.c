@@ -5,7 +5,7 @@
    than assuming. The 30pt level has no native bitmap (24pt is the
    largest this font has) and renders as a scaled enlargement of the
    24pt bitmap instead -- a known, accepted tradeoff for going bigger. */
-static short kZoomLevels[] = { -6, -4, 0, 6, 12 };
+static short kZoomLevels[] = { -4, 0, 6 };
 
 short CurrentFontSize(void)
 {
@@ -48,70 +48,28 @@ static void SaveZoomPref(void)
     }
 }
 
-/*
-    Remaps any run whose size matches one of the OLD base/heading sizes
-    to the corresponding NEW size, in place -- used for zoom, so it
-    never re-parses markdown and can't clobber unsynced edits in
-    whichever buffer isn't currently canonical.
-*/
-static void RescaleStyles(WEHandle te, short oldBase, short newBase)
+void ApplyZoomIndex(short newIndex)
 {
-    long len = WEGetTextLength(te);
-    long i = 0;
     long selStart, selEnd;
-    WEGetSelection(&selStart, &selEnd, te);
-    long savedStart = selStart;
-    long savedEnd = selEnd;
-
-    while (i < len) {
-        WETextStyle st;
-        long runStart = i;
-        short oldSize;
-        short newSize;
-
-        WEGetStyle(i, &st, te);
-        oldSize = st.tsSize;
-
-        while (i < len) {
-            WETextStyle st2;
-
-            WEGetStyle(i, &st2, te);
-            if (st2.tsSize != oldSize)
-                break;
-            i++;
-        }
-
-        if (oldSize == oldBase) newSize = newBase;
-        else if (oldSize == oldBase + 12) newSize = newBase + 12;
-        else if (oldSize == oldBase + 8) newSize = newBase + 8;
-        else if (oldSize == oldBase + 4) newSize = newBase + 4;
-        else newSize = oldSize + (newBase - oldBase);
-
-        if (newSize != oldSize) {
-            WETextStyle ts;
-            ts.tsSize = newSize;
-            WESetSelect(runStart, i, te);
-            WESetStyle(weDoSize, &ts, te);
-        }
-    }
-
-    WESetSelect(savedStart, savedEnd, te);
-}
-
-static void ApplyZoomIndex(short newIndex)
-{
-    short oldBase;
-    short newBase;
 
     if (newIndex < 0 || newIndex >= kNumZoomLevels || newIndex == gZoomIndex)
         return;
 
-    oldBase = CurrentFontSize();
-    gZoomIndex = newIndex;
-    newBase = CurrentFontSize();
+    WEGetSelection(&selStart, &selEnd, gActiveTE);
 
-    ClearStyles();
-    RescaleStyles(gHiddenTE, oldBase, newBase);
+    // Sync current changes to backing store BEFORE changing font size, 
+    // so headers are properly identified based on the OLD font size.
+    SyncWindowToBacking();
+
+    gZoomIndex = newIndex;
+    
+    // Load window from backing store. This will automatically rebuild all styles
+    // (headers, bold, etc.) based on the NEW font size!
+    LoadTextWindow(gWindowStart);
+    
+    WESetSelect(selStart, selEnd, gActiveTE);
+    ScrollCaretIntoView(false);
+
     SaveZoomPref();
     AdjustScrollbar();
     InvalRect(&gWindow->portRect);

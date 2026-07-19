@@ -13,24 +13,75 @@ static short CurrentScrollOffset(WEHandle te)
     return (short)(viewRect.top - destRect.top);
 }
 
+static long GetMaxScrollPixels(void)
+{
+    LongRect viewRect;
+    long viewHeight, totalHeight, maxScroll;
+    
+    if (!gActiveTE) return 0;
+    
+    WEGetViewRect(&viewRect, gActiveTE);
+    viewHeight = viewRect.bottom - viewRect.top;
+    totalHeight = WEGetHeight(0, WEGetLineCount(gActiveTE), gActiveTE);
+    
+    maxScroll = totalHeight - viewHeight;
+    if (maxScroll < 0) maxScroll = 0;
+    return maxScroll;
+}
+
+static void SafeScroll(long dy)
+{
+    long maxScroll = GetMaxScrollPixels();
+    LongRect viewRect, destRect;
+    long currentPixelsScrolled, newPixelsScrolled;
+    
+    if (!gActiveTE) return;
+    
+    WEGetViewRect(&viewRect, gActiveTE);
+    WEGetDestRect(&destRect, gActiveTE);
+    currentPixelsScrolled = viewRect.top - destRect.top;
+    
+    newPixelsScrolled = currentPixelsScrolled - dy;
+    if (newPixelsScrolled < 0) {
+        dy = currentPixelsScrolled;
+    } else if (newPixelsScrolled > maxScroll) {
+        dy = currentPixelsScrolled - maxScroll;
+    }
+    
+    if (dy != 0) {
+        WEPinScroll(0, dy, gActiveTE);
+    }
+}
+
 static void SyncScrollbarToOffset(void)
 {
     static long lastTotal = -1;
     static short lastVal = -1;
     
     long total = TotalLength();
+    short val = 0;
+
     if (total == 0) {
         SetControlValue(gScrollBar, 0);
         return;
     }
     
-    // We are at gWindowStart in the document, plus the local scroll offset.
-    long currentOffset = gWindowStart;
-    
-    // Convert currentOffset to a 0-32767 range
-    short val = (short) (((double)currentOffset * 32767.0) / (double)total);
+    if (total <= WINDOW_SIZE) {
+        long maxScroll = GetMaxScrollPixels();
+        if (maxScroll > 0) {
+            LongRect viewRect, destRect;
+            WEGetViewRect(&viewRect, gActiveTE);
+            WEGetDestRect(&destRect, gActiveTE);
+            long currentPixelsScrolled = viewRect.top - destRect.top;
+            if (currentPixelsScrolled < 0) currentPixelsScrolled = 0;
+            if (currentPixelsScrolled > maxScroll) currentPixelsScrolled = maxScroll;
+            val = (short) (((double)currentPixelsScrolled * 32767.0) / (double)maxScroll);
+        }
+    } else {
+        long currentOffset = gWindowStart;
+        val = (short) (((double)currentOffset * 32767.0) / (double)total);
+    }
 
-    // Only update if value actually changed to avoid unnecessary updates
     if (val != lastVal || total != lastTotal) {
         if (val != GetControlValue(gScrollBar))
             SetControlValue(gScrollBar, val);
@@ -41,7 +92,20 @@ static void SyncScrollbarToOffset(void)
 
 void InvalidateHeightCache(void)
 {
-    // No longer used, but kept for compatibility with other files
+    /* Called after DetectInlineMarkdown applies styles to gActiveTE.
+       Reflow and repaint immediately so bold/italic/header changes
+       appear without requiring a scroll. */
+    if (!gActiveTE || !gWindow) return;
+    LongRect viewRectLong;
+    Rect viewRect;
+    WEGetViewRect(&viewRectLong, gActiveTE);
+    viewRect.left   = (short)viewRectLong.left;
+    viewRect.top    = (short)viewRectLong.top;
+    viewRect.right  = (short)viewRectLong.right;
+    viewRect.bottom = (short)viewRectLong.bottom;
+    WECalText(gActiveTE);
+    EraseRect(&viewRect);
+    WEUpdate(&viewRect, gActiveTE);
 }
 
 void UpdateScrollbarRange(void)
@@ -50,7 +114,14 @@ void UpdateScrollbarRange(void)
     static short lastMaxVal = -1;
     
     long total = TotalLength();
-    short maxVal = (total > 0) ? 32767 : 0;
+    short maxVal;
+    
+    if (total <= WINDOW_SIZE) {
+        long maxScroll = GetMaxScrollPixels();
+        maxVal = (maxScroll > 0) ? 32767 : 0;
+    } else {
+        maxVal = (total > 0) ? 32767 : 0;
+    }
 
     // Only update if value actually changed to avoid unnecessary updates
     if (maxVal != lastMaxVal) {
@@ -111,8 +182,7 @@ void ScrollCaretIntoView(Boolean movingBackward)
 
     /* --- Step 1: use WEPinScroll to bring the caret into the visible rectangle --- */
     if (lineBottom > viewBottom) {
-        short halfScreen = (viewBottom - viewTop) / 2;
-        WEPinScroll(0, viewBottom - lineBottom - halfScreen, gActiveTE);
+        WEPinScroll(0, viewBottom - lineBottom, gActiveTE);
     } else if (lineTop < viewTop) {
         WEPinScroll(0, viewTop - lineTop, gActiveTE);
     }
@@ -169,31 +239,51 @@ static pascal void ScrollAction(ControlHandle control, short part)
 
     if (part == 0 || total <= 0) return;
 
-    /* Scale delta dynamically */
-    long lineDelta = (long) ((80.0 * 32767.0) / (double)total);
-    if (lineDelta < 1) lineDelta = 1;
-    long pageDelta = (long) ((1600.0 * 32767.0) / (double)total);
-    if (pageDelta < 5) pageDelta = 5;
+    if (total <= WINDOW_SIZE) {
+        LongRect viewRect;
+        long viewHeight;
+        WEGetViewRect(&viewRect, gActiveTE);
+        viewHeight = viewRect.bottom - viewRect.top;
+        
+        switch (part) {
+            case inUpButton:   delta = -20; break;
+            case inDownButton: delta = 20; break;
+            case inPageUp:     delta = -(viewHeight - 20); break;
+            case inPageDown:   delta = viewHeight - 20; break;
+            default:           delta = 0; break;
+        }
+        
+        if (delta != 0) {
+            SafeScroll(-delta);
+            SyncScrollbarToOffset();
+        }
+    } else {
+        /* Scale delta dynamically */
+        long lineDelta = (long) ((80.0 * 32767.0) / (double)total);
+        if (lineDelta < 1) lineDelta = 1;
+        long pageDelta = (long) ((1600.0 * 32767.0) / (double)total);
+        if (pageDelta < 5) pageDelta = 5;
 
-    switch (part) {
-        case inUpButton:   delta = -lineDelta; break;
-        case inDownButton: delta = lineDelta; break;
-        case inPageUp:     delta = -pageDelta; break;
-        case inPageDown:   delta = pageDelta; break;
-        default:           delta = 0; break;
+        switch (part) {
+            case inUpButton:   delta = -lineDelta; break;
+            case inDownButton: delta = lineDelta; break;
+            case inPageUp:     delta = -pageDelta; break;
+            case inPageDown:   delta = pageDelta; break;
+            default:           delta = 0; break;
+        }
+
+        cur += delta;
+        if (cur < 0) cur = 0;
+        if (cur > max) cur = max;
+        
+        SetControlValue(control, cur);
+        
+        long newOffset = (long) (((double)cur * (double)total) / 32767.0);
+        
+        gScrollbarDriven = true;
+        SyncWindowToBacking();
+        LoadTextWindow(newOffset);
     }
-
-    cur += delta;
-    if (cur < 0) cur = 0;
-    if (cur > max) cur = max;
-    
-    SetControlValue(control, cur);
-    
-    long newOffset = (long) (((double)cur * (double)total) / 32767.0);
-    
-    gScrollbarDriven = true;
-    SyncWindowToBacking();
-    LoadTextWindow(newOffset);
 }
 
 void DoScrollClick(Point pt)
@@ -211,11 +301,25 @@ void DoScrollClick(Point pt)
         desired = GetControlValue(gScrollBar);
         
         long total = TotalLength();
-        long newOffset = (long) (((double)desired * (double)total) / 32767.0);
-        
-        gScrollbarDriven = true;
-        SyncWindowToBacking();
-        LoadTextWindow(newOffset);
+        if (total <= WINDOW_SIZE) {
+            long maxScroll = GetMaxScrollPixels();
+            long newPixelsScrolled = (long) (((double)desired * (double)maxScroll) / 32767.0);
+            
+            LongRect viewRect, destRect;
+            WEGetViewRect(&viewRect, gActiveTE);
+            WEGetDestRect(&destRect, gActiveTE);
+            long currentPixelsScrolled = viewRect.top - destRect.top;
+            
+            long dy = currentPixelsScrolled - newPixelsScrolled;
+            if (dy != 0) {
+                WEPinScroll(0, dy, gActiveTE);
+            }
+        } else {
+            long newOffset = (long) (((double)desired * (double)total) / 32767.0);
+            gScrollbarDriven = true;
+            SyncWindowToBacking();
+            LoadTextWindow(newOffset);
+        }
     } else {
         TrackControl(gScrollBar, pt, NewControlActionUPP(ScrollAction));
     }

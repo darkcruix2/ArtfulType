@@ -47,6 +47,11 @@ extern short gMemoryPoolCount;
         } \
     } while(0)
 
+void InsertDateHeading(short level);
+void InsertTimeHeading(short level);
+
+#define mApple   1
+#define iAppleAbout 1
 #define mFile    128
 #define iNew     1
 #define iOpen    2
@@ -122,17 +127,13 @@ extern short gMemoryPoolCount;
 #define mWindow  134
 
 #define mHelp    132
-#define iAbout   1
+#define iAbout   1  /* kept for backward compat; About is now in Apple menu */
 
 #define MAX_STYLE_OPS 8192
 
-#define kNumZoomLevels 5
-#define kZoomBaselineIndex 2
-#ifdef ARTFUL_PRO
+#define kNumZoomLevels 3
+#define kZoomBaselineIndex 1
 #define kZoomDefaultIndex 0
-#else
-#define kZoomDefaultIndex kZoomBaselineIndex
-#endif
 
 #define kZoomPrefType 'ZLvl'
 #define kZoomPrefID   128
@@ -161,6 +162,7 @@ typedef struct {
     Handle textH;
     long length;
     short selStart, selEnd;
+    Boolean isWriterMode;
 } UndoSnapshot;
 
 /*
@@ -374,7 +376,10 @@ Handle EncodeSelectionAsMarkdown(long start, long end, WEHandle te);
 void InsertMarkdownAsStyled(Handle srcH, long srcLen, WEHandle te);
 void WrapSelection(char *prefix, char *suffix);
 void ApplyHeading(short level);
+void InsertDateHeading(short level);
+void InsertTimeHeading(short level);
 void DoLink(void);
+void ApplyZoomIndex(short newIndex);
 void ToggleFace(Style face);
 void DoLinkHidden(void);
 void ToggleCode(void);

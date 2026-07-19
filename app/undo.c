@@ -44,17 +44,29 @@ void PushUndoSnapshot(void)
     long len;
     short i;
 
-    if (gHideMarkdown)
-        SyncHiddenToCanonical();
-
-    len = WEGetTextLength(gTE);
-    textH = NewHandle(len);
-    HLock(textH);
-    Handle geText = WEGetText(gTE);
-    HLock(geText);
-    BlockMove(*geText, *textH, len);
-    HUnlock(geText);
-    HUnlock(textH);
+    if (gHideMarkdown) {
+        /* In Writer mode, snapshot the writer text directly.
+           SyncHiddenToCanonical is extremely expensive (O(n²) style ops scan)
+           and we only need the canonical form when saving or switching views,
+           not for every undo checkpoint. */
+        SyncWindowToBacking();
+        len = gWriterLen;
+        textH = NewHandle(len);
+        HLock(textH);
+        HLock(gWriterText);
+        BlockMove(*gWriterText, *textH, len);
+        HUnlock(gWriterText);
+        HUnlock(textH);
+    } else {
+        len = WEGetTextLength(gTE);
+        textH = NewHandle(len);
+        HLock(textH);
+        Handle geText = WEGetText(gTE);
+        HLock(geText);
+        BlockMove(*geText, *textH, len);
+        HUnlock(geText);
+        HUnlock(textH);
+    }
 
     if (gUndoCount == MAX_UNDO_LEVELS) {
         FreeSnapshot(&gUndoStack[0]);
@@ -71,6 +83,7 @@ void PushUndoSnapshot(void)
     slot->length = len;
     slot->selStart = (short) selStart;
     slot->selEnd = (short) selEnd;
+    slot->isWriterMode = gHideMarkdown;
 
     for (i = 0; i < gRedoCount; i++)
         FreeSnapshot(&gRedoStack[i]);
@@ -88,17 +101,25 @@ static void PushRedoSnapshot(void)
     long len;
     short i;
 
-    if (gHideMarkdown)
-        SyncHiddenToCanonical();
-
-    len = WEGetTextLength(gTE);
-    textH = NewHandle(len);
-    HLock(textH);
-    Handle geText = WEGetText(gTE);
-    HLock(geText);
-    BlockMove(*geText, *textH, len);
-    HUnlock(geText);
-    HUnlock(textH);
+    if (gHideMarkdown) {
+        SyncWindowToBacking();
+        len = gWriterLen;
+        textH = NewHandle(len);
+        HLock(textH);
+        HLock(gWriterText);
+        BlockMove(*gWriterText, *textH, len);
+        HUnlock(gWriterText);
+        HUnlock(textH);
+    } else {
+        len = WEGetTextLength(gTE);
+        textH = NewHandle(len);
+        HLock(textH);
+        Handle geText = WEGetText(gTE);
+        HLock(geText);
+        BlockMove(*geText, *textH, len);
+        HUnlock(geText);
+        HUnlock(textH);
+    }
 
     if (gRedoCount == MAX_UNDO_LEVELS) {
         FreeSnapshot(&gRedoStack[0]);
@@ -115,29 +136,69 @@ static void PushRedoSnapshot(void)
     slot->length = len;
     slot->selStart = (short) selStart;
     slot->selEnd = (short) selEnd;
+    slot->isWriterMode = gHideMarkdown;
 }
 
-/* Replaces gTE's text with a snapshot and, if Writer mode is active,
-   rebuilds gHiddenTE from it so styling comes back correctly. Doesn't
-   free the snapshot -- the caller (DoUndo/DoRedo) owns that. */
+/* Replaces document text with a snapshot. If the snapshot was taken in
+   writer mode, it contains writer text which we load directly into the
+   writer backing store and rebuild. If taken in markdown mode, it
+   contains canonical markdown which we load into gTE. */
 static void RestoreSnapshot(UndoSnapshot *snap)
 {
     Rect savedViewRect;
 
-    SuppressDrawing(gTE, &savedViewRect);
-    WESetSelect(0, WEGetTextLength(gTE), gTE);
-    WEDelete(gTE);
-    HLock(snap->textH);
-    WEInsert(*snap->textH, snap->length, NULL, gTE);
-    HUnlock(snap->textH);
-    RestoreDrawing(gTE, &savedViewRect);
-
-    if (gHideMarkdown) {
-        BuildHiddenView();
+    if (snap->isWriterMode && gHideMarkdown) {
+        /* Snapshot is writer text and we're still in writer mode:
+           replace writer backing store directly and rebuild */
+        SetHandleSize(gWriterText, snap->length);
+        HLock(gWriterText);
+        HLock(snap->textH);
+        BlockMove(*snap->textH, *gWriterText, snap->length);
+        HUnlock(snap->textH);
+        HUnlock(gWriterText);
+        gWriterLen = snap->length;
+        gWindowStart = 0;
+        gWindowEnd = 0;
+        LoadTextWindow(0);
         WESetSelect(snap->selStart, snap->selEnd, gHiddenTE);
-    } else {
+    } else if (snap->isWriterMode && !gHideMarkdown) {
+        /* Snapshot is writer text but we're in markdown mode:
+           need to convert. Put writer text in backing, sync to canonical. */
+        SetHandleSize(gWriterText, snap->length);
+        HLock(gWriterText);
+        HLock(snap->textH);
+        BlockMove(*snap->textH, *gWriterText, snap->length);
+        HUnlock(snap->textH);
+        HUnlock(gWriterText);
+        gWriterLen = snap->length;
+        SyncHiddenToCanonical();
+        /* Now load canonical into gTE */
+        SuppressDrawing(gTE, &savedViewRect);
+        WESetSelect(0, WEGetTextLength(gTE), gTE);
+        WEDelete(gTE);
+        HLock(gMarkdownText);
+        WEInsert(*gMarkdownText, gMarkdownLen, NULL, gTE);
+        HUnlock(gMarkdownText);
+        RestoreDrawing(gTE, &savedViewRect);
         ClearStyles();
         WESetSelect(snap->selStart, snap->selEnd, gTE);
+    } else {
+        /* Snapshot is canonical markdown */
+        SuppressDrawing(gTE, &savedViewRect);
+        WESetSelect(0, WEGetTextLength(gTE), gTE);
+        WEDelete(gTE);
+        HLock(snap->textH);
+        WEInsert(*snap->textH, snap->length, NULL, gTE);
+        HUnlock(snap->textH);
+        RestoreDrawing(gTE, &savedViewRect);
+
+        if (gHideMarkdown) {
+            BuildHiddenView();
+            WESetSelect(snap->selStart, snap->selEnd, gHiddenTE);
+        } else {
+            ClearStyles();
+            WESetSelect(snap->selStart, snap->selEnd, gTE);
+        }
     }
 
     gDirty = true;

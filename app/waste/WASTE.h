@@ -73,6 +73,7 @@ void WEDelete(WEHandle we);
 long WEGetLineCount(WEHandle we);
 OSErr WEGetLineRange(long lineIndex, long *lineStart, long *lineEnd, WEHandle we);
 void WECalText(WEHandle we);
+Boolean WEFixLineHeights(WEHandle we);
 void WESetRects(const Rect *destRect, const Rect *viewRect, WEHandle we);
 
 #endif // WASTE_H

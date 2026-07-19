@@ -215,36 +215,23 @@ static void Init(void)
 */
 void UpdateMenuBarLook(void)
 {
-    GrafPtr savePort;
-    GrafPtr wMgrPort;
-    Rect bar;
-    Boolean doHide;
-
-#ifdef ARTFUL_PRO
-    doHide = (gActiveDoc != NULL) ? gActiveDoc->hideMarkdown : false;
-#else
-    doHide = gHideMarkdown;
-#endif
-
     DrawMenuBar();
-
-    if (doHide) {
-        GetPort(&savePort);
-        GetWMgrPort(&wMgrPort);
-        SetPort(wMgrPort);
-
-        SetRect(&bar, 0, 0, qd.screenBits.bounds.right, MENU_BAR_HEIGHT);
-        InvertRect(&bar);
-
-        SetPort(savePort);
-    }
 }
+
 
 static void MakeMenu(void)
 {
+    MenuHandle appleMenu;
     MenuHandle fileMenu;
     MenuHandle styleMenu;
-    MenuHandle helpMenu;
+
+    /* Apple menu -- ID 1, title is the  character (0x14 in Mac Roman).
+       This is the standard Mac OS 7/8 leftmost menu with the Apple logo.
+       Item 1 is "About...", then a separator, then desk accessories. */
+    appleMenu = NewMenu(mApple, "\p\x14");
+    AppendMenu(appleMenu, "\pAbout The Artful Type...;(-");
+    AppendResMenu(appleMenu, 'DRVR'); /* populate with desk accessories */
+    InsertMenu(appleMenu, 0);
 
     fileMenu = NewMenu(mFile, "\pFile");
     AppendMenu(fileMenu, "\pNew/N;Open.../O;Save/S;Save As...;(-;Quit/Q");
@@ -276,10 +263,6 @@ static void MakeMenu(void)
     gWindowMenu = NewMenu(mWindow, "\pWindow");
     InsertMenu(gWindowMenu, 0);
 #endif
-
-    helpMenu = NewMenu(mHelp, "\pHelp");
-    AppendMenu(helpMenu, "\pAbout The Artful Type...");
-    InsertMenu(helpMenu, 0);
 
     UpdateMenuBarLook();
 }
@@ -334,10 +317,15 @@ void MakeWindow(void)
         if (monoFont == 0) GetFNum("\pCourier", &monoFont);
         if (monoFont != 0) TextFont(monoFont);
     }
-    WENew(&viewRect, &viewRect, 0, &gTE);
+    {
+        Rect destRect = viewRect;
+        destRect.left += 6;
+        destRect.right -= 6;
+        WENew(&destRect, &viewRect, 0, &gTE);
 
-    TextFont(fontNum);
-    WENew(&viewRect, &viewRect, 0, &gHiddenTE);
+        TextFont(fontNum);
+        WENew(&destRect, &viewRect, 0, &gHiddenTE);
+    }
     gActiveTE = gHideMarkdown ? gHiddenTE : gTE;
 
 #ifdef ARTFUL_PRO
@@ -483,7 +471,7 @@ static void DrawTopMiddleButtons(WindowPtr w)
 {
     Rect r;
     short centerX = (w->portRect.right - w->portRect.left) / 2;
-    short startX = centerX - 56;
+    short startX = centerX - 96;
     Str255 s;
     short textWidth;
     
@@ -493,6 +481,39 @@ static void DrawTopMiddleButtons(WindowPtr w)
     
     TextFont(0); /* System Font */
     TextSize(0);
+    
+    /* Draw Zoom -1 */
+    SetRect(&r, startX, 2, startX + 22, 22);
+    FrameRoundRect(&r, 6, 6);
+    TextFace(normal);
+    BlockMove("\p-1", s, 3);
+    textWidth = StringWidth(s);
+    MoveTo(r.left + (r.right - r.left - textWidth) / 2, r.top + 14);
+    DrawString(s);
+    if (gZoomIndex == 0) InvertRoundRect(&r, 6, 6);
+    
+    /* Draw Zoom 0 */
+    SetRect(&r, startX + 26, 2, startX + 48, 22);
+    FrameRoundRect(&r, 6, 6);
+    TextFace(normal);
+    BlockMove("\p 0", s, 3);
+    textWidth = StringWidth(s);
+    MoveTo(r.left + (r.right - r.left - textWidth) / 2, r.top + 14);
+    DrawString(s);
+    if (gZoomIndex == 1) InvertRoundRect(&r, 6, 6);
+    
+    /* Draw Zoom +1 */
+    SetRect(&r, startX + 52, 2, startX + 74, 22);
+    FrameRoundRect(&r, 6, 6);
+    TextFace(normal);
+    BlockMove("\p+1", s, 3);
+    textWidth = StringWidth(s);
+    MoveTo(r.left + (r.right - r.left - textWidth) / 2, r.top + 14);
+    DrawString(s);
+    if (gZoomIndex == 2) InvertRoundRect(&r, 6, 6);
+    
+    startX += 80;
+
     
     /* 1. Draw B Button */
     SetRect(&r, startX, 2, startX + 25, 22);
@@ -517,6 +538,15 @@ static void DrawTopMiddleButtons(WindowPtr w)
     FrameRoundRect(&r, 6, 6);
     TextFace(normal);
     BlockMove("\pView", s, 5);
+    textWidth = StringWidth(s);
+    MoveTo(r.left + (r.right - r.left - textWidth) / 2, r.top + 14);
+    DrawString(s);
+    
+    /* 4. Draw Refresh Button */
+    SetRect(&r, startX + 118, 2, startX + 180, 22);
+    FrameRoundRect(&r, 6, 6);
+    TextFace(normal);
+    BlockMove("\pRefresh", s, 8);
     textWidth = StringWidth(s);
     MoveTo(r.left + (r.right - r.left - textWidth) / 2, r.top + 14);
     DrawString(s);
@@ -937,6 +967,7 @@ static void DoMenuCommand(long menuResult)
                 case iLink:   DoLinkHidden(); break;
                 case iNone:   ClearSelectionStyleHidden(); break;
             }
+            InvalidateHeightCache(); /* repaint immediately so style changes show without scrolling */
         } else {
             switch (menuItem) {
                 case iBold:   WrapSelection("**", "**"); break;
@@ -964,9 +995,17 @@ static void DoMenuCommand(long menuResult)
             case iSansSerif:    SetFontMode(true); break;
             case iStatusBar:    ToggleStatusBar(); break;
         }
-    } else if (menuID == mHelp) {
-        switch (menuItem) {
-            case iAbout: ShowAboutBox(); break;
+    } else if (menuID == mApple) {
+        if (menuItem == iAppleAbout) {
+            ShowAboutBox();
+        } else {
+            /* Launch the selected desk accessory */
+            Str255 daName;
+            MenuHandle appleMenu = GetMenuHandle(mApple);
+            if (appleMenu) {
+                GetMenuItemText(appleMenu, menuItem, daName);
+                OpenDeskAcc(daName);
+            }
         }
 #ifdef ARTFUL_PRO
     } else if (menuID == mWindow) {
@@ -1092,6 +1131,63 @@ static void EventLoop(void)
                                 SetActiveDocument(GetDocumentForWindow(FrontWindow()));
                             }
                         }
+                    } else if (part == inGrow) {
+                        Rect sizeRect;
+                        long newSize;
+                        SetRect(&sizeRect, 100, 100, 32000, 32000);
+                        newSize = GrowWindow(w, event.where, &sizeRect);
+                        if (newSize != 0) {
+                            GrafPtr savedPort;
+                            GetPort(&savedPort);
+                            SetPort(w);
+                            
+                            SizeWindow(w, LoWord(newSize), HiWord(newSize), true);
+                            
+                            /* Force a full redraw so centered/right-aligned items don't leave trails */
+                            InvalRect(&w->portRect);
+                            EraseRect(&w->portRect); /* Explicitly erase now to prevent trails */
+                            
+                            if (gActiveDoc) {
+                                Rect viewRect = w->portRect;
+                                Rect destRect;
+                                Rect sbRect;
+                                
+                                viewRect.left += MARGIN_H;
+                                viewRect.right -= MARGIN_H;
+                                viewRect.top += MARGIN_TOP;
+                                viewRect.bottom -= MARGIN_BOTTOM;
+                                
+                                destRect = viewRect;
+                                destRect.left += 6;
+                                destRect.right -= 6;
+                                
+                                if (gActiveDoc->te) {
+                                    WESetRects(&destRect, &viewRect, gActiveDoc->te);
+                                    WECalText(gActiveDoc->te);
+                                }
+                                if (gActiveDoc->hiddenTE) {
+                                    WESetRects(&destRect, &viewRect, gActiveDoc->hiddenTE);
+                                    WECalText(gActiveDoc->hiddenTE);
+                                }
+                                
+                                /* Update Scrollbar */
+                                HideControl(gActiveDoc->scrollBar);
+                                sbRect = viewRect;
+                                sbRect.left = viewRect.right + (MARGIN_H - SCROLLBAR_WIDTH) / 2;
+                                sbRect.right = sbRect.left + SCROLLBAR_WIDTH;
+                                sbRect.top -= 1;
+                                sbRect.bottom += 1;
+                                MoveControl(gActiveDoc->scrollBar, sbRect.left, sbRect.top);
+                                SizeControl(gActiveDoc->scrollBar, sbRect.right - sbRect.left, sbRect.bottom - sbRect.top);
+                                ShowControl(gActiveDoc->scrollBar);
+                                
+                                /* Update Jump Buttons */
+                                MoveControl(gActiveDoc->jumpToTopBtn, viewRect.left, 2);
+                                MoveControl(gActiveDoc->jumpToEndBtn, viewRect.right - 90, 2);
+                                
+                                AdjustScrollbar();
+                            }
+                        }
                     } else if (part == inMenuBar) {
                         SetActiveDocument(GetDocumentForWindow(FrontWindow()));
                         UpdateEditMenuState();
@@ -1109,14 +1205,35 @@ static void EventLoop(void)
                             
                             /* Check custom top-middle buttons first */
                             short centerX = (w->portRect.right - w->portRect.left) / 2;
-                            short startX = centerX - 56;
-                            Rect btnB, btnI, btnView;
+                            short startX = centerX - 96;
+                            Rect btnZm1, btnZ0, btnZp1, btnB, btnI, btnView, btnRefresh;
                             
+                            SetRect(&btnZm1, startX, 2, startX + 22, 22);
+                            SetRect(&btnZ0, startX + 26, 2, startX + 48, 22);
+                            SetRect(&btnZp1, startX + 52, 2, startX + 74, 22);
+                            
+                            startX += 80;
                             SetRect(&btnB, startX, 2, startX + 25, 22);
                             SetRect(&btnI, startX + 31, 2, startX + 56, 22);
                             SetRect(&btnView, startX + 62, 2, startX + 112, 22);
+                            SetRect(&btnRefresh, startX + 118, 2, startX + 180, 22);
                             
-                            if (PtInRect(event.where, &btnB)) {
+                            if (PtInRect(event.where, &btnZm1)) {
+                                InvertRoundRect(&btnZm1, 6, 6);
+                                while (StillDown()) ;
+                                InvertRoundRect(&btnZm1, 6, 6);
+                                if (gZoomIndex != 0) ApplyZoomIndex(0);
+                            } else if (PtInRect(event.where, &btnZ0)) {
+                                InvertRoundRect(&btnZ0, 6, 6);
+                                while (StillDown()) ;
+                                InvertRoundRect(&btnZ0, 6, 6);
+                                if (gZoomIndex != 1) ApplyZoomIndex(1);
+                            } else if (PtInRect(event.where, &btnZp1)) {
+                                InvertRoundRect(&btnZp1, 6, 6);
+                                while (StillDown()) ;
+                                InvertRoundRect(&btnZp1, 6, 6);
+                                if (gZoomIndex != 2) ApplyZoomIndex(2);
+                            } else if (PtInRect(event.where, &btnB)) {
                                 InvertRoundRect(&btnB, 6, 6);
                                 while (StillDown()) ;
                                 InvertRoundRect(&btnB, 6, 6);
@@ -1152,6 +1269,15 @@ static void EventLoop(void)
                                 InvertRoundRect(&btnView, 6, 6);
                                 
                                 SetViewMode(!gHideMarkdown);
+                            } else if (PtInRect(event.where, &btnRefresh)) {
+                                InvertRoundRect(&btnRefresh, 6, 6);
+                                while (StillDown()) ;
+                                InvertRoundRect(&btnRefresh, 6, 6);
+                                
+                                InvalidateHeightCache();
+                                if (gActiveTE != NULL && (*gActiveTE)->te != NULL) {
+                                    InvalRect(&(**((*gActiveTE)->te)).viewRect);
+                                }
                             } else if (FindControl(event.where, w, &hitControl) != 0) {
                                 if (hitControl == gScrollBar) {
                                     DoScrollClick(event.where);
@@ -1182,14 +1308,35 @@ static void EventLoop(void)
                         
                         /* Check custom top-middle buttons first */
                         short centerX = (w->portRect.right - w->portRect.left) / 2;
-                        short startX = centerX - 56;
-                        Rect btnB, btnI, btnView;
+                        short startX = centerX - 96;
+                        Rect btnZm1, btnZ0, btnZp1, btnB, btnI, btnView, btnRefresh;
                         
+                        SetRect(&btnZm1, startX, 2, startX + 22, 22);
+                        SetRect(&btnZ0, startX + 26, 2, startX + 48, 22);
+                        SetRect(&btnZp1, startX + 52, 2, startX + 74, 22);
+                        
+                        startX += 80;
                         SetRect(&btnB, startX, 2, startX + 25, 22);
                         SetRect(&btnI, startX + 31, 2, startX + 56, 22);
                         SetRect(&btnView, startX + 62, 2, startX + 112, 22);
+                        SetRect(&btnRefresh, startX + 118, 2, startX + 180, 22);
                         
-                        if (PtInRect(event.where, &btnB)) {
+                        if (PtInRect(event.where, &btnZm1)) {
+                            InvertRoundRect(&btnZm1, 6, 6);
+                            while (StillDown()) ;
+                            InvertRoundRect(&btnZm1, 6, 6);
+                            if (gZoomIndex != 0) ApplyZoomIndex(0);
+                        } else if (PtInRect(event.where, &btnZ0)) {
+                            InvertRoundRect(&btnZ0, 6, 6);
+                            while (StillDown()) ;
+                            InvertRoundRect(&btnZ0, 6, 6);
+                            if (gZoomIndex != 1) ApplyZoomIndex(1);
+                        } else if (PtInRect(event.where, &btnZp1)) {
+                            InvertRoundRect(&btnZp1, 6, 6);
+                            while (StillDown()) ;
+                            InvertRoundRect(&btnZp1, 6, 6);
+                            if (gZoomIndex != 2) ApplyZoomIndex(2);
+                        } else if (PtInRect(event.where, &btnB)) {
                             InvertRoundRect(&btnB, 6, 6);
                             while (StillDown()) ;
                             InvertRoundRect(&btnB, 6, 6);
@@ -1225,6 +1372,15 @@ static void EventLoop(void)
                             InvertRoundRect(&btnView, 6, 6);
                             
                             SetViewMode(!gHideMarkdown);
+                        } else if (PtInRect(event.where, &btnRefresh)) {
+                            InvertRoundRect(&btnRefresh, 6, 6);
+                            while (StillDown()) ;
+                            InvertRoundRect(&btnRefresh, 6, 6);
+                            
+                            InvalidateHeightCache();
+                            if (gActiveTE != NULL && (*gActiveTE)->te != NULL) {
+                                InvalRect(&(**((*gActiveTE)->te)).viewRect);
+                            }
                         } else if (FindControl(event.where, w, &hitControl) != 0) {
                             if (hitControl == gScrollBar) {
                                 DoScrollClick(event.where);
@@ -1322,7 +1478,23 @@ static void EventLoop(void)
                         if (event.what == keyDown) {
                             if ((key == 'z' || key == 'Z') && (event.modifiers & shiftKey))
                                 DoRedo();
-                            else {
+                            else if (key == 'd' || key == 'D') {
+                                /* Cmd+D: insert current date as H2 heading */
+                                PushUndoSnapshot();
+                                gTypingRunActive = false;
+                                gDirty = true;
+                                InsertDateHeading(2);
+                                ScrollCaretIntoView(false);
+                                UpdateScrollbarRange();
+                            } else if (key == 't' || key == 'T') {
+                                /* Cmd+T: insert current time as H3 heading */
+                                PushUndoSnapshot();
+                                gTypingRunActive = false;
+                                gDirty = true;
+                                InsertTimeHeading(3);
+                                ScrollCaretIntoView(false);
+                                UpdateScrollbarRange();
+                            } else {
                                 UpdateEditMenuState();
                                 DoMenuCommand(MenuKey(key));
                             }
@@ -1527,14 +1699,38 @@ static void EventLoop(void)
                                              }
                                              WESetSelect(lineStart, lineEnd, gActiveTE);
                                              WESetStyle(weDoFace + weDoColor, &ts, gActiveTE);
-                                            doInsertCR = false;
-                                            gDirty = true;
-                                        }
+                                             doInsertCR = false;
+                                             gDirty = true;
+                                         } else if ((ts.tsFace & bold) && ts.tsSize > CurrentFontSize()) {
+                                             ts.tsFace &= ~bold;
+                                             ts.tsSize = CurrentFontSize();
+                                             WESetSelect(lineStart, lineEnd, gActiveTE);
+                                             WESetStyle(weDoFace + weDoSize, &ts, gActiveTE);
+                                             doInsertCR = false;
+                                             gDirty = true;
+                                             InvalidateHeightCache();
+                                             if (gActiveTE != NULL && (*gActiveTE)->te != NULL) {
+                                                 InvalRect(&(**((*gActiveTE)->te)).viewRect);
+                                             }
+                                         }
                                     }
                                 }
                                 
                                 if (doInsertCR) {
+                                    WETextStyle prevTs;
+                                    WEGetStyle(lineStart, &prevTs, gActiveTE);
+                                    Boolean wasHeader = ((prevTs.tsFace & bold) && prevTs.tsSize > CurrentFontSize());
+                                    
                                     WEKey(key, keyCode, event.modifiers, gActiveTE);
+                                    
+                                    if (wasHeader) {
+                                        WETextStyle newTs;
+                                        newTs.tsFace = normal;
+                                        newTs.tsSize = CurrentFontSize();
+                                        long newSelStart, newSelEnd;
+                                        WEGetSelection(&newSelStart, &newSelEnd, gActiveTE);
+                                        WESetStyle(weDoFace + weDoSize, &newTs, gActiveTE);
+                                    }
                                     if (prefixLen > 0) {
                                         char nextPrefix[64];
                                         BlockMove(prefixBuf, nextPrefix, prefixLen);

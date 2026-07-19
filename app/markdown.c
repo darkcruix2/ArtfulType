@@ -1,9 +1,14 @@
+#include <Types.h>
+#include <Memory.h>
+#include <OSUtils.h>
+#include <ToolUtils.h>
+#include <string.h>
+#include <stdio.h>
+
 #include "app.h"
 
 static long GetTESelStart(WEHandle we) { long s, e; WEGetSelection(&s, &e, we); return s; }
 static long GetTESelEnd(WEHandle we) { long s, e; WEGetSelection(&s, &e, we); return e; }
-
-#include <string.h>
 
 short AddLinkURL(const unsigned char *url)
 {
@@ -245,6 +250,11 @@ void BuildHiddenView(void)
                     long lineStart = q;
                     long lineEnd = lineStart;
                     long outStart = outLen;
+
+                    short d;
+                    for (d = 0; d < blockquoteDepth; d++) {
+                        (*outH)[outLen++] = '\t';
+                    }
 
                     while (lineEnd < len && (*srcH)[lineEnd] != '\r') {
                         (*outH)[outLen++] = (*srcH)[lineEnd];
@@ -730,6 +740,12 @@ void SyncHiddenToCanonical(void)
                 (*outH)[outLen++] = '>';
             }
             (*outH)[outLen++] = ' ';
+            long p = lineStart;
+            short t;
+            for (t = 0; t < blockquoteDepth && p < lineEnd && (*srcH)[p] == '\t'; t++) {
+                p++;
+            }
+            textOffset = p;
         } else if (isTaskItem) {
             long p = lineStart;
             while (p < lineEnd && ((*srcH)[p] == ' ' || (*srcH)[p] == '\t')) {
@@ -1663,13 +1679,22 @@ void DetectInlineMarkdown(char justTyped)
             WETextStyle ts;
 
             HUnlock(textH);
+            long deletedLen = caret - lineStart;
+            long innerEnd = lineEnd - deletedLen;
             WESetSelect((short) lineStart, (short) caret, gHiddenTE);
             WEDelete(gHiddenTE);
-            WESetSelect((short) lineStart, (short) lineStart, gHiddenTE);
+            WESetSelect((short) lineStart, (short) innerEnd, gHiddenTE);
             ts.tsFace = bold;
             ts.tsSize = CurrentFontSize() + (7 - level) * 2;
+            if (innerEnd > lineStart) {
+                WESetStyle(weDoFace + weDoSize, &ts, gHiddenTE);
+            }
+            WESetSelect((short) lineStart, (short) lineStart, gHiddenTE);
             WESetStyle(weDoFace + weDoSize, &ts, gHiddenTE);
             InvalidateHeightCache();
+            if (gHiddenTE != NULL && (*gHiddenTE)->te != NULL) {
+                InvalRect(&(**((*gHiddenTE)->te)).viewRect);
+            }
             return;
         }
 
@@ -1693,15 +1718,30 @@ void DetectInlineMarkdown(char justTyped)
                 
                 WESetSelect((short) lineStart, (short) caret, gHiddenTE);
                 WEDelete(gHiddenTE);
-                
-                ts.tsFace = italic;
-                ts.tsColor.red = 0;
-                ts.tsColor.green = 0;
-                ts.tsColor.blue = 1 + bqCount;
+
+                char tabs[16];
+                short i;
+                for (i = 0; i < bqCount && i < 15; i++) tabs[i] = '\t';
+                tabs[i] = 0;
                 
                 WESetSelect((short) lineStart, (short) lineStart, gHiddenTE);
-                WESetStyle(weDoFace + weDoColor, &ts, gHiddenTE);
-                SetTypingStyleNormal((short) lineStart);
+                WEInsert(tabs, i, NULL, gHiddenTE);
+                
+                ts.tsColor.red   = 0;
+                ts.tsColor.green = 0;
+                ts.tsColor.blue  = 10 + bqCount;
+                
+                WESetSelect((short) lineStart, (short) (lineStart + i), gHiddenTE);
+                WESetStyle(weDoColor, &ts, gHiddenTE);
+                
+                WESetSelect((short) (lineStart + i), (short) (lineStart + i), gHiddenTE);
+                WESetStyle(weDoColor, &ts, gHiddenTE);
+
+                SetTypingStyleNormal((short) (lineStart + i));
+                
+                WESetSelect((short) (lineStart + i), (short) (lineStart + i), gHiddenTE);
+                WESetStyle(weDoColor, &ts, gHiddenTE);
+
                 InvalidateHeightCache();
                 return;
             }
@@ -2328,49 +2368,65 @@ void LoadTextWindow(long startOffset)
             if (opEnd > copyLen)    opEnd   = copyLen;
             
             WESetSelect(opStart, opEnd, te);
+            WEGetStyle(opStart, &opStyle, te);
             switch (ops[k].kind) {
                 case 'X':
-                    opStyle.tsFace = bold | italic;
+                    opStyle.tsFace |= (bold | italic);
                     WESetStyle(weDoFace, &opStyle, te);
                     break;
                 case 'B':
-                    opStyle.tsFace = bold;
+                    opStyle.tsFace |= bold;
                     WESetStyle(weDoFace, &opStyle, te);
                     break;
                 case 'I':
-                    opStyle.tsFace = italic;
+                    opStyle.tsFace |= italic;
                     WESetStyle(weDoFace, &opStyle, te);
                     break;
                 case 'C':
                     GetFNum("\pMonaco", &opStyle.tsFont);
                     opStyle.tsFace = normal;
-                    WESetStyle(weDoFont + weDoFace, &opStyle, te);
+                    opStyle.tsColor.red = 0;
+                    opStyle.tsColor.green = 0;
+                    if (ops[k].level > 0) {
+                        opStyle.tsColor.blue = 3;
+                    } else {
+                        opStyle.tsColor.blue = 0;
+                    }
+                    WESetStyle(weDoFont + weDoFace + weDoColor, &opStyle, te);
                     break;
                 case 'L':
-                    opStyle.tsFace = underline;
+                    opStyle.tsFace |= underline;
                     opStyle.tsColor.red = ops[k].linkID;
                     opStyle.tsColor.green = 0;
                     opStyle.tsColor.blue = 0;
                     WESetStyle(weDoFace + weDoColor, &opStyle, te);
                     break;
                 case 'H':
-                    opStyle.tsFace = bold;
+                    opStyle.tsFace |= bold;
                     opStyle.tsSize = CurrentFontSize() + (7 - ops[k].level) * 2;
                     WESetStyle(weDoFace + weDoSize, &opStyle, te);
                     break;
                 case 'R':
-                    opStyle.tsFace = bold;
+                    opStyle.tsFace |= bold;
                     opStyle.tsColor.red   = 0;
                     opStyle.tsColor.green = 0;
                     opStyle.tsColor.blue  = 1;
                     WESetStyle(weDoFace + weDoColor, &opStyle, te);
                     break;
                 case 'Q':
-                    opStyle.tsFace = italic;
+                    opStyle.tsFace = normal;
                     opStyle.tsColor.red   = 0;
                     opStyle.tsColor.green = 0;
-                    opStyle.tsColor.blue  = 1 + ops[k].level;
+                    opStyle.tsColor.blue  = 10 + ops[k].level;
                     WESetStyle(weDoFace + weDoColor, &opStyle, te);
+                    break;
+                case 'T':
+                    GetFNum("\pMonaco", &opStyle.tsFont);
+                    opStyle.tsFace = normal;
+                    opStyle.tsColor.red = 0;
+                    opStyle.tsColor.green = 0;
+                    opStyle.tsColor.blue = 2;
+                    WESetStyle(weDoFont + weDoFace + weDoColor, &opStyle, te);
                     break;
                 case 'S':
                     opStyle.tsColor.red   = 0;
@@ -2510,8 +2566,8 @@ void SyncWindowToBacking(void)
                 
                 Boolean isHR = isBold && (style.stColor.blue == 1);
                 
-                Boolean isBlockquote = (style.stColor.blue >= 2);
-                short bqDepth = isBlockquote ? (style.stColor.blue - 1) : 0;
+                Boolean isBlockquote = (style.stColor.blue >= 10);
+                short bqDepth = isBlockquote ? (style.stColor.blue - 10) : 0;
                 
                 short linkID = 0;
                 if (isUnderline && style.stColor.red > 0) {
@@ -2664,3 +2720,75 @@ void SyncWindowToBacking(void)
     gWindowEnd += diff;
 }
 
+
+void InsertDateHeading(short level)
+{
+    DateTimeRec date;
+    unsigned long secs;
+    char buf[64];
+    int i;
+    
+    GetDateTime(&secs);
+    SecondsToDate(secs, &date);
+    
+    if (gHideMarkdown) {
+        WETextStyle ts;
+        ts.tsFace = bold;
+        ts.tsSize = CurrentFontSize() + (7 - level) * 2;
+        WESetStyle(weDoFace + weDoSize, &ts, gActiveTE);
+        
+        sprintf(buf, "%04d-%02d-%02d\r", date.year, date.month, date.day);
+        WEInsert(buf, strlen(buf), NULL, gActiveTE);
+        
+        ts.tsFace = normal;
+        ts.tsSize = CurrentFontSize();
+        WESetStyle(weDoFace + weDoSize, &ts, gActiveTE);
+        
+        InvalidateHeightCache();
+        if (gActiveTE != NULL && (*gActiveTE)->te != NULL) {
+            InvalRect(&(**((*gActiveTE)->te)).viewRect);
+        }
+    } else {
+        for (i = 0; i < level; i++) buf[i] = '#';
+        buf[level] = ' ';
+        sprintf(buf + level + 1, "%04d-%02d-%02d\r", date.year, date.month, date.day);
+        
+        WEInsert(buf, strlen(buf), NULL, gActiveTE);
+    }
+}
+
+void InsertTimeHeading(short level)
+{
+    DateTimeRec date;
+    unsigned long secs;
+    char buf[64];
+    int i;
+    
+    GetDateTime(&secs);
+    SecondsToDate(secs, &date);
+    
+    if (gHideMarkdown) {
+        WETextStyle ts;
+        ts.tsFace = bold;
+        ts.tsSize = CurrentFontSize() + (7 - level) * 2;
+        WESetStyle(weDoFace + weDoSize, &ts, gActiveTE);
+        
+        sprintf(buf, "%02d:%02d\r", date.hour, date.minute);
+        WEInsert(buf, strlen(buf), NULL, gActiveTE);
+        
+        ts.tsFace = normal;
+        ts.tsSize = CurrentFontSize();
+        WESetStyle(weDoFace + weDoSize, &ts, gActiveTE);
+        
+        InvalidateHeightCache();
+        if (gActiveTE != NULL && (*gActiveTE)->te != NULL) {
+            InvalRect(&(**((*gActiveTE)->te)).viewRect);
+        }
+    } else {
+        for (i = 0; i < level; i++) buf[i] = '#';
+        buf[level] = ' ';
+        sprintf(buf + level + 1, "%02d:%02d\r", date.hour, date.minute);
+        
+        WEInsert(buf, strlen(buf), NULL, gActiveTE);
+    }
+}

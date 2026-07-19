@@ -48,6 +48,8 @@ void WEUpdate(const Rect *rect, WEHandle we)
         GrafPtr oldPort;
         GetPort(&oldPort);
         SetPort((**te).inPort);
+        
+
         TEUpdate(rect, te);
 
         /* --- Post-draw pass for special styles --- */
@@ -71,6 +73,28 @@ void WEUpdate(const Rect *rect, WEHandle we)
             short   nRuns    = (**teStyles).nRuns;
             STHandle styleTab = (**teStyles).styleTab;
             HLock((Handle)styleTab);
+
+            /* --- Draw line backgrounds / side-lines after TEUpdate using patOr --- */
+            short l;
+            for (l = 0; l < (**te).nLines; l++) {
+                short lineStart = (**te).lineStarts[l];
+                short lineEnd = (l + 1 < (**te).nLines) ? (**te).lineStarts[l+1] : (**te).teLength;
+                if (lineEnd > lineStart) {
+                    short styleIndex = -1;
+                    short rr;
+                    for (rr = 0; rr < nRuns; rr++) {
+                        if ((**teStyles).runs[rr].startChar <= lineStart &&
+                            (rr + 1 == nRuns || (**teStyles).runs[rr+1].startChar > lineStart)) {
+                            styleIndex = (**teStyles).runs[rr].styleIndex;
+                            break;
+                        }
+                    }
+                    if (styleIndex >= 0) {
+                        STElement st = (*styleTab)[styleIndex];
+                        // Removed block code and blockquote graphical line rendering as requested
+                    }
+                }
+            }
 
             /* Remember last HR baseline to only draw the line once per line */
             short lastHRScreenY = -32000;
@@ -200,7 +224,9 @@ void WEClick(Point pt, Boolean shift, WEHandle we)
 void WEKey(short charCode, short keyCode, short modifiers, WEHandle we)
 {
     if (we != NULL && (*we)->te != NULL) {
-        TEKey(charCode, (*we)->te);
+        TEHandle te = (*we)->te;
+        TEKey(charCode, te);
+        WEFixLineHeights(we);
     }
 }
 
@@ -331,10 +357,7 @@ void WEGetViewRect(LongRect *viewRect, WEHandle we)
 void WEPinScroll(long dx, long dy, WEHandle we)
 {
     if (we != NULL && (*we)->te != NULL) {
-        TEScroll((short) dx, (short) dy, (*we)->te);
-        /* Redraw overlay after scroll so special styles remain visible */
-        Rect vr = (**((*we)->te)).viewRect;
-        WEUpdate(&vr, we);
+        TEPinScroll((short) dx, (short) dy, (*we)->te);
     }
 }
 
@@ -342,9 +365,6 @@ void WEScroll(long dx, long dy, WEHandle we)
 {
     if (we != NULL && (*we)->te != NULL) {
         TEScroll((short) dx, (short) dy, (*we)->te);
-        /* Redraw overlay after scroll so special styles remain visible */
-        Rect vr = (**((*we)->te)).viewRect;
-        WEUpdate(&vr, we);
     }
 }
 
@@ -405,10 +425,17 @@ OSErr WEGetLineRange(long lineIndex, long *lineStart, long *lineEnd, WEHandle we
     return -1;
 }
 
+Boolean WEFixLineHeights(WEHandle we)
+{
+    /* Line height adjustments removed — headers use natural font metrics */
+    return false;
+}
+
 void WECalText(WEHandle we)
 {
     if (we != NULL && (*we)->te != NULL) {
         TECalText((*we)->te);
+        WEFixLineHeights(we);
     }
 }
 
