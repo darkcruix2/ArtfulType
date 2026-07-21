@@ -55,9 +55,6 @@ static void SafeScroll(long dy)
 
 static void SyncScrollbarToOffset(void)
 {
-    static long lastTotal = -1;
-    static short lastVal = -1;
-    
     long total = TotalLength();
     short val = 0;
 
@@ -78,16 +75,32 @@ static void SyncScrollbarToOffset(void)
             val = (short) (((double)currentPixelsScrolled * 32767.0) / (double)maxScroll);
         }
     } else {
-        long currentOffset = gWindowStart;
-        val = (short) (((double)currentOffset * 32767.0) / (double)total);
+        /* For large documents, combine the window start offset with the
+           pixel scroll position within the current window.  The window
+           covers gWindowStart..gWindowEnd in the backing store; within
+           that window, the TE may be scrolled by some number of pixels.
+           Map the pixel offset to a fractional character offset so the
+           scrollbar moves smoothly during arrow/page scrolling. */
+        double effectiveOffset = (double)gWindowStart;
+        long maxScroll = GetMaxScrollPixels();
+        if (maxScroll > 0) {
+            LongRect viewRect, destRect;
+            long windowChars = gWindowEnd - gWindowStart;
+            WEGetViewRect(&viewRect, gActiveTE);
+            WEGetDestRect(&destRect, gActiveTE);
+            long currentPixelsScrolled = viewRect.top - destRect.top;
+            if (currentPixelsScrolled < 0) currentPixelsScrolled = 0;
+            if (currentPixelsScrolled > maxScroll) currentPixelsScrolled = maxScroll;
+            /* fraction of the window that has been scrolled past */
+            effectiveOffset += ((double)currentPixelsScrolled / (double)maxScroll) * (double)windowChars;
+        }
+        val = (short) ((effectiveOffset * 32767.0) / (double)total);
     }
 
-    if (val != lastVal || total != lastTotal) {
-        if (val != GetControlValue(gScrollBar))
-            SetControlValue(gScrollBar, val);
-        lastVal = val;
-        lastTotal = total;
-    }
+    if (val < 0) val = 0;
+    if (val > 32767) val = 32767;
+    if (val != GetControlValue(gScrollBar))
+        SetControlValue(gScrollBar, val);
 }
 
 void InvalidateHeightCache(void)
@@ -110,9 +123,6 @@ void InvalidateHeightCache(void)
 
 void UpdateScrollbarRange(void)
 {
-    static long lastTotal = -1;
-    static short lastMaxVal = -1;
-    
     long total = TotalLength();
     short maxVal;
     
@@ -123,16 +133,12 @@ void UpdateScrollbarRange(void)
         maxVal = (total > 0) ? 32767 : 0;
     }
 
-    // Only update if value actually changed to avoid unnecessary updates
-    if (maxVal != lastMaxVal) {
-        if (maxVal != GetControlMaximum(gScrollBar))
-            SetControlMaximum(gScrollBar, maxVal);
-        lastMaxVal = maxVal;
-        
-        if (!gScrollBarVisible) {
-            ShowControl(gScrollBar);
-            gScrollBarVisible = true;
-        }
+    if (maxVal != GetControlMaximum(gScrollBar))
+        SetControlMaximum(gScrollBar, maxVal);
+    
+    if (maxVal > 0 && !gScrollBarVisible) {
+        ShowControl(gScrollBar);
+        gScrollBarVisible = true;
     }
 }
 

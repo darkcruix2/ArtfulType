@@ -358,6 +358,14 @@ void WEPinScroll(long dx, long dy, WEHandle we)
 {
     if (we != NULL && (*we)->te != NULL) {
         TEPinScroll((short) dx, (short) dy, (*we)->te);
+        /* TEPinScroll repaints via its own TEUpdate, but our custom
+           post-draw pass (HRs, strikethrough, super/subscript) lives
+           in WEUpdate.  Re-run it on the visible area so decorations
+           stay visible after scrolling. */
+        if (gHideMarkdown) {
+            Rect vr = (**((*we)->te)).viewRect;
+            WEUpdate(&vr, we);
+        }
     }
 }
 

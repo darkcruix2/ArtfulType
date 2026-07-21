@@ -86,6 +86,272 @@ void RestoreDrawing(WEHandle te, Rect *saved)
     WESetRects(saved, saved, te);
 }
 
+/*
+    ParseInlineContent: parse inline markdown formatting (bold, italic, code,
+    links, etc.) from srcH[start..end) and append stripped output to outH at
+    *outLenPtr.  Style ops are appended to the ops array via gWriterOpCount.
+    srcH and outH must be locked by the caller.
+*/
+static void ParseInlineContent(Handle srcH, long start, long end, Handle outH, long *outLenPtr, StyleOp *ops)
+{
+    long i = start;
+    long outLen = *outLenPtr;
+
+    while (i < end) {
+        /* Escape sequences */
+        if (i + 1 < end && (*srcH)[i] == '\\' && ((*srcH)[i+1] == '*' || (*srcH)[i+1] == '_' || (*srcH)[i+1] == '#' || (*srcH)[i+1] == '>' || (*srcH)[i+1] == '[' || (*srcH)[i+1] == '`' || (*srcH)[i+1] == '\\')) {
+            (*outH)[outLen++] = (*srcH)[i+1];
+            i += 2;
+            continue;
+        }
+
+        /* ***bold+italic*** */
+        if (i + 2 < end && ((*srcH)[i] == '*' || (*srcH)[i] == '_') && (*srcH)[i] == (*srcH)[i + 1] && (*srcH)[i] == (*srcH)[i + 2]) {
+            char delim = (*srcH)[i];
+            long j = i + 3;
+            while (j + 2 < end && ((*srcH)[j] != delim || (*srcH)[j + 1] != delim || (*srcH)[j + 2] != delim))
+                j++;
+            if (j + 2 < end) {
+                long outStart = outLen, m;
+                for (m = i + 3; m < j; m++)
+                    (*outH)[outLen++] = (*srcH)[m];
+                if (gWriterOpCount < MAX_STYLE_OPS) {
+                    ops[gWriterOpCount].start = outStart;
+                    ops[gWriterOpCount].end = outLen;
+                    ops[gWriterOpCount].kind = 'X';
+                    ops[gWriterOpCount].level = 0;
+                    ops[gWriterOpCount].linkID = 0;
+                    gWriterOpCount++;
+                }
+                i = j + 3;
+                continue;
+            }
+        }
+
+        /* **bold** */
+        if (i + 1 < end && ((*srcH)[i] == '*' || (*srcH)[i] == '_') && (*srcH)[i] == (*srcH)[i + 1]) {
+            char delim = (*srcH)[i];
+            long j = i + 2;
+            while (j + 1 < end && ((*srcH)[j] != delim || (*srcH)[j + 1] != delim))
+                j++;
+            if (j + 1 < end) {
+                long outStart = outLen, m;
+                for (m = i + 2; m < j; m++)
+                    (*outH)[outLen++] = (*srcH)[m];
+                if (gWriterOpCount < MAX_STYLE_OPS) {
+                    ops[gWriterOpCount].start = outStart;
+                    ops[gWriterOpCount].end = outLen;
+                    ops[gWriterOpCount].kind = 'B';
+                    ops[gWriterOpCount].level = 0;
+                    ops[gWriterOpCount].linkID = 0;
+                    gWriterOpCount++;
+                }
+                i = j + 2;
+                continue;
+            }
+        }
+        /* *italic* */
+        if ((*srcH)[i] == '*' || (*srcH)[i] == '_') {
+            char delim = (*srcH)[i];
+            long j = i + 1;
+            while (j < end && (*srcH)[j] != delim)
+                j++;
+            if (j < end) {
+                long outStart = outLen, m;
+                for (m = i + 1; m < j; m++)
+                    (*outH)[outLen++] = (*srcH)[m];
+                if (gWriterOpCount < MAX_STYLE_OPS) {
+                    ops[gWriterOpCount].start = outStart;
+                    ops[gWriterOpCount].end = outLen;
+                    ops[gWriterOpCount].kind = 'I';
+                    ops[gWriterOpCount].level = 0;
+                    ops[gWriterOpCount].linkID = 0;
+                    gWriterOpCount++;
+                }
+                i = j + 1;
+                continue;
+            }
+        }
+        /* ~~strikethrough~~ */
+        if (i + 1 < end && (*srcH)[i] == '~' && (*srcH)[i + 1] == '~') {
+            long j = i + 2;
+            while (j + 1 < end && ((*srcH)[j] != '~' || (*srcH)[j + 1] != '~'))
+                j++;
+            if (j + 1 < end) {
+                long outStart = outLen, m;
+                for (m = i + 2; m < j; m++)
+                    (*outH)[outLen++] = (*srcH)[m];
+                if (gWriterOpCount < MAX_STYLE_OPS) {
+                    ops[gWriterOpCount].start = outStart;
+                    ops[gWriterOpCount].end = outLen;
+                    ops[gWriterOpCount].kind = 'S';
+                    ops[gWriterOpCount].level = 0;
+                    ops[gWriterOpCount].linkID = 0;
+                    gWriterOpCount++;
+                }
+                i = j + 2;
+                continue;
+            }
+        }
+        /* ~subscript~ */
+        if ((*srcH)[i] == '~' && i + 1 < end && (*srcH)[i + 1] != '~') {
+            long j = i + 1;
+            while (j < end && (*srcH)[j] != '~' && (*srcH)[j] != '\r')
+                j++;
+            if (j < end && (*srcH)[j] == '~' && j > i + 1) {
+                long outStart = outLen, m;
+                for (m = i + 1; m < j; m++)
+                    (*outH)[outLen++] = (*srcH)[m];
+                if (gWriterOpCount < MAX_STYLE_OPS) {
+                    ops[gWriterOpCount].start = outStart;
+                    ops[gWriterOpCount].end = outLen;
+                    ops[gWriterOpCount].kind = 'D';
+                    ops[gWriterOpCount].level = 0;
+                    ops[gWriterOpCount].linkID = 0;
+                    gWriterOpCount++;
+                }
+                i = j + 1;
+                continue;
+            }
+        }
+        /* ^superscript^ */
+        if ((*srcH)[i] == '^') {
+            long j = i + 1;
+            while (j < end && (*srcH)[j] != '^' && (*srcH)[j] != '\r')
+                j++;
+            if (j < end && (*srcH)[j] == '^' && j > i + 1) {
+                long outStart = outLen, m;
+                for (m = i + 1; m < j; m++)
+                    (*outH)[outLen++] = (*srcH)[m];
+                if (gWriterOpCount < MAX_STYLE_OPS) {
+                    ops[gWriterOpCount].start = outStart;
+                    ops[gWriterOpCount].end = outLen;
+                    ops[gWriterOpCount].kind = 'P';
+                    ops[gWriterOpCount].level = 0;
+                    ops[gWriterOpCount].linkID = 0;
+                    gWriterOpCount++;
+                }
+                i = j + 1;
+                continue;
+            }
+        }
+        /* ==highlight== */
+        if (i + 1 < end && (*srcH)[i] == '=' && (*srcH)[i + 1] == '=') {
+            long j = i + 2;
+            while (j + 1 < end && ((*srcH)[j] != '=' || (*srcH)[j + 1] != '='))
+                j++;
+            if (j + 1 < end) {
+                long outStart = outLen, m;
+                for (m = i + 2; m < j; m++)
+                    (*outH)[outLen++] = (*srcH)[m];
+                if (gWriterOpCount < MAX_STYLE_OPS) {
+                    ops[gWriterOpCount].start = outStart;
+                    ops[gWriterOpCount].end = outLen;
+                    ops[gWriterOpCount].kind = 'E';
+                    ops[gWriterOpCount].level = 0;
+                    ops[gWriterOpCount].linkID = 0;
+                    gWriterOpCount++;
+                }
+                i = j + 2;
+                continue;
+            }
+        }
+        /* `inline code` */
+        if ((*srcH)[i] == '`') {
+            long j = i + 1;
+            while (j < end && (*srcH)[j] != '`')
+                j++;
+            if (j < end) {
+                long outStart = outLen, m;
+                for (m = i + 1; m < j; m++)
+                    (*outH)[outLen++] = (*srcH)[m];
+                if (gWriterOpCount < MAX_STYLE_OPS) {
+                    ops[gWriterOpCount].start = outStart;
+                    ops[gWriterOpCount].end = outLen;
+                    ops[gWriterOpCount].kind = 'C';
+                    ops[gWriterOpCount].level = 0;
+                    ops[gWriterOpCount].linkID = 0;
+                    gWriterOpCount++;
+                }
+                i = j + 1;
+                continue;
+            }
+        }
+        /* <auto-link> */
+        if ((*srcH)[i] == '<') {
+            long closeAngle = i + 1;
+            while (closeAngle < end && (*srcH)[closeAngle] != '>')
+                closeAngle++;
+            if (closeAngle < end) {
+                long urlLen = closeAngle - (i + 1);
+                if (urlLen > 7 && urlLen < 255) {
+                    if (((*srcH)[i+1] == 'h' && (*srcH)[i+2] == 't' && (*srcH)[i+3] == 't' && (*srcH)[i+4] == 'p') ||
+                        ((*srcH)[i+1] == 'm' && (*srcH)[i+2] == 'a' && (*srcH)[i+3] == 'i' && (*srcH)[i+4] == 'l')) {
+                        long outStart = outLen, m;
+                        Str255 url;
+                        for (m = i + 1; m < closeAngle; m++)
+                            (*outH)[outLen++] = (*srcH)[m];
+                        url[0] = (unsigned char) urlLen;
+                        BlockMove(*srcH + i + 1, url + 1, urlLen);
+                        if (gWriterOpCount < MAX_STYLE_OPS) {
+                            ops[gWriterOpCount].start = outStart;
+                            ops[gWriterOpCount].end = outLen;
+                            ops[gWriterOpCount].kind = 'L';
+                            ops[gWriterOpCount].level = 0;
+                            ops[gWriterOpCount].linkID = AddLinkURL(url);
+                            gWriterOpCount++;
+                        }
+                        i = closeAngle + 1;
+                        continue;
+                    }
+                }
+            }
+        }
+        /* [link](url) and ![image](url) */
+        if ((*srcH)[i] == '[' || ((*srcH)[i] == '!' && i + 1 < end && (*srcH)[i+1] == '[')) {
+            Boolean isImage = ((*srcH)[i] == '!');
+            long openBracket = isImage ? i + 1 : i;
+            long closeBracket = openBracket + 1;
+            while (closeBracket < end && (*srcH)[closeBracket] != ']')
+                closeBracket++;
+            if (closeBracket < end && closeBracket + 1 < end && (*srcH)[closeBracket + 1] == '(') {
+                long closeParen = closeBracket + 2;
+                while (closeParen < end && (*srcH)[closeParen] != ')')
+                    closeParen++;
+                if (closeParen < end) {
+                    long outStart = outLen, m;
+                    Str255 url;
+                    long urlLen = closeParen - (closeBracket + 2);
+                    if (isImage) {
+                        (*outH)[outLen++] = '!';
+                    }
+                    for (m = openBracket + 1; m < closeBracket; m++)
+                        (*outH)[outLen++] = (*srcH)[m];
+                    if (urlLen > 255) urlLen = 255;
+                    url[0] = (unsigned char) urlLen;
+                    BlockMove(*srcH + closeBracket + 2, url + 1, urlLen);
+                    if (gWriterOpCount < MAX_STYLE_OPS) {
+                        ops[gWriterOpCount].start = outStart;
+                        ops[gWriterOpCount].end = outLen;
+                        ops[gWriterOpCount].kind = isImage ? 'M' : 'L';
+                        ops[gWriterOpCount].level = 0;
+                        ops[gWriterOpCount].linkID = AddLinkURL(url);
+                        gWriterOpCount++;
+                    }
+                    i = closeParen + 1;
+                    continue;
+                }
+            }
+        }
+
+        /* Plain character -- pass through */
+        (*outH)[outLen++] = (*srcH)[i];
+        i++;
+    }
+
+    *outLenPtr = outLen;
+}
+
 void BuildHiddenView(void)
 {
     Handle srcH;
@@ -210,9 +476,9 @@ void BuildHiddenView(void)
                 long outStart = outLen;
 
                 while (lineEnd < len && (*srcH)[lineEnd] != '\r') {
-                    (*outH)[outLen++] = (*srcH)[lineEnd];
                     lineEnd++;
                 }
+                ParseInlineContent(srcH, lineStart, lineEnd, outH, &outLen, ops);
                 if (gWriterOpCount < MAX_STYLE_OPS) {
                     ops[gWriterOpCount].start = outStart;
                     ops[gWriterOpCount].end = outLen;
@@ -256,10 +522,14 @@ void BuildHiddenView(void)
                         (*outH)[outLen++] = '\t';
                     }
 
+                    /* Skip leading whitespace after > markers */
+                    while (lineStart < len && ((*srcH)[lineStart] == ' ' || (*srcH)[lineStart] == '\t'))
+                        lineStart++;
+
                     while (lineEnd < len && (*srcH)[lineEnd] != '\r') {
-                        (*outH)[outLen++] = (*srcH)[lineEnd];
                         lineEnd++;
                     }
+                    ParseInlineContent(srcH, lineStart, lineEnd, outH, &outLen, ops);
                     if (gWriterOpCount < MAX_STYLE_OPS) {
                         ops[gWriterOpCount].start = outStart;
                         ops[gWriterOpCount].end = outLen;
@@ -307,6 +577,38 @@ void BuildHiddenView(void)
                 }
             }
 
+            /* Indented code block: 4+ spaces at start of line */
+            if (p - i >= 4 && (*srcH)[i] == ' ' && (*srcH)[i+1] == ' ' && (*srcH)[i+2] == ' ' && (*srcH)[i+3] == ' ') {
+                long lineStart = i + 4;
+                long lineEnd = lineStart;
+                long outStart = outLen;
+
+                while (lineEnd < len && (*srcH)[lineEnd] != '\r') {
+                    lineEnd++;
+                }
+                /* Copy content with indent stripped */
+                {
+                    long m;
+                    for (m = lineStart; m < lineEnd; m++)
+                        (*outH)[outLen++] = (*srcH)[m];
+                }
+                if (gWriterOpCount < MAX_STYLE_OPS) {
+                    ops[gWriterOpCount].start = outStart;
+                    ops[gWriterOpCount].end = outLen;
+                    ops[gWriterOpCount].kind = 'C';
+                    ops[gWriterOpCount].level = 0;
+                    ops[gWriterOpCount].linkID = 0;
+                    gWriterOpCount++;
+                }
+                if (lineEnd < len && (*srcH)[lineEnd] == '\r') {
+                    (*outH)[outLen++] = '\r';
+                    i = lineEnd + 1;
+                } else {
+                    i = lineEnd;
+                }
+                continue;
+            }
+
             if (p + 1 < len && ((*srcH)[p] == '-' || (*srcH)[p] == '+' || (*srcH)[p] == '*') && (*srcH)[p + 1] == ' ') {
                 long lineStart = p + 2;
                 long lineEnd = lineStart;
@@ -345,9 +647,9 @@ void BuildHiddenView(void)
 
                 lineEnd = lineStart;
                 while (lineEnd < len && (*srcH)[lineEnd] != '\r') {
-                    (*outH)[outLen++] = (*srcH)[lineEnd];
                     lineEnd++;
                 }
+                ParseInlineContent(srcH, lineStart, lineEnd, outH, &outLen, ops);
                 if (lineEnd < len && (*srcH)[lineEnd] == '\r') {
                     (*outH)[outLen++] = '\r';
                     i = lineEnd + 1;
@@ -2385,6 +2687,7 @@ void LoadTextWindow(long startOffset)
                 case 'C':
                     GetFNum("\pMonaco", &opStyle.tsFont);
                     opStyle.tsFace = normal;
+                    opStyle.tsSize = CurrentFontSize() - 1;
                     opStyle.tsColor.red = 0;
                     opStyle.tsColor.green = 0;
                     if (ops[k].level > 0) {
@@ -2392,7 +2695,7 @@ void LoadTextWindow(long startOffset)
                     } else {
                         opStyle.tsColor.blue = 0;
                     }
-                    WESetStyle(weDoFont + weDoFace + weDoColor, &opStyle, te);
+                    WESetStyle(weDoFont + weDoFace + weDoSize + weDoColor, &opStyle, te);
                     break;
                 case 'L':
                     opStyle.tsFace |= underline;
@@ -2414,7 +2717,7 @@ void LoadTextWindow(long startOffset)
                     WESetStyle(weDoFace + weDoColor, &opStyle, te);
                     break;
                 case 'Q':
-                    opStyle.tsFace = normal;
+                    opStyle.tsFace = italic;
                     opStyle.tsColor.red   = 0;
                     opStyle.tsColor.green = 0;
                     opStyle.tsColor.blue  = 10 + ops[k].level;
