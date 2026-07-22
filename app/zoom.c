@@ -52,6 +52,9 @@ void ApplyZoomIndex(short newIndex)
 {
     long selStart, selEnd;
 
+    if (!gHideMarkdown)
+        return;
+
     if (newIndex < 0 || newIndex >= kNumZoomLevels || newIndex == gZoomIndex)
         return;
 

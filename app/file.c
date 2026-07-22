@@ -31,6 +31,12 @@ void SetViewMode(Boolean hideMarkdown)
         
         gHideMarkdown = false;
         gActiveTE = gTE;
+        
+        TEHandle te = (*gTE)->te;
+        if (te != NULL) {
+            (**te).destRect.left = (**te).viewRect.left + 36;
+        }
+        
         LoadTextWindow(gWindowStart);
     }
 

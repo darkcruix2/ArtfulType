@@ -629,10 +629,20 @@ void BuildHiddenView(void)
                 }
 
                 if (isTask) {
+                    long taskBoxStart = outLen;
                     (*outH)[outLen++] = '[';
-                    (*outH)[outLen++] = isChecked ? 'x' : ' ';
+                    (*outH)[outLen++] = isChecked ? 'X' : ' ';
                     (*outH)[outLen++] = ']';
                     (*outH)[outLen++] = ' ';
+                    
+                    if (gWriterOpCount < MAX_STYLE_OPS) {
+                        ops[gWriterOpCount].start = taskBoxStart;
+                        ops[gWriterOpCount].end = taskBoxStart + 4;
+                        ops[gWriterOpCount].kind = 'K'; /* Monospaced font */
+                        ops[gWriterOpCount].level = 0;
+                        ops[gWriterOpCount].linkID = 0;
+                        gWriterOpCount++;
+                    }
                     lineStart = p + 6;
                 } else {
                     char bulletChar = '\245';
@@ -2576,7 +2586,7 @@ void LoadTextWindow(long startOffset)
     if (startOffset > 0 && startOffset < len) {
         long scan = startOffset;
         HLock(srcH);
-        while (scan > 0 && (*srcH)[scan - 1] != '\r') {
+        while (scan > 0 && (*srcH)[scan - 1] != '\r' && (*srcH)[scan - 1] != '\n') {
             scan--;
         }
         HUnlock(srcH);
@@ -2588,9 +2598,9 @@ void LoadTextWindow(long startOffset)
     
     /* Snap the end to a line boundary so we never cut in the middle of a line */
     if (startOffset + copyLen < len) {
-        long scan = startOffset + copyLen;
+        long scan = startOffset + copyLen - 1;
         HLock(srcH);
-        while (scan > startOffset && (*srcH)[scan] != '\r') {
+        while (scan > startOffset && (*srcH)[scan] != '\r' && (*srcH)[scan] != '\n') {
             scan--;
         }
         HUnlock(srcH);
@@ -2610,7 +2620,14 @@ void LoadTextWindow(long startOffset)
         long lineCount = 1;
         HLock(srcH);
         for (i = 0; i < startOffset; i++) {
-            if ((*srcH)[i] == '\r') lineCount++;
+            char c = (*srcH)[i];
+            if (c == '\r') {
+                lineCount++;
+            } else if (c == '\n') {
+                if (i == 0 || (*srcH)[i - 1] != '\r') {
+                    lineCount++;
+                }
+            }
         }
         HUnlock(srcH);
         gWindowStartLine = lineCount;
@@ -2622,10 +2639,16 @@ void LoadTextWindow(long startOffset)
     {
         LongRect viewRectLong;
         WEGetViewRect(&viewRectLong, te);
-        savedViewRect.left = (short)viewRectLong.left;
-        savedViewRect.top = (short)viewRectLong.top;
-        savedViewRect.right = (short)viewRectLong.right;
-        savedViewRect.bottom = (short)viewRectLong.bottom;
+        if (viewRectLong.left < OFFSCREEN_COORD / 2) {
+            savedViewRect = gWindow->portRect;
+            savedViewRect.top += 30;
+            savedViewRect.bottom -= 15;
+        } else {
+            savedViewRect.left = (short)viewRectLong.left;
+            savedViewRect.top = (short)viewRectLong.top;
+            savedViewRect.right = (short)viewRectLong.right;
+            savedViewRect.bottom = (short)viewRectLong.bottom;
+        }
     }
     SetRect(&hiddenRect, OFFSCREEN_COORD, OFFSCREEN_COORD,
             OFFSCREEN_COORD + (savedViewRect.right - savedViewRect.left),
@@ -2642,10 +2665,18 @@ void LoadTextWindow(long startOffset)
     HUnlock(srcH);
     
     /* 3. Apply a uniform base style across everything so we start clean */
-    fontNum = GetDefaultFontNum();
+    if (!gHideMarkdown) {
+        short monoFont = 0;
+        GetFNum("\pMonaco", &monoFont);
+        if (monoFont == 0) GetFNum("\pCourier", &monoFont);
+        fontNum = (monoFont != 0) ? monoFont : GetDefaultFontNum();
+        baseStyle.tsSize = 12;
+    } else {
+        fontNum = GetDefaultFontNum();
+        baseStyle.tsSize = CurrentFontSize();
+    }
     baseStyle.tsFont  = fontNum;
     baseStyle.tsFace  = normal;
-    baseStyle.tsSize  = CurrentFontSize();
     baseStyle.tsColor.red = baseStyle.tsColor.green = baseStyle.tsColor.blue = 0;
     WESetSelect(0, WEGetTextLength(te), te);
     WESetStyle(weDoFont + weDoFace + weDoSize + weDoColor, &baseStyle, te);
@@ -2745,6 +2776,16 @@ void LoadTextWindow(long startOffset)
                     opStyle.tsSize = (short)(CurrentFontSize() * 0.7) - 1;
                     WESetStyle(weDoSize, &opStyle, te);
                     break;
+                case 'K':
+                    GetFNum("\pMonaco", &opStyle.tsFont);
+                    if (opStyle.tsFont == 0) GetFNum("\pCourier", &opStyle.tsFont);
+                    opStyle.tsFace = normal;
+                    opStyle.tsSize = CurrentFontSize();
+                    opStyle.tsColor.red = 0;
+                    opStyle.tsColor.green = 0;
+                    opStyle.tsColor.blue = 0;
+                    WESetStyle(weDoFont + weDoFace + weDoSize + weDoColor, &opStyle, te);
+                    break;
                 case 'E':
                     opStyle.tsFace = outline;
                     WESetStyle(weDoFace, &opStyle, te);
@@ -2754,12 +2795,18 @@ void LoadTextWindow(long startOffset)
         HUnlock(gWriterOpsH);
     }
     
-    /* 5. Place caret at start, reflow text */
+    /* 5. Place caret at start */
     WESetSelect(0, 0, te);
-    WECalText(te);
     
-    /* 6. Restore the real viewRect and destRect (top-aligned, no scroll offset) */
+    /* 6. Restore the real viewRect and destRect.
+       Set the gutter margin HERE (not inside WESetRects) so offscreen rects
+       are never corrupted by the +48 adjustment. */
     WESetRects(&savedViewRect, &savedViewRect, te);
+    if (!gHideMarkdown) {
+        /* Markdown view: inset destRect left by 48px for the line-numbers gutter */
+        (*(*te)->te)->destRect.left = savedViewRect.left + 48;
+    }
+    WECalText(te);
     
     /* 7. Erase the window area and let WEUpdate paint the freshly laid-out text */
     EraseRect(&savedViewRect);
