@@ -19,6 +19,8 @@ Video overview: [Artful Type demo](https://youtu.be/HEheu_r9UGw)
 
 A version of ArtfulType that requires at least a 16MHz 68030 (SE/30), 16 MB of RAM, and Mac OS 7.1 or later.
 
+![ArtfulType Pro running in Writer mode](screenshot2.png)
+
 ### Additional Features of the "Pro" version
 
 - Multi File Support - you can open multiple markdown files at once
@@ -42,7 +44,6 @@ A version of ArtfulType that requires at least a 16MHz 68030 (SE/30), 16 MB of R
 - Code block to be encapsulated by top and bottom lines
 - Blockquote
 - Check-Box List
-- 
 
 ## Getting Started
 
