@@ -447,8 +447,8 @@ static void UpdateStatusBar(WindowPtr w, Boolean forceDraw) {
   LongRect viewRect;
   WEGetViewRect(&viewRect, gActiveTE);
   statusRect.left = viewRect.left;
-  statusRect.right = statusRect.left + 300;
-  statusRect.top = viewRect.bottom;
+  statusRect.right = statusRect.left + 350;
+  statusRect.top = w->portRect.bottom - 20;
   statusRect.bottom = w->portRect.bottom;
 
   EraseRect(&statusRect);

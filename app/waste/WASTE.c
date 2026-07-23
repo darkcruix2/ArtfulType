@@ -480,13 +480,17 @@ void WEGetViewRect(LongRect *viewRect, WEHandle we) {
 
 void WEPinScroll(long dx, long dy, WEHandle we) {
   if (we != NULL && (*we)->te != NULL) {
-    TEPinScroll((short)dx, (short)dy, (*we)->te);
-    /* TEPinScroll repaints via its own TEUpdate, but our custom
-       post-draw pass (HRs, strikethrough, super/subscript) lives
-       in WEUpdate.  Re-run it on the visible area so decorations
-       stay visible after scrolling. */
+    TEHandle te = (*we)->te;
+    LongRect viewRect;
+    WEGetViewRect(&viewRect, we);
+    long viewHeight = viewRect.bottom - viewRect.top;
+    long totalHeight = WEGetHeight(0, WEGetLineCount(we), we);
+
+    (**te).destRect.bottom = (**te).destRect.top + (short)(totalHeight + viewHeight / 2);
+
+    TEPinScroll((short)dx, (short)dy, te);
     if (gHideMarkdown) {
-      Rect vr = (**((*we)->te)).viewRect;
+      Rect vr = (**te).viewRect;
       WEUpdate(&vr, we);
     }
   }

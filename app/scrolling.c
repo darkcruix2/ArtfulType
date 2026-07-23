@@ -13,6 +13,11 @@ static short CurrentScrollOffset(WEHandle te)
     return (short)(viewRect.top - destRect.top);
 }
 
+static short LineContaining(WEHandle te, long pos)
+{
+    return (short) WEOffsetToLine(pos, te);
+}
+
 static long GetMaxScrollPixels(void)
 {
     LongRect viewRect;
@@ -24,7 +29,7 @@ static long GetMaxScrollPixels(void)
     viewHeight = viewRect.bottom - viewRect.top;
     totalHeight = WEGetHeight(0, WEGetLineCount(gActiveTE), gActiveTE);
     
-    maxScroll = totalHeight - viewHeight;
+    maxScroll = totalHeight + (viewHeight / 2);
     if (maxScroll < 0) maxScroll = 0;
     return maxScroll;
 }
@@ -35,7 +40,7 @@ static void SafeScroll(long dy)
     LongRect viewRect, destRect;
     long currentPixelsScrolled, newPixelsScrolled;
     
-    if (!gActiveTE) return;
+    if (!gActiveTE || !(*gActiveTE)->te) return;
     
     WEGetViewRect(&viewRect, gActiveTE);
     WEGetDestRect(&destRect, gActiveTE);
@@ -161,10 +166,6 @@ void AdjustScrollbar(void)
     }
 }
 
-static short LineContaining(WEHandle te, long pos)
-{
-    return (short) WEOffsetToLine(pos, te);
-}
 
 void ScrollCaretIntoView(Boolean movingBackward)
 {
@@ -181,6 +182,13 @@ void ScrollCaretIntoView(Boolean movingBackward)
 
     heightToLine     = WEGetHeight(0, caretLine, gActiveTE);
     heightToLineNext = WEGetHeight(0, caretLine + 1, gActiveTE);
+
+    short fontHeight = CurrentFontSize() + 4;
+    if (fontHeight < 16) fontHeight = 16;
+
+    if (heightToLineNext <= heightToLine) {
+        heightToLineNext = heightToLine + fontHeight;
+    }
     
     LongRect viewRect, destRect;
     WEGetViewRect(&viewRect, gActiveTE);
@@ -192,11 +200,11 @@ void ScrollCaretIntoView(Boolean movingBackward)
     viewTop    = viewRect.top;
     viewBottom = viewRect.bottom;
 
-    /* --- Step 1: use WEPinScroll to bring the caret into the visible rectangle --- */
+    /* --- Step 1: bring caret into visible view rectangle --- */
     if (lineBottom > viewBottom) {
-        WEPinScroll(0, viewBottom - lineBottom, gActiveTE);
+        SafeScroll(viewBottom - lineBottom);
     } else if (lineTop < viewTop) {
-        WEPinScroll(0, viewTop - lineTop, gActiveTE);
+        SafeScroll(viewTop - lineTop);
     }
 
     /* --- Step 2: window shift (only when caret is still off-screen) --- */

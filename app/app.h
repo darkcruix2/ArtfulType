@@ -21,7 +21,7 @@
 
 #define MARGIN_H     64
 #define MARGIN_TOP   32
-#define MARGIN_BOTTOM 24
+#define MARGIN_BOTTOM 38
 #define MENU_BAR_HEIGHT 20
 #define FONT_SIZE 12
 #define SCROLLBAR_WIDTH 16
