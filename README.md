@@ -19,7 +19,7 @@ Video overview: [Artful Type demo](https://youtu.be/HEheu_r9UGw)
 
 A version of ArtfulType that requires at least a 16MHz 68030 (SE/30), 16 MB of RAM, and Mac OS 7.1 or later.
 
-### Additional Features of the Pro version
+### Additional Features of the "Pro" version
 
 - Multi File Support - you can open multiple markdown files at once
 - Maximum file size increased to 256K
@@ -27,11 +27,22 @@ A version of ArtfulType that requires at least a 16MHz 68030 (SE/30), 16 MB of R
 - Resizable windows
 - Status Bar
 - Icon Bar for text formatting and view change
+- Style menu contains more features
+- Markdown view contains line numbers
+- Shortcuts for navigation, like:
+  - CMD + Left     : Jump in front of the first letter of the line
+  - CMD + RIGHT    : Jump past the last letter of the line
+  - CMD + DOWN     : Jump to the end of the document (There is also a clickable button)
+  - CMD + UP       : Jump to the beginning of the document (There is also a clickable button)
 
 ### Planned Features
 
 - Full Basic Markdown support (excluding images)
-- Larger File Size (> 32,768 characters)
+- Print functionality
+- Code block to be encapsulated by top and bottom lines
+- Blockquote
+- Check-Box List
+- 
 
 ## Getting Started
 
