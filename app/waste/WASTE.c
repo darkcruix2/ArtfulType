@@ -169,11 +169,14 @@ void WEUpdate(const Rect *rect, WEHandle we) {
 
       /* --- Draw line backgrounds / side-lines after TEUpdate using patOr ---
        */
+      Boolean inCodeBlock = false;
+      short codeBlockBottomY = -32000;
+
       short l;
       for (l = 0; l < (**te).nLines; l++) {
         short lineStart = (**te).lineStarts[l];
         short lineEnd = (l + 1 < (**te).nLines) ? (**te).lineStarts[l + 1]
-                                                : (**te).teLength;
+                                                : (short)(**te).teLength;
         if (lineEnd > lineStart) {
           short styleIndex = -1;
           short rr;
@@ -185,10 +188,79 @@ void WEUpdate(const Rect *rect, WEHandle we) {
               break;
             }
           }
+
+          Boolean isCodeLine = false;
+          STElement st;
           if (styleIndex >= 0) {
-            STElement st = (*styleTab)[styleIndex];
-            // Removed block code and blockquote graphical line rendering as
-            // requested
+            st = (*styleTab)[styleIndex];
+            if (st.stColor.blue == 3) {
+              isCodeLine = true;
+            }
+          }
+
+          LONGINT ptVal = TEGetPoint(lineStart, te);
+          short screenV = (short)(ptVal >> 16);
+          short lineTop = screenV;
+          short lineBottom = screenV;
+          if (styleIndex >= 0) {
+            TextFont(st.stFont);
+            TextFace(st.stFace);
+            TextSize(st.stSize);
+            FontInfo fi;
+            GetFontInfo(&fi);
+            lineTop = screenV - fi.ascent;
+            lineBottom = screenV + fi.descent;
+          }
+
+          if (isCodeLine && !inCodeBlock) {
+            inCodeBlock = true;
+            short y = lineTop - 4;
+            if (y >= rect->top - 10 && y <= rect->bottom + 10) {
+              PenNormal();
+              PenSize(1, 1);
+              RGBColor black = {0, 0, 0};
+              RGBForeColor(&black);
+              MoveTo(vr.left, y);
+              LineTo(vr.right - 1, y);
+              MoveTo(vr.left, y - 2);
+              LineTo(vr.right - 1, y - 2);
+            }
+          }
+
+          if (inCodeBlock) {
+            codeBlockBottomY = lineBottom;
+          }
+
+          Boolean nextIsCode = false;
+          if (l + 1 < (**te).nLines) {
+            short nextStart = (**te).lineStarts[l + 1];
+            short nrr;
+            for (nrr = 0; nrr < nRuns; nrr++) {
+              if ((**teStyles).runs[nrr].startChar <= nextStart &&
+                  (nrr + 1 == nRuns ||
+                   (**teStyles).runs[nrr + 1].startChar > nextStart)) {
+                short nIdx = (**teStyles).runs[nrr].styleIndex;
+                if (nIdx >= 0 && (*styleTab)[nIdx].stColor.blue == 3) {
+                  nextIsCode = true;
+                }
+                break;
+              }
+            }
+          }
+
+          if (inCodeBlock && !nextIsCode) {
+            inCodeBlock = false;
+            short y = codeBlockBottomY + 3;
+            if (y >= rect->top - 10 && y <= rect->bottom + 10) {
+              PenNormal();
+              PenSize(1, 1);
+              RGBColor black = {0, 0, 0};
+              RGBForeColor(&black);
+              MoveTo(vr.left, y);
+              LineTo(vr.right - 1, y);
+              MoveTo(vr.left, y + 2);
+              LineTo(vr.right - 1, y + 2);
+            }
           }
         }
       }
@@ -214,8 +286,9 @@ void WEUpdate(const Rect *rect, WEHandle we) {
         Boolean isStrike = (st.stColor.green == 1);
         Boolean isHR = ((st.stFace & bold) && st.stColor.blue == 1);
         Boolean isTaskBox = (st.stColor.red == 255);
+        Boolean isBullet = (st.stColor.red == 254);
 
-        if (!isSuper && !isSub && !isStrike && !isHR && !isTaskBox)
+        if (!isSuper && !isSub && !isStrike && !isHR && !isTaskBox && !isBullet)
           continue;
 
         /* Set font so CharWidth/GetFontInfo are accurate */
@@ -226,33 +299,111 @@ void WEUpdate(const Rect *rect, WEHandle we) {
         FontInfo fi;
         GetFontInfo(&fi);
 
+        if (isBullet) {
+          short level = st.stColor.green;
+          if (level >= 4) {
+            /* Level 4 (5th level and beyond): render plain text dash '-' */
+          } else {
+            LONGINT ptVal = TEGetPoint(runStart, te);
+            short screenV = (short)(ptVal >> 16);
+            short screenH = (short)(ptVal & 0xFFFF);
+            if (screenV + fi.descent >= rect->top &&
+                screenV - fi.ascent <= rect->bottom) {
+              short boxRunW = 0;
+              short ci;
+              for (ci = runStart; ci < runEnd; ci++) {
+                char c = (*(**te).hText)[ci];
+                boxRunW += CharWidth(c);
+              }
+              if (boxRunW == 0) boxRunW = 12;
+
+              Rect cellR;
+              cellR.left = screenH;
+              cellR.right = screenH + boxRunW;
+              cellR.top = screenV - fi.ascent;
+              cellR.bottom = screenV + fi.descent;
+
+              RGBColor whiteColor = {0xFFFF, 0xFFFF, 0xFFFF};
+              RGBBackColor(&whiteColor);
+              EraseRect(&cellR);
+
+              short bSize = 5;
+              short midY = screenV - (fi.ascent * 3) / 8;
+              Rect bR;
+              bR.left = screenH + 2;
+              bR.right = bR.left + bSize;
+              bR.top = midY - bSize / 2;
+              bR.bottom = bR.top + bSize;
+
+              PenNormal();
+              PenSize(1, 1);
+              RGBColor black = {0, 0, 0};
+              RGBForeColor(&black);
+
+              if (level == 0) {
+                /* 1st Level: Filled circle */
+                PaintOval(&bR);
+              } else if (level == 1) {
+                /* 2nd Level: Circle (not filled) */
+                FrameOval(&bR);
+              } else if (level == 2) {
+                /* 3rd Level: Filled square */
+                PaintRect(&bR);
+              } else if (level == 3) {
+                /* 4th Level: Square (not filled) */
+                FrameRect(&bR);
+              }
+            }
+            continue;
+          }
+        }
+
         if (isTaskBox) {
           LONGINT ptVal = TEGetPoint(runStart, te);
           short screenV = (short)(ptVal >> 16);
           short screenH = (short)(ptVal & 0xFFFF);
           if (screenV + fi.descent >= rect->top &&
               screenV - fi.ascent <= rect->bottom) {
-            short midY = screenV - fi.ascent / 2;
+            short boxRunW = 0;
+            short ci;
+            for (ci = runStart; ci < runEnd; ci++) {
+              char c = (*(**te).hText)[ci];
+              boxRunW += CharWidth(c);
+            }
+            if (boxRunW == 0) boxRunW = 24;
+
+            Rect cellR;
+            cellR.left = screenH;
+            cellR.right = screenH + boxRunW;
+            cellR.top = screenV - fi.ascent;
+            cellR.bottom = screenV + fi.descent;
+
+            RGBColor whiteColor = {0xFFFF, 0xFFFF, 0xFFFF};
+            RGBBackColor(&whiteColor);
+            EraseRect(&cellR);
+
+            short boxSize = 11;
+            short midY = screenV - (fi.ascent * 3) / 8;
             Rect boxR;
-            boxR.left = (**te).destRect.left + 4;
-            boxR.right = boxR.left + 10;
-            boxR.top = midY - 5;
-            boxR.bottom = boxR.top + 10;
+            boxR.left = screenH + 2;
+            boxR.right = boxR.left + boxSize;
+            boxR.top = midY - boxSize / 2;
+            boxR.bottom = boxR.top + boxSize;
 
             PenNormal();
             PenSize(1, 1);
             RGBColor black = {0, 0, 0};
             RGBForeColor(&black);
-            FrameRect(&boxR);
+            FrameRoundRect(&boxR, 3, 3);
 
             if (st.stColor.green == 1) {
               /* Checked tick mark */
               MoveTo(boxR.left + 2, boxR.top + 4);
               LineTo(boxR.left + 4, boxR.top + 7);
-              LineTo(boxR.left + 9, boxR.top + 1);
+              LineTo(boxR.left + 9, boxR.top + 2);
               MoveTo(boxR.left + 2, boxR.top + 5);
               LineTo(boxR.left + 4, boxR.top + 8);
-              LineTo(boxR.left + 9, boxR.top + 2);
+              LineTo(boxR.left + 9, boxR.top + 3);
             }
           }
           continue;

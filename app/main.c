@@ -1273,6 +1273,115 @@ static void GetCurrentParagraphRange(short *paraStart, short *paraEnd) {
   *paraEnd = (short)end;
 }
 
+static Boolean HandleCheckboxClick(Point pt) {
+  if (!gHideMarkdown || gActiveTE == NULL || (*gActiveTE)->te == NULL) {
+    return false;
+  }
+
+  TEHandle te = (*gActiveTE)->te;
+  TEStyleHandle teStyles = TEGetStyleHandle(te);
+  if (teStyles == NULL)
+    return false;
+
+  HLock((Handle)teStyles);
+  short nRuns = (**teStyles).nRuns;
+  STHandle styleTab = (**teStyles).styleTab;
+  if (styleTab == NULL) {
+    HUnlock((Handle)teStyles);
+    return false;
+  }
+  HLock((Handle)styleTab);
+
+  short r;
+  for (r = 0; r < nRuns; r++) {
+    short runStart = (**teStyles).runs[r].startChar;
+    short runEnd = (r + 1 < nRuns) ? (**teStyles).runs[r + 1].startChar
+                                   : (short)(**te).teLength;
+    if (runEnd <= runStart)
+      continue;
+
+    short styleIdx = (**teStyles).runs[r].styleIndex;
+    STElement st = (*styleTab)[styleIdx];
+
+    if (st.stColor.red == 255) {
+      LONGINT ptVal = TEGetPoint(runStart, te);
+      short screenV = (short)(ptVal >> 16);
+      short screenH = (short)(ptVal & 0xFFFF);
+
+      TextFont(st.stFont);
+      TextSize(st.stSize);
+      TextFace(st.stFace);
+      FontInfo fi;
+      GetFontInfo(&fi);
+
+      short midY = screenV - (fi.ascent * 3) / 8;
+      short boxSize = 11;
+
+      Rect hitR;
+      hitR.left = screenH - 2;
+      hitR.right = screenH + boxSize + 6;
+      hitR.top = midY - boxSize / 2 - 3;
+      hitR.bottom = midY + boxSize / 2 + 4;
+
+      if (PtInRect(pt, &hitR)) {
+        HUnlock((Handle)styleTab);
+        HUnlock((Handle)teStyles);
+
+        Handle hText = (**te).hText;
+        if (hText != NULL && runStart + 1 < (**te).teLength) {
+          HLock(hText);
+          char c = (*hText)[runStart + 1];
+          Boolean isCurrentlyChecked = (c == 'x' || c == 'X');
+          short newChecked = isCurrentlyChecked ? 0 : 1;
+
+          PushUndoSnapshot();
+          gTypingRunActive = false;
+
+          (*hText)[runStart + 1] = newChecked ? 'X' : ' ';
+          HUnlock(hText);
+
+          WESetSelect(runStart, runStart + 4, gActiveTE);
+          WETextStyle ts;
+          ts.tsColor.red = 255;
+          ts.tsColor.green = newChecked;
+          ts.tsColor.blue = 0;
+          WESetStyle(weDoColor, &ts, gActiveTE);
+
+          WESetSelect(runStart + 4, runStart + 4, gActiveTE);
+
+          if (gWriterOpsH != NULL) {
+            HLock(gWriterOpsH);
+            StyleOp *ops = (StyleOp *)*gWriterOpsH;
+            short k;
+            long globalOffset = gWindowStart + runStart;
+            for (k = 0; k < gWriterOpCount; k++) {
+              if (ops[k].kind == 'K' && ops[k].start <= globalOffset &&
+                  ops[k].end > globalOffset) {
+                ops[k].level = newChecked;
+                break;
+              }
+            }
+            HUnlock(gWriterOpsH);
+          }
+
+          SetDirty(true);
+          SyncWindowToBacking();
+
+          if (gWindow != NULL) {
+            InvalRect(&gWindow->portRect);
+          }
+          return true;
+        }
+        return true;
+      }
+    }
+  }
+
+  HUnlock((Handle)styleTab);
+  HUnlock((Handle)teStyles);
+  return false;
+}
+
 static void EventLoop(void) {
   EventRecord event;
   WindowPtr w;
@@ -1486,9 +1595,13 @@ static void EventLoop(void) {
                 }
               }
             } else {
-              gTypingRunActive = false;
-              WEClick(event.where, (event.modifiers & shiftKey) != 0,
-                      gActiveTE);
+              if (gHideMarkdown && HandleCheckboxClick(event.where)) {
+                /* Handled checkbox click */
+              } else {
+                gTypingRunActive = false;
+                WEClick(event.where, (event.modifiers & shiftKey) != 0,
+                        gActiveTE);
+              }
             }
           }
         }
@@ -1581,8 +1694,12 @@ static void EventLoop(void) {
               }
             }
           } else {
-            gTypingRunActive = false;
-            WEClick(event.where, (event.modifiers & shiftKey) != 0, gActiveTE);
+            if (gHideMarkdown && HandleCheckboxClick(event.where)) {
+              /* Handled checkbox click */
+            } else {
+              gTypingRunActive = false;
+              WEClick(event.where, (event.modifiers & shiftKey) != 0, gActiveTE);
+            }
           }
         }
 #endif
@@ -1761,7 +1878,8 @@ static void EventLoop(void) {
               if (gHideMarkdown) {
                 if (scan < caret &&
                     ((unsigned char)(*hText)[scan] == 0xA5 ||
-                     (*hText)[scan] == 'o' || (*hText)[scan] == '-') &&
+                     (*hText)[scan] == 'o' || (*hText)[scan] == 's' ||
+                     (*hText)[scan] == '-') &&
                     scan + 1 < caret && (*hText)[scan + 1] == ' ') {
                   prefixLen = (scan + 2) - lineStart;
                 }
@@ -1856,7 +1974,7 @@ static void EventLoop(void) {
                     if (gHideMarkdown) {
                       unsigned char bulletChar = prefixBuf[spaceCount];
                       if (bulletChar == 0xA5 || bulletChar == 'o' ||
-                          bulletChar == '-') {
+                          bulletChar == 's' || bulletChar == '-') {
                         isUnordered = true;
                       }
                     } else {
@@ -1872,7 +1990,11 @@ static void EventLoop(void) {
                       if (gHideMarkdown) {
                         if (newNesting == 1)
                           newBullet = 'o';
-                        else if (newNesting >= 2)
+                        else if (newNesting == 2)
+                          newBullet = 's';
+                        else if (newNesting == 3)
+                          newBullet = 'o';
+                        else if (newNesting >= 4)
                           newBullet = '-';
                       } else {
                         newBullet = '-';
@@ -2060,7 +2182,7 @@ static void EventLoop(void) {
                 if (gHideMarkdown) {
                   unsigned char bulletChar = prefixBuf[bulletOffset];
                   if (bulletChar == 0xA5 || bulletChar == 'o' ||
-                      bulletChar == '-') {
+                      bulletChar == 's' || bulletChar == '-') {
                     isUnordered = true;
                   }
                 } else {
@@ -2076,7 +2198,11 @@ static void EventLoop(void) {
                   if (gHideMarkdown) {
                     if (newNesting == 1)
                       newBullet = 'o';
-                    else if (newNesting >= 2)
+                    else if (newNesting == 2)
+                      newBullet = 's';
+                    else if (newNesting == 3)
+                      newBullet = 'o';
+                    else if (newNesting >= 4)
                       newBullet = '-';
                   } else {
                     newBullet = '-';

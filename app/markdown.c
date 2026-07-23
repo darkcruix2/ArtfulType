@@ -448,6 +448,11 @@ void BuildHiddenView(void)
                 }
                 
                 if (closingFenceStart < len) {
+                    if (outLen > 0 && (*outH)[outLen - 1] == '\r') {
+                        if (outLen < 2 || (*outH)[outLen - 2] != '\r') {
+                            (*outH)[outLen++] = '\r';
+                        }
+                    }
                     long outStart = outLen;
                     long m;
                     for (m = codeStart; m < codeEnd; m++) {
@@ -461,9 +466,15 @@ void BuildHiddenView(void)
                         ops[gWriterOpCount].start = outStart;
                         ops[gWriterOpCount].end = outLen;
                         ops[gWriterOpCount].kind = 'C';
-                        ops[gWriterOpCount].level = 0;
+                        ops[gWriterOpCount].level = 1;
                         ops[gWriterOpCount].linkID = 0;
                         gWriterOpCount++;
+                    }
+
+                    if (outLen > 0 && (*outH)[outLen - 1] == '\r') {
+                        if (outLen < 2 || (*outH)[outLen - 2] != '\r') {
+                            (*outH)[outLen++] = '\r';
+                        }
                     }
                     
                     j = closingFenceStart + 3;
@@ -526,8 +537,9 @@ void BuildHiddenView(void)
 
                     short d;
                     for (d = 0; d < blockquoteDepth; d++) {
-                        (*outH)[outLen++] = '\t';
+                        (*outH)[outLen++] = '"';
                     }
+                    (*outH)[outLen++] = ' ';
 
                     /* Skip leading whitespace after > markers */
                     while (lineStart < len && ((*srcH)[lineStart] == ' ' || (*srcH)[lineStart] == '\t'))
@@ -536,11 +548,22 @@ void BuildHiddenView(void)
                     while (lineEnd < len && (*srcH)[lineEnd] != '\r') {
                         lineEnd++;
                     }
+
+                    long contentStart = outLen;
                     ParseInlineContent(srcH, lineStart, lineEnd, outH, &outLen, ops);
+                    
                     if (gWriterOpCount < MAX_STYLE_OPS) {
                         ops[gWriterOpCount].start = outStart;
+                        ops[gWriterOpCount].end = outStart + blockquoteDepth;
+                        ops[gWriterOpCount].kind = 'q'; /* Quote prefix */
+                        ops[gWriterOpCount].level = blockquoteDepth;
+                        gWriterOpCount++;
+                    }
+                    
+                    if (gWriterOpCount < MAX_STYLE_OPS) {
+                        ops[gWriterOpCount].start = contentStart;
                         ops[gWriterOpCount].end = outLen;
-                        ops[gWriterOpCount].kind = 'Q';
+                        ops[gWriterOpCount].kind = 'Q'; /* Quote content */
                         ops[gWriterOpCount].level = blockquoteDepth;
                         gWriterOpCount++;
                     }
@@ -645,8 +668,8 @@ void BuildHiddenView(void)
                     if (gWriterOpCount < MAX_STYLE_OPS) {
                         ops[gWriterOpCount].start = taskBoxStart;
                         ops[gWriterOpCount].end = taskBoxStart + 4;
-                        ops[gWriterOpCount].kind = 'K'; /* Monospaced font */
-                        ops[gWriterOpCount].level = 0;
+                        ops[gWriterOpCount].kind = 'K'; /* Monospaced font / Task box */
+                        ops[gWriterOpCount].level = isChecked ? 1 : 0;
                         ops[gWriterOpCount].linkID = 0;
                         gWriterOpCount++;
                     }
@@ -655,11 +678,25 @@ void BuildHiddenView(void)
                     char bulletChar = '\245';
                     if (nestingLevel == 1) {
                         bulletChar = 'o';
-                    } else if (nestingLevel >= 2) {
+                    } else if (nestingLevel == 2) {
+                        bulletChar = 's';
+                    } else if (nestingLevel == 3) {
+                        bulletChar = 'o';
+                    } else if (nestingLevel >= 4) {
                         bulletChar = '-';
                     }
+                    long bulletStart = outLen;
                     (*outH)[outLen++] = bulletChar;
                     (*outH)[outLen++] = ' ';
+
+                    if (gWriterOpCount < MAX_STYLE_OPS) {
+                        ops[gWriterOpCount].start = bulletStart;
+                        ops[gWriterOpCount].end = bulletStart + 2;
+                        ops[gWriterOpCount].kind = 'U'; /* Unordered bullet list */
+                        ops[gWriterOpCount].level = nestingLevel;
+                        ops[gWriterOpCount].linkID = 0;
+                        gWriterOpCount++;
+                    }
                 }
 
                 lineEnd = lineStart;
@@ -1015,7 +1052,7 @@ void SyncHiddenToCanonical(void)
             if (p + 3 < lineEnd && (*srcH)[p] == '[' && ((*srcH)[p + 1] == ' ' || (*srcH)[p + 1] == 'x' || (*srcH)[p + 1] == 'X') && (*srcH)[p + 2] == ']' && (*srcH)[p + 3] == ' ') {
                 isTaskItem = true;
                 isCheckedTask = ((*srcH)[p + 1] == 'x' || (*srcH)[p + 1] == 'X');
-            } else if (p < lineEnd && ((unsigned char)(*srcH)[p] == 0xA5 || (*srcH)[p] == 'o' || (*srcH)[p] == '-') && p + 1 < lineEnd && (*srcH)[p + 1] == ' ') {
+            } else if (p < lineEnd && ((unsigned char)(*srcH)[p] == 0xA5 || (*srcH)[p] == 'o' || (*srcH)[p] == 's' || (*srcH)[p] == '-') && p + 1 < lineEnd && (*srcH)[p + 1] == ' ') {
                 isListItem = true;
             } else {
                 textOffset = p;
@@ -1060,8 +1097,7 @@ void SyncHiddenToCanonical(void)
             }
             (*outH)[outLen++] = ' ';
             long p = lineStart;
-            short t;
-            for (t = 0; t < blockquoteDepth && p < lineEnd && (*srcH)[p] == '\t'; t++) {
+            while (p < lineEnd && ((*srcH)[p] == '"' || (*srcH)[p] == '\t' || (*srcH)[p] == ' ')) {
                 p++;
             }
             textOffset = p;
@@ -2938,6 +2974,14 @@ void LoadTextWindow(long startOffset)
                     opStyle.tsColor.blue  = 1;
                     WESetStyle(weDoFace + weDoColor, &opStyle, te);
                     break;
+                case 'q':
+                    opStyle.tsFace = bold;
+                    opStyle.tsSize = CurrentFontSize() + 3;
+                    opStyle.tsColor.red   = 253;
+                    opStyle.tsColor.green = ops[k].level;
+                    opStyle.tsColor.blue  = 0;
+                    WESetStyle(weDoFont + weDoFace + weDoSize + weDoColor, &opStyle, te);
+                    break;
                 case 'Q':
                     opStyle.tsFace = italic;
                     opStyle.tsColor.red   = 0;
@@ -2972,8 +3016,18 @@ void LoadTextWindow(long startOffset)
                     if (opStyle.tsFont == 0) GetFNum("\pCourier", &opStyle.tsFont);
                     opStyle.tsFace = normal;
                     opStyle.tsSize = CurrentFontSize();
-                    opStyle.tsColor.red = 0;
-                    opStyle.tsColor.green = 0;
+                    opStyle.tsColor.red = 255;
+                    opStyle.tsColor.green = ops[k].level;
+                    opStyle.tsColor.blue = 0;
+                    WESetStyle(weDoFont + weDoFace + weDoSize + weDoColor, &opStyle, te);
+                    break;
+                case 'U':
+                    GetFNum("\pMonaco", &opStyle.tsFont);
+                    if (opStyle.tsFont == 0) GetFNum("\pCourier", &opStyle.tsFont);
+                    opStyle.tsFace = normal;
+                    opStyle.tsSize = CurrentFontSize();
+                    opStyle.tsColor.red = 254;
+                    opStyle.tsColor.green = ops[k].level;
                     opStyle.tsColor.blue = 0;
                     WESetStyle(weDoFont + weDoFace + weDoSize + weDoColor, &opStyle, te);
                     break;
