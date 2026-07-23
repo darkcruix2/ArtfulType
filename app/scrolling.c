@@ -72,7 +72,10 @@ static void SyncScrollbarToOffset(void)
             long currentPixelsScrolled = viewRect.top - destRect.top;
             if (currentPixelsScrolled < 0) currentPixelsScrolled = 0;
             if (currentPixelsScrolled > maxScroll) currentPixelsScrolled = maxScroll;
-            val = (short) (((double)currentPixelsScrolled * 32767.0) / (double)maxScroll);
+            double calcVal = ((double)currentPixelsScrolled * 32767.0) / (double)maxScroll;
+            if (calcVal < 0.0) calcVal = 0.0;
+            if (calcVal > 32767.0) calcVal = 32767.0;
+            val = (short) calcVal;
         }
     } else {
         /* For large documents, combine the window start offset with the
@@ -94,7 +97,10 @@ static void SyncScrollbarToOffset(void)
             /* fraction of the window that has been scrolled past */
             effectiveOffset += ((double)currentPixelsScrolled / (double)maxScroll) * (double)windowChars;
         }
-        val = (short) ((effectiveOffset * 32767.0) / (double)total);
+        double calcVal = (effectiveOffset * 32767.0) / (double)total;
+        if (calcVal < 0.0) calcVal = 0.0;
+        if (calcVal > 32767.0) calcVal = 32767.0;
+        val = (short) calcVal;
     }
 
     if (val < 0) val = 0;
@@ -236,6 +242,75 @@ void ScrollCaretIntoView(Boolean movingBackward)
     SyncScrollbarToOffset();
 }
 
+static void ApplyScrollbarValue(short cur)
+{
+    long total = TotalLength();
+    if (total <= 0 || !gActiveTE) return;
+
+    if (total <= WINDOW_SIZE) {
+        long maxScroll = GetMaxScrollPixels();
+        if (maxScroll > 0) {
+            long targetPixels = (long) (((double)cur * (double)maxScroll) / 32767.0);
+            long currentPixels = CurrentScrollOffset(gActiveTE);
+            long dy = currentPixels - targetPixels;
+            if (dy != 0) {
+                WEPinScroll(0, dy, gActiveTE);
+            }
+        }
+    } else {
+        double desiredEffective = ((double)cur * (double)total) / 32767.0;
+        long windowLen = gWindowEnd - gWindowStart;
+        long maxStart = total - WINDOW_SIZE;
+        if (maxStart < 0) maxStart = 0;
+        
+        Boolean insideWindow = false;
+        if (desiredEffective >= (double)gWindowStart && windowLen > 0) {
+            if (desiredEffective <= (double)gWindowEnd) {
+                insideWindow = true;
+            } else if (gWindowStart >= maxStart || gWindowEnd >= total) {
+                insideWindow = true;
+            }
+        }
+        
+        /* Check if desired position is inside current loaded window */
+        if (insideWindow) {
+            double fraction = (desiredEffective - (double)gWindowStart) / (double)windowLen;
+            if (fraction < 0.0) fraction = 0.0;
+            if (fraction > 1.0) fraction = 1.0;
+            
+            long maxScroll = GetMaxScrollPixels();
+            long targetPixels = (long) (fraction * (double)maxScroll);
+            long currentPixels = CurrentScrollOffset(gActiveTE);
+            long dy = currentPixels - targetPixels;
+            if (dy != 0) {
+                WEPinScroll(0, dy, gActiveTE);
+            }
+        } else {
+            /* Desired position is outside current window: calculate new window start */
+            long newStart = (long) desiredEffective - (WINDOW_SIZE / 2);
+            if (newStart < 0) newStart = 0;
+            if (newStart > maxStart) newStart = maxStart;
+            
+            gScrollbarDriven = true;
+            SyncWindowToBacking();
+            LoadTextWindow(newStart);
+            
+            windowLen = gWindowEnd - gWindowStart;
+            if (windowLen > 0) {
+                double fraction = (desiredEffective - (double)gWindowStart) / (double)windowLen;
+                if (fraction < 0.0) fraction = 0.0;
+                if (fraction > 1.0) fraction = 1.0;
+                
+                long maxScroll = GetMaxScrollPixels();
+                long targetPixels = (long) (fraction * (double)maxScroll);
+                if (targetPixels > 0) {
+                    WEPinScroll(0, -targetPixels, gActiveTE);
+                }
+            }
+        }
+    }
+}
+
 static pascal void ScrollAction(ControlHandle control, short part)
 {
     short max = GetControlMaximum(control);
@@ -278,17 +353,15 @@ static pascal void ScrollAction(ControlHandle control, short part)
             default:           delta = 0; break;
         }
 
-        cur += delta;
-        if (cur < 0) cur = 0;
-        if (cur > max) cur = max;
+        long newCur = (long)cur + delta;
+        if (newCur < 0) newCur = 0;
+        if (newCur > (long)max) newCur = (long)max;
+        cur = (short)newCur;
         
         SetControlValue(control, cur);
         
-        long newOffset = (long) (((double)cur * (double)total) / 32767.0);
-        
         gScrollbarDriven = true;
-        SyncWindowToBacking();
-        LoadTextWindow(newOffset);
+        ApplyScrollbarValue(cur);
     }
 }
 
@@ -305,27 +378,8 @@ void DoScrollClick(Point pt)
     if (part == inThumb) {
         TrackControl(gScrollBar, pt, NULL);
         desired = GetControlValue(gScrollBar);
-        
-        long total = TotalLength();
-        if (total <= WINDOW_SIZE) {
-            long maxScroll = GetMaxScrollPixels();
-            long newPixelsScrolled = (long) (((double)desired * (double)maxScroll) / 32767.0);
-            
-            LongRect viewRect, destRect;
-            WEGetViewRect(&viewRect, gActiveTE);
-            WEGetDestRect(&destRect, gActiveTE);
-            long currentPixelsScrolled = viewRect.top - destRect.top;
-            
-            long dy = currentPixelsScrolled - newPixelsScrolled;
-            if (dy != 0) {
-                WEPinScroll(0, dy, gActiveTE);
-            }
-        } else {
-            long newOffset = (long) (((double)desired * (double)total) / 32767.0);
-            gScrollbarDriven = true;
-            SyncWindowToBacking();
-            LoadTextWindow(newOffset);
-        }
+        gScrollbarDriven = true;
+        ApplyScrollbarValue(desired);
     } else {
         TrackControl(gScrollBar, pt, NewControlActionUPP(ScrollAction));
     }
@@ -356,4 +410,57 @@ void HandleJumpToEnd(void)
     
     ScrollCaretIntoView(false);
     UpdateScrollbarRange();
+}
+
+void HandlePageUp(void)
+{
+    if (!gActiveTE) return;
+    
+    LongRect viewRect;
+    WEGetViewRect(&viewRect, gActiveTE);
+    long viewHeight = viewRect.bottom - viewRect.top;
+    long pageScroll = viewHeight - 20;
+    if (pageScroll < 20) pageScroll = 20;
+    
+    long total = TotalLength();
+    if (total <= WINDOW_SIZE) {
+        SafeScroll(pageScroll);
+        SyncScrollbarToOffset();
+    } else {
+        short cur = GetControlValue(gScrollBar);
+        long pageDelta = (long) ((1600.0 * 32767.0) / (double)total);
+        if (pageDelta < 5) pageDelta = 5;
+        cur -= pageDelta;
+        if (cur < 0) cur = 0;
+        SetControlValue(gScrollBar, cur);
+        gScrollbarDriven = true;
+        ApplyScrollbarValue(cur);
+    }
+}
+
+void HandlePageDown(void)
+{
+    if (!gActiveTE) return;
+    
+    LongRect viewRect;
+    WEGetViewRect(&viewRect, gActiveTE);
+    long viewHeight = viewRect.bottom - viewRect.top;
+    long pageScroll = viewHeight - 20;
+    if (pageScroll < 20) pageScroll = 20;
+    
+    long total = TotalLength();
+    if (total <= WINDOW_SIZE) {
+        SafeScroll(-pageScroll);
+        SyncScrollbarToOffset();
+    } else {
+        short cur = GetControlValue(gScrollBar);
+        short max = GetControlMaximum(gScrollBar);
+        long pageDelta = (long) ((1600.0 * 32767.0) / (double)total);
+        if (pageDelta < 5) pageDelta = 5;
+        cur += pageDelta;
+        if (cur > max) cur = max;
+        SetControlValue(gScrollBar, cur);
+        gScrollbarDriven = true;
+        ApplyScrollbarValue(cur);
+    }
 }

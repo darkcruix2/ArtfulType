@@ -29,15 +29,22 @@ void ClearStyles(void)
 {
     WETextStyle ts;
     short fontNum;
-    FontInfo info;
     short savedStart = GetTESelStart(gActiveTE);
     short savedEnd = GetTESelEnd(gActiveTE);
 
-    fontNum = GetDefaultFontNum();
+    if (!gHideMarkdown) {
+        short monoFont = 0;
+        GetFNum("\pMonaco", &monoFont);
+        if (monoFont == 0) GetFNum("\pCourier", &monoFont);
+        fontNum = (monoFont != 0) ? monoFont : GetDefaultFontNum();
+        ts.tsSize = 12;
+    } else {
+        fontNum = GetDefaultFontNum();
+        ts.tsSize = CurrentFontSize();
+    }
         
     ts.tsFont = fontNum;
     ts.tsFace = normal;
-    ts.tsSize = CurrentFontSize();
     ts.tsColor.red = ts.tsColor.green = ts.tsColor.blue = 0;
 
     WESetSelect(0, 32767, gActiveTE);
@@ -1706,46 +1713,222 @@ void WrapSelection(char *prefix, char *suffix)
     WESetSelect(selStart + prefixLen, selStart + prefixLen + selLen, gTE);
 }
 
+static void ApplyLinePrefixToTE(WEHandle te, const char *prefix);
+
 void ApplyHeading(short level)
 {
-    short selStart;
-    short lineStart;
-    long textLen;
-    Handle textH;
     char prefix[8];
     short i;
-    Boolean alreadyHeading;
+    for (i = 0; i < level && i < 6; i++) prefix[i] = '#';
+    prefix[i] = ' ';
+    prefix[i+1] = '\0';
+    ApplyLinePrefixToTE(gTE, prefix);
+}
 
-    gDirty = true;
+static Boolean LineStartsWithNumber(const char *buf, long len, long *prefixBytes)
+{
+    long i = 0;
+    while (i < len && buf[i] >= '0' && buf[i] <= '9') i++;
+    if (i > 0 && i + 1 < len && buf[i] == '.' && buf[i+1] == ' ') {
+        if (prefixBytes) *prefixBytes = i + 2;
+        return true;
+    }
+    return false;
+}
 
-    selStart = GetTESelStart(gTE);
-    textH = WEGetText(gTE);
-    textLen = WEGetTextLength(gTE);
+static Boolean GetExistingListMarkerLen(const char *buf, long len, long *markerLen)
+{
+    if (len >= 6 && buf[0] == '-' && buf[1] == ' ' && buf[2] == '[' && (buf[3] == ' ' || buf[3] == 'x' || buf[3] == 'X') && buf[4] == ']' && buf[5] == ' ') {
+        if (markerLen) *markerLen = 6;
+        return true;
+    }
+    if (len >= 4 && buf[0] == '[' && (buf[1] == ' ' || buf[1] == 'x' || buf[1] == 'X') && buf[2] == ']' && buf[3] == ' ') {
+        if (markerLen) *markerLen = 4;
+        return true;
+    }
+    if (len >= 2 && (buf[0] == '-' || buf[0] == '*' || buf[0] == '+' || buf[0] == (char)'\245') && buf[1] == ' ') {
+        if (markerLen) *markerLen = 2;
+        return true;
+    }
+    long numBytes = 0;
+    if (LineStartsWithNumber(buf, len, &numBytes)) {
+        if (markerLen) *markerLen = numBytes;
+        return true;
+    }
+    return false;
+}
 
-    lineStart = selStart;
-    HLock(textH);
-    while (lineStart > 0 && (*textH)[lineStart - 1] != '\r')
-        lineStart--;
-    HUnlock(textH);
+static void ApplyLinePrefixToTE(WEHandle te, const char *prefix)
+{
+    long selStart, selEnd;
+    long textLen;
+    Handle textH;
+    long start, end;
+    short prefixLen;
+    Boolean isNumbered;
 
-    for (i = 0; i < level; i++)
-        prefix[i] = '#';
-    prefix[level] = ' ';
+    if (!te || !prefix) return;
+    prefixLen = strlen(prefix);
+    isNumbered = (strcmp(prefix, "1. ") == 0);
 
-    HLock(textH);
-    alreadyHeading =
-        (lineStart + level + 1 <= textLen) &&
-        (memcmp(*textH + lineStart, prefix, level + 1) == 0);
-    HUnlock(textH);
+    WEGetSelection(&selStart, &selEnd, te);
+    if (selEnd < selStart) {
+        long tmp = selStart; selStart = selEnd; selEnd = tmp;
+    }
 
-    if (alreadyHeading) {
-        WESetSelect(lineStart, lineStart + level + 1, gTE);
-        WEDelete(gTE);
+    textH = WEGetText(te);
+    textLen = WEGetTextLength(te);
+    if (textLen == 0) {
+        if (isNumbered) {
+            WEInsert("1. ", 3, NULL, te);
+        } else {
+            WEInsert((Ptr)prefix, prefixLen, NULL, te);
+        }
+        gDirty = true;
         return;
     }
 
-    WESetSelect(lineStart, lineStart, gTE);
-    WEInsert(prefix, level + 1, NULL, gTE);
+    start = selStart;
+    HLock(textH);
+    while (start > 0 && (*textH)[start - 1] != '\r')
+        start--;
+
+    end = selEnd;
+    if (end > selStart && end > start && (*textH)[end - 1] == '\r') {
+        end--;
+    }
+    while (end < textLen && (*textH)[end] != '\r')
+        end++;
+
+    long lineStart = start;
+    long nonEmptyCount = 0;
+    long prefixedCount = 0;
+
+    while (lineStart <= end) {
+        long lineEnd = lineStart;
+        while (lineEnd < end && (*textH)[lineEnd] != '\r')
+            lineEnd++;
+        
+        long lineLen = lineEnd - lineStart;
+        if (lineLen > 0) {
+            nonEmptyCount++;
+            if (isNumbered) {
+                long mLen = 0;
+                if (LineStartsWithNumber(*textH + lineStart, lineLen, &mLen)) {
+                    prefixedCount++;
+                }
+            } else {
+                if (lineLen >= prefixLen && memcmp(*textH + lineStart, prefix, prefixLen) == 0) {
+                    prefixedCount++;
+                }
+            }
+        }
+        lineStart = lineEnd + 1;
+    }
+
+    Boolean removing = (nonEmptyCount > 0 && prefixedCount == nonEmptyCount);
+
+    long maxNewLen = (end - start) + (nonEmptyCount + 2) * (prefixLen + 12) + 64;
+    Handle newH = NewHandle(maxNewLen);
+    if (!newH) {
+        HUnlock(textH);
+        return;
+    }
+
+    HLock(newH);
+    long newLen = 0;
+    long itemNumber = 1;
+    lineStart = start;
+
+    while (lineStart <= end) {
+        long lineEnd = lineStart;
+        while (lineEnd < end && (*textH)[lineEnd] != '\r')
+            lineEnd++;
+        
+        long lineLen = lineEnd - lineStart;
+        const char *linePtr = *textH + lineStart;
+
+        if (removing) {
+            long skipBytes = 0;
+            if (isNumbered) {
+                LineStartsWithNumber(linePtr, lineLen, &skipBytes);
+            } else {
+                if (lineLen >= prefixLen && memcmp(linePtr, prefix, prefixLen) == 0) {
+                    skipBytes = prefixLen;
+                }
+            }
+            long copyLen = lineLen - skipBytes;
+            if (copyLen > 0) {
+                BlockMove(linePtr + skipBytes, *newH + newLen, copyLen);
+                newLen += copyLen;
+            }
+        } else {
+            if (lineLen > 0 || (start == end)) {
+                long existingMarkerLen = 0;
+                if (isNumbered || prefix[0] == '-' || prefix[0] == '*' || prefix[0] == (char)'\245') {
+                    GetExistingListMarkerLen(linePtr, lineLen, &existingMarkerLen);
+                }
+
+                if (isNumbered) {
+                    char numBuf[16];
+                    sprintf(numBuf, "%ld. ", itemNumber++);
+                    short nLen = strlen(numBuf);
+                    BlockMove(numBuf, *newH + newLen, nLen);
+                    newLen += nLen;
+                } else {
+                    if (existingMarkerLen > 0 && lineLen >= prefixLen && memcmp(linePtr, prefix, prefixLen) == 0) {
+                        existingMarkerLen = 0;
+                    } else {
+                        BlockMove((Ptr)prefix, *newH + newLen, prefixLen);
+                        newLen += prefixLen;
+                    }
+                }
+
+                long copyLen = lineLen - existingMarkerLen;
+                if (copyLen > 0) {
+                    BlockMove(linePtr + existingMarkerLen, *newH + newLen, copyLen);
+                    newLen += copyLen;
+                }
+            }
+        }
+
+        if (lineEnd < end || (lineEnd < textLen && (*textH)[lineEnd] == '\r')) {
+            (*newH)[newLen++] = '\r';
+        }
+
+        lineStart = lineEnd + 1;
+    }
+
+    HUnlock(textH);
+    HUnlock(newH);
+
+    WESetSelect(start, end, te);
+    WEDelete(te);
+    WEInsert(*newH, newLen, NULL, te);
+    DisposeHandle(newH);
+
+    WESetSelect(start, start + newLen, te);
+    gDirty = true;
+}
+
+void ApplyLinePrefix(const char *prefix)
+{
+    ApplyLinePrefixToTE(gTE, prefix);
+    SyncWindowToBacking();
+    if (gWindow != NULL) {
+        InvalRect(&gWindow->portRect);
+    }
+}
+
+void ApplyLinePrefixHidden(const char *prefix)
+{
+    ApplyLinePrefixToTE(gHiddenTE, prefix);
+    SyncWindowToBacking();
+    SyncHiddenToCanonical();
+    BuildHiddenView();
+    if (gWindow != NULL) {
+        InvalRect(&gWindow->portRect);
+    }
 }
 
 void DoLink(void)
@@ -2570,6 +2753,17 @@ void LoadTextWindow(long startOffset)
     WETextStyle baseStyle;
     short fontNum;
     
+    if (gWindow != NULL) {
+        SetPort(gWindow);
+    }
+    
+    if (!gHideMarkdown && (gMarkdownText == NULL || gMarkdownLen == 0)) {
+        if (gWriterText == NULL && gHiddenTE != NULL) {
+            SyncWindowToBacking();
+        }
+        SyncHiddenToCanonical();
+    }
+    
     if (gHideMarkdown) {
         srcH = gWriterText;
         len = gWriterLen;
@@ -2580,8 +2774,14 @@ void LoadTextWindow(long startOffset)
     
     if (srcH == NULL) return;
     
-    if (startOffset < 0) startOffset = 0;
-    if (startOffset > len) startOffset = len;
+    if (len <= WINDOW_SIZE) {
+        startOffset = 0;
+    } else {
+        long maxStart = len - (WINDOW_SIZE / 2);
+        if (maxStart < 0) maxStart = 0;
+        if (startOffset < 0) startOffset = 0;
+        if (startOffset > maxStart) startOffset = maxStart;
+    }
     
     if (startOffset > 0 && startOffset < len) {
         long scan = startOffset;
@@ -2636,20 +2836,11 @@ void LoadTextWindow(long startOffset)
        during the delete/insert/style phase. Every TESetStyle, TEDelete,
        TEInsert, TECalText call clips to viewRect – with it off-screen the
        window stays perfectly still until we restore it at the very end. */
-    {
-        LongRect viewRectLong;
-        WEGetViewRect(&viewRectLong, te);
-        if (viewRectLong.left < OFFSCREEN_COORD / 2) {
-            savedViewRect = gWindow->portRect;
-            savedViewRect.top += 30;
-            savedViewRect.bottom -= 15;
-        } else {
-            savedViewRect.left = (short)viewRectLong.left;
-            savedViewRect.top = (short)viewRectLong.top;
-            savedViewRect.right = (short)viewRectLong.right;
-            savedViewRect.bottom = (short)viewRectLong.bottom;
-        }
-    }
+    savedViewRect = gWindow->portRect;
+    savedViewRect.left += MARGIN_H;
+    savedViewRect.right -= MARGIN_H;
+    savedViewRect.top += MARGIN_TOP;
+    savedViewRect.bottom -= MARGIN_BOTTOM;
     SetRect(&hiddenRect, OFFSCREEN_COORD, OFFSCREEN_COORD,
             OFFSCREEN_COORD + (savedViewRect.right - savedViewRect.left),
             OFFSCREEN_COORD + (savedViewRect.bottom - savedViewRect.top));
@@ -2818,18 +3009,27 @@ void SyncWindowToBacking(void)
     long newLen = WEGetTextLength(gActiveTE);
     long oldLen = gWindowEnd - gWindowStart;
     long diff = newLen - oldLen;
-    Handle targetH;
+    Handle *targetHPtr;
     long *targetLenPtr;
     
     if (gHideMarkdown) {
-        targetH = gWriterText;
+        targetHPtr = &gWriterText;
         targetLenPtr = &gWriterLen;
     } else {
-        targetH = gMarkdownText;
+        targetHPtr = &gMarkdownText;
         targetLenPtr = &gMarkdownLen;
     }
     
-    if (targetH == NULL) return;
+    if (*targetHPtr == NULL) {
+        *targetHPtr = NewHandle(0);
+        *targetLenPtr = 0;
+        oldLen = 0;
+        diff = newLen;
+        gWindowStart = 0;
+        gWindowEnd = 0;
+    }
+    
+    Handle targetH = *targetHPtr;
     
     if (diff != 0) {
         SetHandleSize(targetH, *targetLenPtr + diff);
@@ -2841,9 +3041,11 @@ void SyncWindowToBacking(void)
         *targetLenPtr += diff;
     }
     
-    HLock(targetH);
-    BlockMove(*(WEGetText(gActiveTE)), *targetH + gWindowStart, newLen);
-    HUnlock(targetH);
+    if (newLen > 0) {
+        HLock(targetH);
+        BlockMove(*(WEGetText(gActiveTE)), *targetH + gWindowStart, newLen);
+        HUnlock(targetH);
+    }
     
     if (gHideMarkdown && gWriterOpsH != NULL) {
         /* 1. Remove old style ops in this window range and adjust later ones */

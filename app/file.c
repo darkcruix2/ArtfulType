@@ -164,7 +164,7 @@ static void ReadFile(StringPtr name, short vRefNum)
         LoadTextWindow(0);
     }
 
-    gDirty = false;
+    SetDirty(false);
     ClearUndoRedoStacks();
     UpdateEditMenuState();
     RefreshActiveView();
@@ -230,7 +230,7 @@ Boolean DoSaveAs(void)
     gVRefNum = reply.vRefNum;
     gHaveFile = true;
     WriteFile(gFileName, gVRefNum);
-    gDirty = false;
+    SetDirty(false);
     return true;
 }
 
@@ -250,7 +250,7 @@ Boolean DoSave(void)
 
 
     WriteFile(gFileName, gVRefNum);
-    gDirty = false;
+    SetDirty(false);
     return true;
 }
 
@@ -322,7 +322,7 @@ void DoNewFile(void)
     WESetSelect(0, WEGetTextLength(gTE), gTE);
     WEDelete(gTE);
     gHaveFile = false;
-    gDirty = false;
+    SetDirty(false);
     ClearUndoRedoStacks();
     UpdateEditMenuState();
     RefreshActiveView();

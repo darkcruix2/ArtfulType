@@ -216,6 +216,14 @@ void UpdateMenuBarLook(void) { DrawMenuBar(); }
 
 static void DrawTopMiddleButtons(WindowPtr w);
 
+void SetDirty(Boolean dirty) {
+  Boolean oldDirty = gDirty;
+  gDirty = dirty;
+  if (oldDirty != dirty && gWindow != NULL) {
+    DrawTopMiddleButtons(gWindow);
+  }
+}
+
 static void MakeMenu(void) {
   MenuHandle appleMenu;
   MenuHandle fileMenu;
@@ -247,12 +255,13 @@ static void MakeMenu(void) {
 
   styleMenu = NewMenu(mStyle, "\pStyle");
   AppendMenu(styleMenu,
-             "\pBold/B;Italic/I;Code/K;Strikethrough;Highlight/H;(-;Heading "
-             "1/1;Heading 2/2;Heading 3/3;(-;Link/L;(-;None");
+             "\pBold/B;Italic/I;In-line Code/K;Code Block;Strikethrough;Highlight/H;(-;"
+             "Blockquote;Checkbox;Bullet Points;Numbered List;(-;"
+             "Heading 1/1;Heading 2/2;Heading 3/3;(-;Link/L;(-;None");
   InsertMenu(styleMenu, 0);
 
   gViewMenu = NewMenu(mView, "\pView");
-  AppendMenu(gViewMenu, "\pMarkdown;Writer;(-;Zoom In/=;Zoom Out/-;Default "
+  AppendMenu(gViewMenu, "\pMarkdown;Writer;(-;Refresh/R;(-;Zoom In/=;Zoom Out/-;Default "
                         "Size/0;(-;Serif;Sans Serif;(-;Show Status Bar");
   InsertMenu(gViewMenu, 0);
   CheckItem(gViewMenu, iWriterView, true);
@@ -475,7 +484,7 @@ static void UpdateStatusBar(WindowPtr w, Boolean forceDraw) {
 static void DrawTopMiddleButtons(WindowPtr w) {
   Rect r;
   short centerX = (w->portRect.right - w->portRect.left) / 2;
-  short startX = centerX - 96;
+  short startX = centerX - 82;
   Str255 s;
   short textWidth;
 
@@ -486,43 +495,35 @@ static void DrawTopMiddleButtons(WindowPtr w) {
   TextFont(0); /* System Font */
   TextSize(0);
 
-  /* Draw Zoom -1 */
-  SetRect(&r, startX, 2, startX + 22, 22);
+  /* 1. Draw Save Button (3.5" Floppy Disk Icon) */
+  SetRect(&r, startX, 2, startX + 30, 22);
   EraseRoundRect(&r, 6, 6);
   FrameRoundRect(&r, 6, 6);
-  TextFace(normal);
-  BlockMove("\p-1", s, 3);
-  textWidth = StringWidth(s);
-  MoveTo(r.left + (r.right - r.left - textWidth) / 2, r.top + 14);
-  DrawString(s);
-  if (gZoomIndex == 0)
-    InvertRoundRect(&r, 6, 6);
+  {
+    short iconLeft = r.left + (r.right - r.left - 16) / 2;
+    short iconTop = r.top + (r.bottom - r.top - 14) / 2;
+    PenNormal();
+    PenSize(1, 1);
 
-  /* Draw Zoom 0 */
-  SetRect(&r, startX + 26, 2, startX + 48, 22);
-  EraseRoundRect(&r, 6, 6);
-  FrameRoundRect(&r, 6, 6);
-  TextFace(normal);
-  BlockMove("\p 0", s, 3);
-  textWidth = StringWidth(s);
-  MoveTo(r.left + (r.right - r.left - textWidth) / 2, r.top + 14);
-  DrawString(s);
-  if (gZoomIndex == 1)
-    InvertRoundRect(&r, 6, 6);
+    /* Floppy disk outer body */
+    Rect bodyR;
+    SetRect(&bodyR, iconLeft, iconTop, iconLeft + 16, iconTop + 14);
+    FrameRect(&bodyR);
 
-  /* Draw Zoom +1 */
-  SetRect(&r, startX + 52, 2, startX + 74, 22);
-  EraseRoundRect(&r, 6, 6);
-  FrameRoundRect(&r, 6, 6);
-  TextFace(normal);
-  BlockMove("\p+1", s, 3);
-  textWidth = StringWidth(s);
-  MoveTo(r.left + (r.right - r.left - textWidth) / 2, r.top + 14);
-  DrawString(s);
-  if (gZoomIndex == 2)
-    InvertRoundRect(&r, 6, 6);
+    /* Top metal slider / shutter door */
+    Rect shutterR;
+    SetRect(&shutterR, iconLeft + 3, iconTop, iconLeft + 11, iconTop + 6);
+    FrameRect(&shutterR);
+    MoveTo(iconLeft + 5, iconTop + 2);
+    LineTo(iconLeft + 5, iconTop + 5);
 
-  startX += 80;
+    /* Bottom paper label */
+    Rect labelR;
+    SetRect(&labelR, iconLeft + 3, iconTop + 7, iconLeft + 13, iconTop + 14);
+    FrameRect(&labelR);
+  }
+  if (gDirty)
+    InvertRoundRect(&r, 6, 6);
 
   Boolean isBoldAtCaret = false;
   Boolean isItalicAtCaret = false;
@@ -549,8 +550,8 @@ static void DrawTopMiddleButtons(WindowPtr w) {
     }
   }
 
-  /* 1. Draw B Button */
-  SetRect(&r, startX, 2, startX + 25, 22);
+  /* 2. Draw B Button */
+  SetRect(&r, startX + 36, 2, startX + 61, 22);
   EraseRoundRect(&r, 6, 6);
   FrameRoundRect(&r, 6, 6);
   TextFace(bold);
@@ -561,8 +562,8 @@ static void DrawTopMiddleButtons(WindowPtr w) {
   if (isBoldAtCaret)
     InvertRoundRect(&r, 6, 6);
 
-  /* 2. Draw I Button */
-  SetRect(&r, startX + 31, 2, startX + 56, 22);
+  /* 3. Draw I Button */
+  SetRect(&r, startX + 67, 2, startX + 92, 22);
   EraseRoundRect(&r, 6, 6);
   FrameRoundRect(&r, 6, 6);
   TextFace(italic);
@@ -573,8 +574,8 @@ static void DrawTopMiddleButtons(WindowPtr w) {
   if (isItalicAtCaret)
     InvertRoundRect(&r, 6, 6);
 
-  /* 3. Draw View Button (24x12 Vector Icon) */
-  SetRect(&r, startX + 62, 2, startX + 92, 22);
+  /* 4. Draw View Button (24x12 Vector Icon) */
+  SetRect(&r, startX + 98, 2, startX + 128, 22);
   EraseRoundRect(&r, 6, 6);
   FrameRoundRect(&r, 6, 6);
   {
@@ -614,8 +615,8 @@ static void DrawTopMiddleButtons(WindowPtr w) {
     }
   }
 
-  /* 4. Draw Refresh Button (Circled Arrow Icon) */
-  SetRect(&r, startX + 98, 2, startX + 128, 22);
+  /* 5. Draw Refresh Button (Circled Arrow Icon) */
+  SetRect(&r, startX + 134, 2, startX + 164, 22);
   EraseRoundRect(&r, 6, 6);
   FrameRoundRect(&r, 6, 6);
   {
@@ -884,7 +885,7 @@ void DoSearchReplace(void) {
             BlockMove(&replaceWith[1], *backingH + matchStart, replaceWith[0]);
             HUnlock(backingH);
 
-            gDirty = true;
+            SetDirty(true);
             LoadTextWindow(matchStart);
 
             long localStart = matchStart - gWindowStart;
@@ -963,7 +964,7 @@ void DoSearchReplace(void) {
           }
 
           if (replaceCount > 0) {
-            gDirty = true;
+            SetDirty(true);
             LoadTextWindow(gWindowStart);
           } else {
             SysBeep(30);
@@ -1068,7 +1069,10 @@ static void DoMenuCommand(long menuResult)
       case iItalic:
         ToggleFace(italic);
         break;
-      case iCode:
+      case iInlineCode:
+        ToggleCode();
+        break;
+      case iCodeBlock:
         ToggleCode();
         break;
       case iStrike:
@@ -1076,6 +1080,18 @@ static void DoMenuCommand(long menuResult)
         break;
       case iHighlight:
         ToggleFace(outline);
+        break;
+      case iBlockquote:
+        ApplyLinePrefixHidden("\t");
+        break;
+      case iCheckbox:
+        ApplyLinePrefixHidden("[ ] ");
+        break;
+      case iBulletPoints:
+        ApplyLinePrefixHidden("\245 ");
+        break;
+      case iNumberedList:
+        ApplyLinePrefixHidden("1. ");
         break;
       case iH1:
         ToggleHeadingHidden(1);
@@ -1103,14 +1119,29 @@ static void DoMenuCommand(long menuResult)
       case iItalic:
         WrapSelection("*", "*");
         break;
-      case iCode:
+      case iInlineCode:
         WrapSelection("`", "`");
+        break;
+      case iCodeBlock:
+        WrapSelection("```\r", "\r```");
         break;
       case iStrike:
         WrapSelection("~~", "~~");
         break;
       case iHighlight:
         WrapSelection("==", "==");
+        break;
+      case iBlockquote:
+        ApplyLinePrefix("> ");
+        break;
+      case iCheckbox:
+        ApplyLinePrefix("- [ ] ");
+        break;
+      case iBulletPoints:
+        ApplyLinePrefix("- ");
+        break;
+      case iNumberedList:
+        ApplyLinePrefix("1. ");
         break;
       case iH1:
         ApplyHeading(1);
@@ -1138,6 +1169,12 @@ static void DoMenuCommand(long menuResult)
       break;
     case iWriterView:
       SetViewMode(true);
+      break;
+    case iRefreshView:
+      InvalidateHeightCache();
+      if (gActiveTE != NULL && (*gActiveTE)->te != NULL) {
+        InvalRect(&(**((*gActiveTE)->te)).viewRect);
+      }
       break;
     case iZoomIn:
       DoZoom(1);
@@ -1370,40 +1407,21 @@ static void EventLoop(void) {
 
             /* Check custom top-middle buttons first */
             short centerX = (w->portRect.right - w->portRect.left) / 2;
-            short startX = centerX - 96;
-            Rect btnZm1, btnZ0, btnZp1, btnB, btnI, btnView, btnRefresh;
+            short startX = centerX - 82;
+            Rect btnSave, btnB, btnI, btnView, btnRefresh;
 
-            SetRect(&btnZm1, startX, 2, startX + 22, 22);
-            SetRect(&btnZ0, startX + 26, 2, startX + 48, 22);
-            SetRect(&btnZp1, startX + 52, 2, startX + 74, 22);
+            SetRect(&btnSave, startX, 2, startX + 30, 22);
+            SetRect(&btnB, startX + 36, 2, startX + 61, 22);
+            SetRect(&btnI, startX + 67, 2, startX + 92, 22);
+            SetRect(&btnView, startX + 98, 2, startX + 128, 22);
+            SetRect(&btnRefresh, startX + 134, 2, startX + 164, 22);
 
-            startX += 80;
-            SetRect(&btnB, startX, 2, startX + 25, 22);
-            SetRect(&btnI, startX + 31, 2, startX + 56, 22);
-            SetRect(&btnView, startX + 62, 2, startX + 92, 22);
-            SetRect(&btnRefresh, startX + 98, 2, startX + 128, 22);
-
-            if (PtInRect(event.where, &btnZm1)) {
-              InvertRoundRect(&btnZm1, 6, 6);
+            if (PtInRect(event.where, &btnSave)) {
+              InvertRoundRect(&btnSave, 6, 6);
               while (StillDown())
                 ;
-              InvertRoundRect(&btnZm1, 6, 6);
-              if (gZoomIndex != 0)
-                ApplyZoomIndex(0);
-            } else if (PtInRect(event.where, &btnZ0)) {
-              InvertRoundRect(&btnZ0, 6, 6);
-              while (StillDown())
-                ;
-              InvertRoundRect(&btnZ0, 6, 6);
-              if (gZoomIndex != 1)
-                ApplyZoomIndex(1);
-            } else if (PtInRect(event.where, &btnZp1)) {
-              InvertRoundRect(&btnZp1, 6, 6);
-              while (StillDown())
-                ;
-              InvertRoundRect(&btnZp1, 6, 6);
-              if (gZoomIndex != 2)
-                ApplyZoomIndex(2);
+              InvertRoundRect(&btnSave, 6, 6);
+              DoSave();
             } else if (PtInRect(event.where, &btnB)) {
               InvertRoundRect(&btnB, 6, 6);
               while (StillDown())
@@ -1412,7 +1430,7 @@ static void EventLoop(void) {
 
               PushUndoSnapshot();
               gTypingRunActive = false;
-              gDirty = true;
+              SetDirty(true);
               if (gHideMarkdown) {
                 ToggleFace(bold);
               } else {
@@ -1428,7 +1446,7 @@ static void EventLoop(void) {
 
               PushUndoSnapshot();
               gTypingRunActive = false;
-              gDirty = true;
+              SetDirty(true);
               if (gHideMarkdown) {
                 ToggleFace(italic);
               } else {
@@ -1486,40 +1504,21 @@ static void EventLoop(void) {
 
           /* Check custom top-middle buttons first */
           short centerX = (w->portRect.right - w->portRect.left) / 2;
-          short startX = centerX - 96;
-          Rect btnZm1, btnZ0, btnZp1, btnB, btnI, btnView, btnRefresh;
+          short startX = centerX - 82;
+          Rect btnSave, btnB, btnI, btnView, btnRefresh;
 
-          SetRect(&btnZm1, startX, 2, startX + 22, 22);
-          SetRect(&btnZ0, startX + 26, 2, startX + 48, 22);
-          SetRect(&btnZp1, startX + 52, 2, startX + 74, 22);
+          SetRect(&btnSave, startX, 2, startX + 30, 22);
+          SetRect(&btnB, startX + 36, 2, startX + 61, 22);
+          SetRect(&btnI, startX + 67, 2, startX + 92, 22);
+          SetRect(&btnView, startX + 98, 2, startX + 128, 22);
+          SetRect(&btnRefresh, startX + 134, 2, startX + 164, 22);
 
-          startX += 80;
-          SetRect(&btnB, startX, 2, startX + 25, 22);
-          SetRect(&btnI, startX + 31, 2, startX + 56, 22);
-          SetRect(&btnView, startX + 62, 2, startX + 112, 22);
-          SetRect(&btnRefresh, startX + 118, 2, startX + 180, 22);
-
-          if (PtInRect(event.where, &btnZm1)) {
-            InvertRoundRect(&btnZm1, 6, 6);
+          if (PtInRect(event.where, &btnSave)) {
+            InvertRoundRect(&btnSave, 6, 6);
             while (StillDown())
               ;
-            InvertRoundRect(&btnZm1, 6, 6);
-            if (gZoomIndex != 0)
-              ApplyZoomIndex(0);
-          } else if (PtInRect(event.where, &btnZ0)) {
-            InvertRoundRect(&btnZ0, 6, 6);
-            while (StillDown())
-              ;
-            InvertRoundRect(&btnZ0, 6, 6);
-            if (gZoomIndex != 1)
-              ApplyZoomIndex(1);
-          } else if (PtInRect(event.where, &btnZp1)) {
-            InvertRoundRect(&btnZp1, 6, 6);
-            while (StillDown())
-              ;
-            InvertRoundRect(&btnZp1, 6, 6);
-            if (gZoomIndex != 2)
-              ApplyZoomIndex(2);
+            InvertRoundRect(&btnSave, 6, 6);
+            DoSave();
           } else if (PtInRect(event.where, &btnB)) {
             InvertRoundRect(&btnB, 6, 6);
             while (StillDown())
@@ -1528,7 +1527,7 @@ static void EventLoop(void) {
 
             PushUndoSnapshot();
             gTypingRunActive = false;
-            gDirty = true;
+            SetDirty(true);
             if (gHideMarkdown) {
               ToggleFace(bold);
             } else {
@@ -1544,7 +1543,7 @@ static void EventLoop(void) {
 
             PushUndoSnapshot();
             gTypingRunActive = false;
-            gDirty = true;
+            SetDirty(true);
             if (gHideMarkdown) {
               ToggleFace(italic);
             } else {
@@ -1641,11 +1640,25 @@ static void EventLoop(void) {
           WESetSelect(scan, scan, gActiveTE);
           ScrollCaretIntoView(true);
           handled = true;
+        } else if (keyCode == 0x74) { /* Page Up */
+          HandlePageUp();
+          handled = true;
+        } else if (keyCode == 0x79) { /* Page Down */
+          HandlePageDown();
+          handled = true;
         } else if (keyCode == 0x77) { /* End */
           short lineStart, lineEnd;
           GetCurrentLineRange(&lineStart, &lineEnd);
           WESetSelect(lineEnd, lineEnd, gActiveTE);
           ScrollCaretIntoView(false);
+          handled = true;
+        } else if ((event.modifiers & cmdKey) &&
+                   keyCode == 0x7E) { /* Cmd+Cursor Up */
+          HandleJumpToTop();
+          handled = true;
+        } else if ((event.modifiers & cmdKey) &&
+                   keyCode == 0x7D) { /* Cmd+Cursor Down */
+          HandleJumpToEnd();
           handled = true;
         } else if ((event.modifiers & cmdKey) &&
                    keyCode == 0x7B) { /* Cmd+Cursor Left */
@@ -1674,7 +1687,7 @@ static void EventLoop(void) {
               /* Cmd+D: insert current date as H2 heading */
               PushUndoSnapshot();
               gTypingRunActive = false;
-              gDirty = true;
+              SetDirty(true);
               InsertDateHeading(2);
               ScrollCaretIntoView(false);
               UpdateScrollbarRange();
@@ -1682,7 +1695,7 @@ static void EventLoop(void) {
               /* Cmd+T: insert current time as H3 heading */
               PushUndoSnapshot();
               gTypingRunActive = false;
-              gDirty = true;
+              SetDirty(true);
               InsertTimeHeading(3);
               ScrollCaretIntoView(false);
               UpdateScrollbarRange();
@@ -1827,12 +1840,12 @@ static void EventLoop(void) {
                       WESetSelect(lineStart, lineStart, gActiveTE);
                       WEInsert(newBuf, newPrefixLen, NULL, gActiveTE);
                       doInsertCR = false;
-                      gDirty = true;
+                      SetDirty(true);
                     } else {
                       WESetSelect(lineStart, lineEnd, gActiveTE);
                       WEDelete(gActiveTE);
                       doInsertCR = false;
-                      gDirty = true;
+                      SetDirty(true);
                     }
                   } else if (spaceCount >= 2) {
                     char newBuf[64];
@@ -1872,12 +1885,12 @@ static void EventLoop(void) {
                     WESetSelect(lineStart, lineStart, gActiveTE);
                     WEInsert(newBuf, newPrefixLen, NULL, gActiveTE);
                     doInsertCR = false;
-                    gDirty = true;
+                    SetDirty(true);
                   } else {
                     WESetSelect(lineStart, lineEnd, gActiveTE);
                     WEDelete(gActiveTE);
                     doInsertCR = false;
-                    gDirty = true;
+                    SetDirty(true);
                   }
                 } else {
                   Boolean isNumbered = false;
@@ -1917,7 +1930,7 @@ static void EventLoop(void) {
                     WESetSelect(lineStart, lineEnd, gActiveTE);
                     WESetStyle(weDoFace + weDoColor, &ts, gActiveTE);
                     doInsertCR = false;
-                    gDirty = true;
+                    SetDirty(true);
                   } else if ((ts.tsFace & bold) &&
                              ts.tsSize > CurrentFontSize()) {
                     ts.tsFace &= ~bold;
@@ -1925,7 +1938,7 @@ static void EventLoop(void) {
                     WESetSelect(lineStart, lineEnd, gActiveTE);
                     WESetStyle(weDoFace + weDoSize, &ts, gActiveTE);
                     doInsertCR = false;
-                    gDirty = true;
+                    SetDirty(true);
                     InvalidateHeightCache();
                     if (gActiveTE != NULL && (*gActiveTE)->te != NULL) {
                       InvalRect(&(**((*gActiveTE)->te)).viewRect);
@@ -2078,7 +2091,7 @@ static void EventLoop(void) {
 
                 short newCaret = caret + 2;
                 WESetSelect(newCaret, newCaret, gActiveTE);
-                gDirty = true;
+                SetDirty(true);
               } else {
                 WEKey(key, keyCode, event.modifiers, gActiveTE);
               }
@@ -2088,7 +2101,7 @@ static void EventLoop(void) {
 
             if (isContentKey) {
               short caret;
-              gDirty = true;
+              SetDirty(true);
               if (gHideMarkdown)
                 DetectInlineMarkdown(key);
 

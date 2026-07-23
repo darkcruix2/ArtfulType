@@ -71,16 +71,21 @@ void InsertTimeHeading(short level);
 
 
 #define mStyle   129
-#define iBold    1
-#define iItalic  2
-#define iCode    3
-#define iStrike  4
-#define iHighlight 5
-#define iH1      7
-#define iH2      8
-#define iH3      9
-#define iLink    11
-#define iNone    13
+#define iBold        1
+#define iItalic      2
+#define iInlineCode  3
+#define iCodeBlock   4
+#define iStrike      5
+#define iHighlight   6
+#define iBlockquote  8
+#define iCheckbox    9
+#define iBulletPoints 10
+#define iNumberedList 11
+#define iH1          13
+#define iH2          14
+#define iH3          15
+#define iLink        17
+#define iNone        19
 
 #define kSaveChangesAlert 130
 #define kSaveBtn          1
@@ -117,12 +122,13 @@ void InsertTimeHeading(short level);
 #define mView        130
 #define iMarkdownView 1
 #define iWriterView  2
-#define iZoomIn      4
-#define iZoomOut     5
-#define iZoomDefault 6
-#define iSerif       8
-#define iSansSerif   9
-#define iStatusBar   11
+#define iRefreshView 4
+#define iZoomIn      6
+#define iZoomOut     7
+#define iZoomDefault 8
+#define iSerif       10
+#define iSansSerif   11
+#define iStatusBar   13
 
 #define mWindow  134
 
@@ -320,6 +326,7 @@ extern ControlHandle gScrollBar;
 extern Boolean gScrollBarVisible;
 extern Boolean gHaveFile;
 extern Boolean gDirty;
+void SetDirty(Boolean dirty);
 extern Str255 gFileName;
 extern short gVRefNum;
 extern Boolean gHideMarkdown;
@@ -350,6 +357,7 @@ void MakeWindow(void);
 void UpdateMenuBarLook(void);
 short GetDefaultFontNum(void);
 void SetFontMode(Boolean useSans);
+void SetDirty(Boolean dirty);
 
 /* scrolling.c */
 void UpdateScrollbarRange(void);
@@ -357,6 +365,8 @@ void AdjustScrollbar(void);
 void ScrollCaretIntoView(Boolean movingBackward);
 void HandleJumpToTop(void);
 void HandleJumpToEnd(void);
+void HandlePageUp(void);
+void HandlePageDown(void);
 
 
 
@@ -377,6 +387,8 @@ void InsertMarkdownAsStyled(Handle srcH, long srcLen, WEHandle te);
 void WrapSelection(char *prefix, char *suffix);
 void ApplyHeading(short level);
 void InsertDateHeading(short level);
+void ApplyLinePrefix(const char *prefix);
+void ApplyLinePrefixHidden(const char *prefix);
 void InsertTimeHeading(short level);
 void DoLink(void);
 void ApplyZoomIndex(short newIndex);
