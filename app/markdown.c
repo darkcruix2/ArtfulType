@@ -607,44 +607,66 @@ void BuildHiddenView(void)
                 }
             }
 
-            /* Indented code block: 4+ spaces at start of line */
+            /* Indented code block: 4+ spaces at start of line.
+               EXCEPTION: if the content after stripping the leading spaces is a
+               list marker (dash, plus, asterisk, bullet/o/s followed by a space),
+               fall through to the list item handler below. Deeply-nested list
+               items look like indented code blocks but must NOT be treated as such.
+            */
             if (p - i >= 4 && (*srcH)[i] == ' ' && (*srcH)[i+1] == ' ' && (*srcH)[i+2] == ' ' && (*srcH)[i+3] == ' ') {
-                long lineStart = i + 4;
-                long lineEnd = lineStart;
-                long outStart = outLen;
+                /* Check if this is actually a nested list item */
+                Boolean isListLine = false;
+                if (p + 1 < len) {
+                    unsigned char lch = (unsigned char)(*srcH)[p];
+                    if ((lch == '-' || lch == '+' || lch == '*' ||
+                         lch == 0xA5 || lch == 'o' || lch == 's') &&
+                        (*srcH)[p + 1] == ' ') {
+                        isListLine = true;
+                    }
+                }
+                if (!isListLine) {
+                    long lineStart = i + 4;
+                    long lineEnd = lineStart;
+                    long outStart = outLen;
 
-                while (lineEnd < len && (*srcH)[lineEnd] != '\r') {
-                    lineEnd++;
+                    while (lineEnd < len && (*srcH)[lineEnd] != '\r') {
+                        lineEnd++;
+                    }
+                    /* Copy content with indent stripped */
+                    {
+                        long m;
+                        for (m = lineStart; m < lineEnd; m++)
+                            (*outH)[outLen++] = (*srcH)[m];
+                    }
+                    if (gWriterOpCount < MAX_STYLE_OPS) {
+                        ops[gWriterOpCount].start = outStart;
+                        ops[gWriterOpCount].end = outLen;
+                        ops[gWriterOpCount].kind = 'C';
+                        ops[gWriterOpCount].level = 0;
+                        ops[gWriterOpCount].linkID = 0;
+                        gWriterOpCount++;
+                    }
+                    if (lineEnd < len && (*srcH)[lineEnd] == '\r') {
+                        (*outH)[outLen++] = '\r';
+                        i = lineEnd + 1;
+                    } else {
+                        i = lineEnd;
+                    }
+                    continue;
                 }
-                /* Copy content with indent stripped */
-                {
-                    long m;
-                    for (m = lineStart; m < lineEnd; m++)
-                        (*outH)[outLen++] = (*srcH)[m];
-                }
-                if (gWriterOpCount < MAX_STYLE_OPS) {
-                    ops[gWriterOpCount].start = outStart;
-                    ops[gWriterOpCount].end = outLen;
-                    ops[gWriterOpCount].kind = 'C';
-                    ops[gWriterOpCount].level = 0;
-                    ops[gWriterOpCount].linkID = 0;
-                    gWriterOpCount++;
-                }
-                if (lineEnd < len && (*srcH)[lineEnd] == '\r') {
-                    (*outH)[outLen++] = '\r';
-                    i = lineEnd + 1;
-                } else {
-                    i = lineEnd;
-                }
-                continue;
+                /* else: fall through to list item detection below */
             }
 
-            if (p + 1 < len && ((*srcH)[p] == '-' || (*srcH)[p] == '+' || (*srcH)[p] == '*') && (*srcH)[p + 1] == ' ') {
+            if (p + 1 < len && ((*srcH)[p] == '-' || (*srcH)[p] == '+' || (*srcH)[p] == '*' || (unsigned char)(*srcH)[p] == 0xA5 || (*srcH)[p] == 'o' || (*srcH)[p] == 's') && (*srcH)[p + 1] == ' ') {
                 long lineStart = p + 2;
                 long lineEnd = lineStart;
                 long outStart = outLen;
                 short spaceCount = p - i;
                 short nestingLevel = spaceCount / 2;
+                if (nestingLevel == 0) {
+                    if ((*srcH)[p] == 'o') nestingLevel = 1;
+                    else if ((*srcH)[p] == 's') nestingLevel = 2;
+                }
                 
                 Boolean isTask = false;
                 Boolean isChecked = false;
@@ -660,31 +682,20 @@ void BuildHiddenView(void)
 
                 if (isTask) {
                     long taskBoxStart = outLen;
-                    (*outH)[outLen++] = '[';
-                    (*outH)[outLen++] = isChecked ? 'X' : ' ';
-                    (*outH)[outLen++] = ']';
+                    (*outH)[outLen++] = ' ';
                     (*outH)[outLen++] = ' ';
                     
                     if (gWriterOpCount < MAX_STYLE_OPS) {
                         ops[gWriterOpCount].start = taskBoxStart;
-                        ops[gWriterOpCount].end = taskBoxStart + 4;
-                        ops[gWriterOpCount].kind = 'K'; /* Monospaced font / Task box */
+                        ops[gWriterOpCount].end = taskBoxStart + 2;
+                        ops[gWriterOpCount].kind = 'K'; /* Task box */
                         ops[gWriterOpCount].level = isChecked ? 1 : 0;
                         ops[gWriterOpCount].linkID = 0;
                         gWriterOpCount++;
                     }
                     lineStart = p + 6;
                 } else {
-                    char bulletChar = '\245';
-                    if (nestingLevel == 1) {
-                        bulletChar = 'o';
-                    } else if (nestingLevel == 2) {
-                        bulletChar = 's';
-                    } else if (nestingLevel == 3) {
-                        bulletChar = 'o';
-                    } else if (nestingLevel >= 4) {
-                        bulletChar = '-';
-                    }
+                    char bulletChar = '\245'; /* filled bullet for all nesting levels */
                     long bulletStart = outLen;
                     (*outH)[outLen++] = bulletChar;
                     (*outH)[outLen++] = ' ';
@@ -964,12 +975,14 @@ void SyncHiddenToCanonical(void)
     
     if (srcH == NULL) return;
 
+
     urlSpace = 0;
     for (li = 1; li <= gLinkCount; li++)
         urlSpace += gLinkURLs[li][0];
     outCap = len * 5 + 1024 + urlSpace;
     outH = NewHandle(outCap);
     outLen = 0;
+
 
     HLock(srcH);
     HLock(outH);
@@ -985,7 +998,63 @@ void SyncHiddenToCanonical(void)
         Boolean isHR = false;
         WETextStyle firstStyle;
         long textOffset = lineStart;
-        
+
+        /* Check for a fenced code block ('C' op with level=1) that starts at or
+           before this line.  If found, emit the entire block as ```...``` in one
+           pass and skip past all lines it covers — they must NOT be processed
+           line-by-line because that would produce one inline backtick per line. */
+        if (gWriterOpsH != NULL) {
+            short k;
+            StyleOp *ops;
+            HLock(gWriterOpsH);
+            ops = (StyleOp *) *gWriterOpsH;
+            for (k = 0; k < gWriterOpCount; k++) {
+                if (ops[k].kind == 'C' && ops[k].level == 1 &&
+                    ops[k].start <= lineStart && ops[k].end > lineStart) {
+                    /* This fenced code block covers lineStart. Output the fence. */
+                    long blockStart = ops[k].start;
+                    long blockEnd   = ops[k].end;   /* points to \r or EOF after last code line */
+
+                    /* Ensure a blank line before the fence if needed */
+                    if (outLen >= 1 && (*outH)[outLen - 1] == '\r') {
+                        if (outLen < 2 || (*outH)[outLen - 2] != '\r') {
+                            (*outH)[outLen++] = '\r';
+                        }
+                    }
+
+                    /* Opening ``` */
+                    (*outH)[outLen++] = '`';
+                    (*outH)[outLen++] = '`';
+                    (*outH)[outLen++] = '`';
+                    (*outH)[outLen++] = '\r';
+
+                    /* Code content: copy verbatim from gWriterText, converting \r to \r */
+                    long m;
+                    for (m = blockStart; m < blockEnd; m++) {
+                        (*outH)[outLen++] = (*srcH)[m];
+                    }
+                    /* Ensure content ends with \r before closing fence */
+                    if (outLen > 0 && (*outH)[outLen - 1] != '\r') {
+                        (*outH)[outLen++] = '\r';
+                    }
+
+                    /* Closing ``` */
+                    (*outH)[outLen++] = '`';
+                    (*outH)[outLen++] = '`';
+                    (*outH)[outLen++] = '`';
+                    (*outH)[outLen++] = '\r';
+
+                    /* Skip past this block (and the trailing \r if present) */
+                    lineStart = blockEnd;
+                    if (lineStart < len && (*srcH)[lineStart] == '\r') lineStart++;
+
+                    HUnlock(gWriterOpsH);
+                    goto nextLine;
+                }
+            }
+            HUnlock(gWriterOpsH);
+        }
+
         lineEnd = lineStart;
         while (lineEnd < len && (*srcH)[lineEnd] != '\r')
             lineEnd++;
@@ -996,6 +1065,7 @@ void SyncHiddenToCanonical(void)
             short k;
             StyleOp *ops = (StyleOp *) *gWriterOpsH;
             firstStyle.tsFace = 0;
+            firstStyle.tsSize = 0;
             firstStyle.tsColor.blue = 0;
             if (gWriterOpsH) {
                 HLock(gWriterOpsH);
@@ -1032,8 +1102,8 @@ void SyncHiddenToCanonical(void)
         }
 
         Boolean isHeading = false;
-        Boolean isListItem = false;
-        
+        /* isListItem declared below, after bullet detection */
+
         if (!isHR && (firstStyle.tsFace & bold)) {
             short lvl;
             for (lvl = 1; lvl <= 6; lvl++) {
@@ -1046,19 +1116,43 @@ void SyncHiddenToCanonical(void)
         
         Boolean isTaskItem = false;
         Boolean isCheckedTask = false;
-        if (!isHR && !isHeading && !isBlockquote) {
+        Boolean isListItem = false;
+        /* Detect bullet/task list items FIRST, before the heading check.
+           A bullet char at the start of a line (after optional spaces) takes
+           priority over any accidentally-inherited heading style. */
+        if (!isHR && !isBlockquote) {
             long p = lineStart;
             while (p < lineEnd && ((*srcH)[p] == ' ' || (*srcH)[p] == '\t')) p++;
-            if (p + 3 < lineEnd && (*srcH)[p] == '[' && ((*srcH)[p + 1] == ' ' || (*srcH)[p + 1] == 'x' || (*srcH)[p + 1] == 'X') && (*srcH)[p + 2] == ']' && (*srcH)[p + 3] == ' ') {
-                isTaskItem = true;
-                isCheckedTask = ((*srcH)[p + 1] == 'x' || (*srcH)[p + 1] == 'X');
-            } else if (p < lineEnd && ((unsigned char)(*srcH)[p] == 0xA5 || (*srcH)[p] == 'o' || (*srcH)[p] == 's' || (*srcH)[p] == '-') && p + 1 < lineEnd && (*srcH)[p + 1] == ' ') {
-                isListItem = true;
-            } else {
-                textOffset = p;
+
+            if (gWriterOpsH) {
+                short k;
+                StyleOp *ops = (StyleOp *) *gWriterOpsH;
+                HLock(gWriterOpsH);
+                for (k = 0; k < gWriterOpCount; k++) {
+                    if (ops[k].kind == 'K' && ops[k].start <= p && ops[k].end > p) {
+                        isTaskItem = true;
+                        isCheckedTask = (ops[k].level > 0);
+                        break;
+                    }
+                }
+                HUnlock(gWriterOpsH);
+            }
+
+            if (!isTaskItem) {
+                if (p < lineEnd &&
+                    ((unsigned char)(*srcH)[p] == 0xA5 ||
+                     (*srcH)[p] == 'o' || (*srcH)[p] == 's' || (*srcH)[p] == '-') &&
+                    p + 1 < lineEnd && (*srcH)[p + 1] == ' ') {
+                    isListItem = true;
+                } else {
+                    textOffset = p;
+                }
             }
         }
+
+        /* If this line is a bullet/task, suppress any spurious heading detection */
         Boolean isAnyList = isListItem || isTaskItem;
+        if (isAnyList) isHeading = false;
         Boolean prevWasAnyList = prevWasListItem || prevWasTaskItem;
         if (isHeading || isHR ||
             (isBlockquote && !prevWasBlockquote) ||
@@ -1104,7 +1198,6 @@ void SyncHiddenToCanonical(void)
         } else if (isTaskItem) {
             long p = lineStart;
             while (p < lineEnd && ((*srcH)[p] == ' ' || (*srcH)[p] == '\t')) {
-                (*outH)[outLen++] = (*srcH)[p];
                 p++;
             }
             (*outH)[outLen++] = '-';
@@ -1113,16 +1206,18 @@ void SyncHiddenToCanonical(void)
             (*outH)[outLen++] = isCheckedTask ? 'x' : ' ';
             (*outH)[outLen++] = ']';
             (*outH)[outLen++] = ' ';
-            textOffset = p + 4;
+            textOffset = p + 2;
         } else if (isListItem) {
             long p = lineStart;
+            short nestingSpaces = 0;
             while (p < lineEnd && ((*srcH)[p] == ' ' || (*srcH)[p] == '\t')) {
                 (*outH)[outLen++] = (*srcH)[p];
+                nestingSpaces++;
                 p++;
             }
             (*outH)[outLen++] = '-';
             (*outH)[outLen++] = ' ';
-            textOffset = p + 2;
+            textOffset = p + 2; /* skip bullet char + space */
         }
 
         if (!isHR) {
@@ -1144,7 +1239,7 @@ void SyncHiddenToCanonical(void)
                             if (ops[k].kind == 'X') isBoldItalic = true;
                             if (ops[k].kind == 'B') isBold = true;
                             if (ops[k].kind == 'I') isItalic = true;
-                            if (ops[k].kind == 'C') isCode = true;
+                            if (ops[k].kind == 'C' && ops[k].level == 0) isCode = true;
                             if (ops[k].kind == 'S') isStrike = true;
                             if (ops[k].kind == 'E') isHighlight = true;
                             if (ops[k].kind == 'P') isSuper = true;
@@ -1277,7 +1372,9 @@ void SyncHiddenToCanonical(void)
         prevWasTaskItem = isTaskItem;
 
         lineStart = lineEnd + 1;
+        nextLine:;
     }
+
 
     HUnlock(srcH);
     HUnlock(outH);
@@ -2091,15 +2188,125 @@ void DoLinkHidden(void)
 void ToggleCode(void)
 {
     WETextStyle ts;
-    short lh, fa;
     short monacoFont, defaultFont;
 
     GetFNum("\pMonaco", &monacoFont);
     defaultFont = GetDefaultFontNum();
 
     WEGetStyle(GetTESelStart(gHiddenTE), &ts, gHiddenTE);
-    ts.tsFont = (ts.tsFont == monacoFont) ? defaultFont : monacoFont;
-    WESetStyle(weDoFont, &ts, gHiddenTE);
+    if (ts.tsFont == monacoFont) {
+        /* Toggle off: restore default font, clear any code-block color marker */
+        ts.tsFont = defaultFont;
+        ts.tsColor.red = ts.tsColor.green = ts.tsColor.blue = 0;
+    } else {
+        /* Toggle on: Monaco with explicit blue=0 so WASTE.c doesn't treat as fenced block */
+        ts.tsFont = monacoFont;
+        ts.tsColor.red = ts.tsColor.green = ts.tsColor.blue = 0;
+    }
+    WESetStyle(weDoFont + weDoColor, &ts, gHiddenTE);
+}
+
+/*
+    Wraps the current selection (expanded to whole-line boundaries) in a fenced
+    code block by creating a 'C' op (level=1) in gWriterOpsH.  If the selection
+    is already inside a fenced code block, the op is removed (toggle off).
+*/
+void ToggleCodeBlockHidden(void)
+{
+    long selStart, selEnd;
+    long lineStart, lineEnd;
+    Handle textH;
+    long len;
+    WETextStyle ts;
+    short monacoFont, defaultFont;
+    Boolean isAlreadyBlock = false;
+
+    WEGetSelection(&selStart, &selEnd, gHiddenTE);
+    textH = WEGetText(gHiddenTE);
+    len   = WEGetTextLength(gHiddenTE);
+
+    HLock(textH);
+    /* Expand selection to cover full lines */
+    lineStart = selStart;
+    while (lineStart > 0 && (*textH)[lineStart - 1] != '\r')
+        lineStart--;
+    lineEnd = (selEnd > 0) ? selEnd - 1 : 0;
+    /* If selEnd is right at a line start (e.g. cursor landed on next line),
+       back up so we don't include the trailing empty line */
+    if (selEnd > selStart && selEnd < len && (*textH)[selEnd - 1] == '\r')
+        lineEnd = selEnd - 1;
+    else
+        lineEnd = selEnd;
+    while (lineEnd < len && (*textH)[lineEnd] != '\r')
+        lineEnd++;
+    HUnlock(textH);
+
+    /* Compute global positions in the backing store */
+    long globalLineStart = gWindowStart + lineStart;
+    long globalLineEnd   = gWindowStart + lineEnd;
+
+    /* Check if already a fenced code block covering this range */
+    if (gWriterOpsH != NULL) {
+        short k;
+        StyleOp *ops;
+        HLock(gWriterOpsH);
+        ops = (StyleOp *) *gWriterOpsH;
+        for (k = 0; k < gWriterOpCount; k++) {
+            if (ops[k].kind == 'C' && ops[k].level == 1 &&
+                ops[k].start <= globalLineStart && ops[k].end >= globalLineEnd) {
+                isAlreadyBlock = true;
+                break;
+            }
+        }
+        HUnlock(gWriterOpsH);
+    }
+
+    /* Remove any existing 'C' level=1 op overlapping this range */
+    if (gWriterOpsH != NULL) {
+        short k, newCount = 0;
+        StyleOp *ops;
+        HLock(gWriterOpsH);
+        ops = (StyleOp *) *gWriterOpsH;
+        for (k = 0; k < gWriterOpCount; k++) {
+            if (ops[k].kind == 'C' && ops[k].level == 1 &&
+                ops[k].start <= globalLineEnd && ops[k].end >= globalLineStart) {
+                continue; /* remove */
+            }
+            if (newCount != k) ops[newCount] = ops[k];
+            newCount++;
+        }
+        gWriterOpCount = newCount;
+        HUnlock(gWriterOpsH);
+    }
+
+    GetFNum("\pMonaco", &monacoFont);
+    defaultFont = GetDefaultFontNum();
+
+    WESetSelect((short) lineStart, (short) lineEnd, gHiddenTE);
+    if (isAlreadyBlock) {
+        /* Toggle off: restore default font */
+        ts.tsFont = defaultFont;
+        WESetStyle(weDoFont, &ts, gHiddenTE);
+    } else {
+        /* Toggle on: apply Monaco font for visual feedback and add 'C' block op */
+        ts.tsFont = monacoFont;
+        WESetStyle(weDoFont, &ts, gHiddenTE);
+
+        if (gWriterOpsH == NULL)
+            gWriterOpsH = NewHandle(MAX_STYLE_OPS * sizeof(StyleOp));
+        if (gWriterOpsH != NULL && gWriterOpCount < MAX_STYLE_OPS) {
+            StyleOp *ops;
+            HLock(gWriterOpsH);
+            ops = (StyleOp *) *gWriterOpsH;
+            ops[gWriterOpCount].start  = globalLineStart;
+            ops[gWriterOpCount].end    = globalLineEnd;
+            ops[gWriterOpCount].kind   = 'C';
+            ops[gWriterOpCount].level  = 1;
+            ops[gWriterOpCount].linkID = 0;
+            gWriterOpCount++;
+            HUnlock(gWriterOpsH);
+        }
+    }
 }
 
 void ToggleHeadingHidden(short level)
@@ -2109,8 +2316,7 @@ void ToggleHeadingHidden(short level)
     Handle textH;
     long len;
     WETextStyle ts;
-    short lh, fa;
-    Boolean isThisLevel;
+    Boolean isThisLevel = false;
 
     selStart = GetTESelStart(gHiddenTE);
     textH = WEGetText(gHiddenTE);
@@ -2125,19 +2331,78 @@ void ToggleHeadingHidden(short level)
         lineEnd++;
     HUnlock(textH);
 
-    WEGetStyle((short) lineStart, &ts, gHiddenTE);
-    isThisLevel = (ts.tsFace & bold) && (ts.tsSize == CurrentFontSize() + (7 - level) * 2);
+    /* Compute global positions in the backing store */
+    long globalLineStart = gWindowStart + lineStart;
+    long globalLineEnd   = gWindowStart + lineEnd;
 
+    /* Check existing 'H' op for this line using gWriterOpsH (the authoritative
+       source — WEGetStyle is unreliable because TESetStyle doesn't persist in
+       the TE's style table after TEInsert/TEDelete cycles). */
+    if (gWriterOpsH != NULL) {
+        short k;
+        StyleOp *ops;
+        HLock(gWriterOpsH);
+        ops = (StyleOp *) *gWriterOpsH;
+        for (k = 0; k < gWriterOpCount; k++) {
+            if (ops[k].kind == 'H' &&
+                ops[k].start <= globalLineStart && ops[k].end >= globalLineStart) {
+                isThisLevel = (ops[k].level == level);
+                break;
+            }
+        }
+        HUnlock(gWriterOpsH);
+    }
+
+    /* Remove any existing 'H' op covering this line */
+    if (gWriterOpsH != NULL) {
+        short k, newCount = 0;
+        StyleOp *ops;
+        HLock(gWriterOpsH);
+        ops = (StyleOp *) *gWriterOpsH;
+        for (k = 0; k < gWriterOpCount; k++) {
+            if (ops[k].kind == 'H' &&
+                ops[k].start <= globalLineStart && ops[k].end >= globalLineStart) {
+                /* Remove this op */
+                continue;
+            }
+            if (newCount != k) ops[newCount] = ops[k];
+            newCount++;
+        }
+        gWriterOpCount = newCount;
+        HUnlock(gWriterOpsH);
+    }
+
+    /* Apply or remove the heading visual style in the TE */
     WESetSelect((short) lineStart, (short) lineEnd, gHiddenTE);
     if (isThisLevel) {
+        /* Toggle off: restore normal style */
         ts.tsFace = normal;
         ts.tsSize = CurrentFontSize();
     } else {
+        /* Toggle on: apply heading style and add 'H' op */
         ts.tsFace = bold;
         ts.tsSize = CurrentFontSize() + (7 - level) * 2;
+
+        /* Add 'H' op to gWriterOpsH */
+        if (gWriterOpsH == NULL) {
+            gWriterOpsH = NewHandle(MAX_STYLE_OPS * sizeof(StyleOp));
+        }
+        if (gWriterOpsH != NULL && gWriterOpCount < MAX_STYLE_OPS) {
+            StyleOp *ops;
+            HLock(gWriterOpsH);
+            ops = (StyleOp *) *gWriterOpsH;
+            ops[gWriterOpCount].start  = globalLineStart;
+            ops[gWriterOpCount].end    = globalLineEnd;
+            ops[gWriterOpCount].kind   = 'H';
+            ops[gWriterOpCount].level  = level;
+            ops[gWriterOpCount].linkID = 0;
+            gWriterOpCount++;
+            HUnlock(gWriterOpsH);
+        }
     }
     WESetStyle(weDoFace + weDoSize, &ts, gHiddenTE);
 }
+
 
 /*
     Sets the style at a zero-length selection (the insertion point) --
@@ -2222,6 +2487,44 @@ void DetectInlineMarkdown(char justTyped)
             }
             WESetSelect((short) lineStart, (short) lineStart, gHiddenTE);
             WESetStyle(weDoFace + weDoSize, &ts, gHiddenTE);
+
+            /* Add 'H' op to gWriterOpsH so the heading survives a view switch */
+            {
+                long globalLineStart = gWindowStart + lineStart;
+                long globalLineEnd   = gWindowStart + innerEnd;
+                /* Remove any existing 'H' op for this line first */
+                if (gWriterOpsH != NULL) {
+                    short ki, nci = 0;
+                    StyleOp *opi;
+                    HLock(gWriterOpsH);
+                    opi = (StyleOp *) *gWriterOpsH;
+                    for (ki = 0; ki < gWriterOpCount; ki++) {
+                        if (opi[ki].kind == 'H' &&
+                            opi[ki].start <= globalLineStart && opi[ki].end >= globalLineStart) {
+                            continue; /* remove */
+                        }
+                        if (nci != ki) opi[nci] = opi[ki];
+                        nci++;
+                    }
+                    gWriterOpCount = nci;
+                    HUnlock(gWriterOpsH);
+                }
+                if (gWriterOpsH == NULL)
+                    gWriterOpsH = NewHandle(MAX_STYLE_OPS * sizeof(StyleOp));
+                if (gWriterOpsH != NULL && gWriterOpCount < MAX_STYLE_OPS) {
+                    StyleOp *opi2;
+                    HLock(gWriterOpsH);
+                    opi2 = (StyleOp *) *gWriterOpsH;
+                    opi2[gWriterOpCount].start  = globalLineStart;
+                    opi2[gWriterOpCount].end    = globalLineEnd;
+                    opi2[gWriterOpCount].kind   = 'H';
+                    opi2[gWriterOpCount].level  = level;
+                    opi2[gWriterOpCount].linkID = 0;
+                    gWriterOpCount++;
+                    HUnlock(gWriterOpsH);
+                }
+            }
+
             InvalidateHeightCache();
             if (gHiddenTE != NULL && (*gHiddenTE)->te != NULL) {
                 InvalRect(&(**((*gHiddenTE)->te)).viewRect);
@@ -2456,8 +2759,9 @@ void DetectInlineMarkdown(char justTyped)
                 WEDelete(gHiddenTE);
 
                 GetFNum("\pMonaco", &ts.tsFont);
+                ts.tsColor.red = ts.tsColor.green = ts.tsColor.blue = 0;
                 WESetSelect((short) p, (short) (innerEnd - 1), gHiddenTE);
-                WESetStyle(weDoFont, &ts, gHiddenTE);
+                WESetStyle(weDoFont + weDoColor, &ts, gHiddenTE);
                 SetTypingStyleNormal((short) (innerEnd - 1));
                 InvalidateHeightCache();
                 return;
@@ -2483,8 +2787,9 @@ void DetectInlineMarkdown(char justTyped)
                     WEDelete(gHiddenTE);
 
                     GetFNum("\pMonaco", &ts.tsFont);
+                    ts.tsColor.red = ts.tsColor.green = ts.tsColor.blue = 0;
                     WESetSelect((short) (caret - 1), (short) (innerEnd - 1), gHiddenTE);
-                    WESetStyle(weDoFont, &ts, gHiddenTE);
+                    WESetStyle(weDoFont + weDoColor, &ts, gHiddenTE);
                     SetTypingStyleNormal((short) (caret - 1));
                     InvalidateHeightCache();
                     return;
@@ -2808,7 +3113,35 @@ void LoadTextWindow(long startOffset)
         len = gMarkdownLen;
     }
     
-    if (srcH == NULL) return;
+    if (srcH == NULL || len == 0) {
+        /* Empty document: still reset the TE font so we don't inherit a stale
+           heading size or Writer-mode font from the previous view. */
+        WETextStyle emptyStyle;
+        short emptyFont = 0;
+        if (!gHideMarkdown) {
+            GetFNum("\pMonaco", &emptyFont);
+            if (emptyFont == 0) GetFNum("\pCourier", &emptyFont);
+            if (emptyFont == 0) emptyFont = GetDefaultFontNum();
+            emptyStyle.tsSize = 12;
+        } else {
+            emptyFont = GetDefaultFontNum();
+            emptyStyle.tsSize = CurrentFontSize();
+        }
+        emptyStyle.tsFont = emptyFont;
+        emptyStyle.tsFace = normal;
+        emptyStyle.tsColor.red = emptyStyle.tsColor.green = emptyStyle.tsColor.blue = 0;
+        WESetSelect(0, WEGetTextLength(te), te);
+        WESetStyle(weDoFont + weDoFace + weDoSize + weDoColor, &emptyStyle, te);
+        /* Restore view rect to visible position */
+        Rect emptyViewRect = gWindow->portRect;
+        emptyViewRect.left  += MARGIN_H;
+        emptyViewRect.right -= MARGIN_H;
+        emptyViewRect.top   += MARGIN_TOP;
+        emptyViewRect.bottom -= MARGIN_BOTTOM;
+        WESetRects(&emptyViewRect, &emptyViewRect, te);
+        WECalText(te);
+        return;
+    }
     
     if (len <= WINDOW_SIZE) {
         startOffset = 0;
@@ -3022,13 +3355,17 @@ void LoadTextWindow(long startOffset)
                     WESetStyle(weDoFont + weDoFace + weDoSize + weDoColor, &opStyle, te);
                     break;
                 case 'U':
+                    /* Bullet marker. Monaco font is used solely to ensure TE
+                       creates a DISTINCT style run boundary at the bullet char
+                       (if the font matches base, the run is merged and we can't
+                       detect it). stColor.blue=5 is our detection sentinel. */
                     GetFNum("\pMonaco", &opStyle.tsFont);
                     if (opStyle.tsFont == 0) GetFNum("\pCourier", &opStyle.tsFont);
                     opStyle.tsFace = normal;
                     opStyle.tsSize = CurrentFontSize();
-                    opStyle.tsColor.red = 254;
+                    opStyle.tsColor.red = 0;
                     opStyle.tsColor.green = ops[k].level;
-                    opStyle.tsColor.blue = 0;
+                    opStyle.tsColor.blue = 5;
                     WESetStyle(weDoFont + weDoFace + weDoSize + weDoColor, &opStyle, te);
                     break;
                 case 'E':
@@ -3102,7 +3439,14 @@ void SyncWindowToBacking(void)
     }
     
     if (gHideMarkdown && gWriterOpsH != NULL) {
-        /* 1. Remove old style ops in this window range and adjust later ones */
+        /* 1. Process old ops in this window range:
+           - Block-level ops ('H','R','Q','U'): keep with adjusted positions.
+             These are the authoritative source of block structure; the TE doesn't
+             reliably persist bold/large styles (TESetStyle is not reflected in
+             TEGetStyleHandle after TEInsert). Bullet 'U' ops are rebuilt from text
+             in step 2 so we DROP them here; 'H'/'R'/'Q' are preserved.
+           - Inline ops ('B','I','C','E','L','X','S','P','T'): discard and rebuild
+             from TE style runs below. */
         short k;
         short newCount = 0;
         StyleOp *ops;
@@ -3111,9 +3455,21 @@ void SyncWindowToBacking(void)
         HLock(gWriterOpsH);
         ops = (StyleOp *) *gWriterOpsH;
         for (k = 0; k < gWriterOpCount; k++) {
-            if (ops[k].start < oldWindowEnd && ops[k].end > gWindowStart) {
+            Boolean inWindowRange = (ops[k].start < oldWindowEnd && ops[k].end > gWindowStart);
+            /* Fenced code blocks ('C' level=1) are block-level: the TE only
+               stores their content as plain text so we must preserve the op.
+               Inline code ('C' level=0) is rebuilt from TE style runs. */
+            Boolean isFencedCode = (ops[k].kind == 'C' && ops[k].level == 1);
+            Boolean isBlockOp = (ops[k].kind == 'H' || ops[k].kind == 'R' ||
+                                 ops[k].kind == 'Q' || ops[k].kind == 'q' ||
+                                 isFencedCode);
+            
+            if (inWindowRange && !isBlockOp) {
+                /* Inline op in old window range: discard, will be rebuilt from TE */
                 continue;
             }
+            
+            /* Adjust position for text length change */
             if (ops[k].start >= oldWindowEnd) {
                 ops[k].start += diff;
                 ops[k].end += diff;
@@ -3127,8 +3483,41 @@ void SyncWindowToBacking(void)
         }
         gWriterOpCount = newCount;
         HUnlock(gWriterOpsH);
+
+        /* 1.5. Refresh 'H' op end positions by scanning gWriterText for the actual
+           line end. The op start marks the beginning of the heading line (stable);
+           the end must track the line's current \r so SyncHiddenToCanonical can match
+           the op against any position on that line.  Also validates the start.
+           NOTE: 'C' fenced code block ops are NOT refreshed here — they span multiple
+           lines intentionally and their start/end are already correct. */
+        if (gWriterText != NULL && *targetLenPtr > 0) {
+            long totalLen = *targetLenPtr;
+            short ki;
+            HLock(gWriterOpsH);
+            HLock(targetH);
+            ops = (StyleOp *) *gWriterOpsH;
+            for (ki = 0; ki < gWriterOpCount; ki++) {
+                if (ops[ki].kind != 'H') continue;
+                long opStart = ops[ki].start;
+                if (opStart < 0 || opStart >= totalLen) continue;
+                /* Scan backward from opStart to find the real line start */
+                long ls = opStart;
+                while (ls > 0 && (*targetH)[ls - 1] != '\r') ls--;
+                /* Scan forward from ls to find the line end (\r or EOF) */
+                long le = ls;
+                while (le < totalLen && (*targetH)[le] != '\r') le++;
+                ops[ki].start = ls;
+                ops[ki].end   = le;
+            }
+            HUnlock(targetH);
+            HUnlock(gWriterOpsH);
+        }
+
         
-        /* 2. Extract current active TE style runs and add them to gWriterOpsH */
+        /* 2. Extract current active TE style runs and add INLINE ops to gWriterOpsH.
+           Note: block-level ops ('H','R','Q') are NOT recoverable from TE style runs
+           because TESetStyle for bold/large is not reflected in TEGetStyleHandle after
+           TEInsert. We preserve them in step 1 above instead. */
         TEStyleHandle teStyles = TEGetStyleHandle((*gActiveTE)->te);
         if (teStyles != NULL) {
             short nRuns;
@@ -3138,7 +3527,7 @@ void SyncWindowToBacking(void)
             nRuns = (**teStyles).nRuns;
             styleTab = (**teStyles).styleTab;
             HLock((Handle)styleTab);
-            
+
             short r;
             for (r = 0; r < nRuns; r++) {
                 short runStart = (**teStyles).runs[r].startChar;
@@ -3165,7 +3554,7 @@ void SyncWindowToBacking(void)
                         }
                     }
                 }
-                
+
                 short monacoFontNum;
                 GetFNum("\pMonaco", &monacoFontNum);
                 Boolean isCode = (style.stFont == monacoFontNum);
@@ -3182,7 +3571,74 @@ void SyncWindowToBacking(void)
                 
                 long globalStart = gWindowStart + runStart;
                 long globalEnd = gWindowStart + runEnd;
-                
+
+                /* Bullet marker detection: check gWriterText directly.
+                   TESetStyle with doColor may not persist colors on all hardware,
+                   so we can't rely on stColor.blue==5. Instead check the text:
+                   a bullet marker run starts with •/o/s/- preceded by spaces. */
+                Boolean isBulletMarker = false;
+                /* runEnd-runStart <= 4: the Monaco 'U' op covers exactly 2 chars
+                   (bullet + space). Widened to 4 to handle TE run boundary variance. */
+                if (gWriterText != NULL && globalStart < gWriterLen && (runEnd - runStart) <= 4) {
+                    HLock(gWriterText);
+                    unsigned char bulletCh = (unsigned char)(*gWriterText)[globalStart];
+                    /* Next char must be space — confirms this is a "bullet space" pair */
+                    Boolean nextIsSpace = (globalStart + 1 < gWriterLen &&
+                                          (*gWriterText)[globalStart + 1] == ' ');
+                    if ((bulletCh == 0xA5 || bulletCh == 'o' || bulletCh == 's' || bulletCh == '-') &&
+                        nextIsSpace) {
+                        /* Verify only spaces precede it on this line */
+                        long scan = globalStart - 1;
+                        while (scan >= 0 && (*gWriterText)[scan] == ' ') scan--;
+                        if (scan < 0 || (*gWriterText)[scan] == '\r' || (*gWriterText)[scan] == '\n') {
+                            isBulletMarker = true;
+                        }
+                    }
+                    HUnlock(gWriterText);
+                }
+                if (isBulletMarker) {
+                    /* Re-add as 'U' op so LoadTextWindow re-applies the bullet style */
+                    HLock(gWriterOpsH);
+                    ops = (StyleOp *) *gWriterOpsH;
+                    if (gWriterOpCount < MAX_STYLE_OPS) {
+                        ops[gWriterOpCount].start = globalStart;
+                        ops[gWriterOpCount].end = globalEnd;
+                        ops[gWriterOpCount].kind = 'U';
+                        /* Recover nesting level from stColor.green if set, else from spaces */
+                        short nestingLevel = style.stColor.green;
+                        if (nestingLevel == 0 && globalStart > 0) {
+                            long sp = globalStart - 1;
+                            short spCount = 0;
+                            while (sp >= 0 && (*gWriterOpsH == NULL || 1) && 
+                                   gWriterText != NULL) {
+                                HLock(gWriterText);
+                                char sc = (*gWriterText)[sp];
+                                HUnlock(gWriterText);
+                                if (sc == ' ') { spCount++; sp--; }
+                                else break;
+                            }
+                            nestingLevel = spCount / 2;
+                        }
+                        ops[gWriterOpCount].level = nestingLevel;
+                        ops[gWriterOpCount].linkID = 0;
+                        gWriterOpCount++;
+                    }
+                    HUnlock(gWriterOpsH);
+                    continue;
+                }
+
+                /* Also prevent Monaco runs at bullet positions from becoming 'C' ops */
+                if (isCode && gWriterText != NULL && globalStart < gWriterLen) {
+                    HLock(gWriterText);
+                    unsigned char fc = (unsigned char)(*gWriterText)[globalStart];
+                    HUnlock(gWriterText);
+                    if (fc == 0xA5 || fc == 'o' || fc == 's' || fc == '-' ||
+                        fc == ' ' || fc == '[' || fc == ']' || fc == 'x') {
+                        /* Likely a task box or bullet space — don't make it code */
+                        isCode = false;
+                    }
+                }
+
                 HLock(gWriterOpsH);
                 ops = (StyleOp *) *gWriterOpsH;
                 
@@ -3256,7 +3712,21 @@ void SyncWindowToBacking(void)
                         }
                     }
                     if (isCode) {
-                        if (gWriterOpCount < MAX_STYLE_OPS) {
+                        /* Skip creating a level=0 inline 'C' op if this run is inside a
+                           fenced code block ('C' level=1) already preserved from step 1.
+                           That block op is the authoritative source; creating a level=0 op
+                           on top of it would cause LoadTextWindow to overwrite blue=3 with
+                           blue=0, removing the double-line visual for fenced blocks. */
+                        Boolean coveredByFencedBlock = false;
+                        short fk;
+                        for (fk = 0; fk < gWriterOpCount; fk++) {
+                            if (ops[fk].kind == 'C' && ops[fk].level == 1 &&
+                                ops[fk].start <= globalStart && ops[fk].end >= globalEnd) {
+                                coveredByFencedBlock = true;
+                                break;
+                            }
+                        }
+                        if (!coveredByFencedBlock && gWriterOpCount < MAX_STYLE_OPS) {
                             ops[gWriterOpCount].start = globalStart;
                             ops[gWriterOpCount].end = globalEnd;
                             ops[gWriterOpCount].kind = 'C';

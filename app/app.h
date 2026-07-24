@@ -49,6 +49,7 @@ extern short gMemoryPoolCount;
 
 void InsertDateHeading(short level);
 void InsertTimeHeading(short level);
+void ToggleCodeBlockHidden(void);
 
 #define mApple   1
 #define iAppleAbout 1
@@ -395,6 +396,7 @@ void ApplyZoomIndex(short newIndex);
 void ToggleFace(Style face);
 void DoLinkHidden(void);
 void ToggleCode(void);
+void ToggleCodeBlockHidden(void);
 void ToggleStrike(void);
 void ToggleHeadingHidden(short level);
 void DetectInlineMarkdown(char justTyped);

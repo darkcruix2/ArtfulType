@@ -189,13 +189,28 @@ void WEUpdate(const Rect *rect, WEHandle we) {
             }
           }
 
+          /* Determine if this line is part of a fenced code block ('C' level=1 op).
+             Use gWriterOpsH directly — this is the authoritative source and avoids
+             false positives from stColor.blue==3 being inherited by inline code runs. */
           Boolean isCodeLine = false;
           STElement st;
           if (styleIndex >= 0) {
             st = (*styleTab)[styleIndex];
-            if (st.stColor.blue == 3) {
-              isCodeLine = true;
+          }
+          if (gWriterOpsH != NULL) {
+            long globalLineStart = (long)gWindowStart + lineStart;
+            short k;
+            StyleOp *ops;
+            HLock(gWriterOpsH);
+            ops = (StyleOp *) *gWriterOpsH;
+            for (k = 0; k < gWriterOpCount; k++) {
+              if (ops[k].kind == 'C' && ops[k].level == 1 &&
+                  ops[k].start <= globalLineStart && ops[k].end > globalLineStart) {
+                isCodeLine = true;
+                break;
+              }
             }
+            HUnlock(gWriterOpsH);
           }
 
           LONGINT ptVal = TEGetPoint(lineStart, te);
@@ -232,20 +247,21 @@ void WEUpdate(const Rect *rect, WEHandle we) {
           }
 
           Boolean nextIsCode = false;
-          if (l + 1 < (**te).nLines) {
+          if (l + 1 < (**te).nLines && gWriterOpsH != NULL) {
             short nextStart = (**te).lineStarts[l + 1];
-            short nrr;
-            for (nrr = 0; nrr < nRuns; nrr++) {
-              if ((**teStyles).runs[nrr].startChar <= nextStart &&
-                  (nrr + 1 == nRuns ||
-                   (**teStyles).runs[nrr + 1].startChar > nextStart)) {
-                short nIdx = (**teStyles).runs[nrr].styleIndex;
-                if (nIdx >= 0 && (*styleTab)[nIdx].stColor.blue == 3) {
-                  nextIsCode = true;
-                }
+            long globalNextStart = (long)gWindowStart + nextStart;
+            short k;
+            StyleOp *ops;
+            HLock(gWriterOpsH);
+            ops = (StyleOp *) *gWriterOpsH;
+            for (k = 0; k < gWriterOpCount; k++) {
+              if (ops[k].kind == 'C' && ops[k].level == 1 &&
+                  ops[k].start <= globalNextStart && ops[k].end > globalNextStart) {
+                nextIsCode = true;
                 break;
               }
             }
+            HUnlock(gWriterOpsH);
           }
 
           if (inCodeBlock && !nextIsCode) {
@@ -280,15 +296,14 @@ void WEUpdate(const Rect *rect, WEHandle we) {
         short styleIdx = (**teStyles).runs[r].styleIndex;
         STElement st = (*styleTab)[styleIdx];
 
-        /* --- Identify what kind of special style this run is --- */
+        /* --- Style-based special run detection --- */
         Boolean isSuper = (st.stSize == superSize);
         Boolean isSub = (st.stSize == subSize);
-        Boolean isStrike = (st.stColor.green == 1);
+        Boolean isStrike = (st.stColor.red == 0 && st.stColor.green == 1 && st.stColor.blue == 0);
         Boolean isHR = ((st.stFace & bold) && st.stColor.blue == 1);
         Boolean isTaskBox = (st.stColor.red == 255);
-        Boolean isBullet = (st.stColor.red == 254);
 
-        if (!isSuper && !isSub && !isStrike && !isHR && !isTaskBox && !isBullet)
+        if (!isSuper && !isSub && !isStrike && !isHR && !isTaskBox)
           continue;
 
         /* Set font so CharWidth/GetFontInfo are accurate */
@@ -299,64 +314,6 @@ void WEUpdate(const Rect *rect, WEHandle we) {
         FontInfo fi;
         GetFontInfo(&fi);
 
-        if (isBullet) {
-          short level = st.stColor.green;
-          if (level >= 4) {
-            /* Level 4 (5th level and beyond): render plain text dash '-' */
-          } else {
-            LONGINT ptVal = TEGetPoint(runStart, te);
-            short screenV = (short)(ptVal >> 16);
-            short screenH = (short)(ptVal & 0xFFFF);
-            if (screenV + fi.descent >= rect->top &&
-                screenV - fi.ascent <= rect->bottom) {
-              short boxRunW = 0;
-              short ci;
-              for (ci = runStart; ci < runEnd; ci++) {
-                char c = (*(**te).hText)[ci];
-                boxRunW += CharWidth(c);
-              }
-              if (boxRunW == 0) boxRunW = 12;
-
-              Rect cellR;
-              cellR.left = screenH;
-              cellR.right = screenH + boxRunW;
-              cellR.top = screenV - fi.ascent;
-              cellR.bottom = screenV + fi.descent;
-
-              RGBColor whiteColor = {0xFFFF, 0xFFFF, 0xFFFF};
-              RGBBackColor(&whiteColor);
-              EraseRect(&cellR);
-
-              short bSize = 5;
-              short midY = screenV - (fi.ascent * 3) / 8;
-              Rect bR;
-              bR.left = screenH + 2;
-              bR.right = bR.left + bSize;
-              bR.top = midY - bSize / 2;
-              bR.bottom = bR.top + bSize;
-
-              PenNormal();
-              PenSize(1, 1);
-              RGBColor black = {0, 0, 0};
-              RGBForeColor(&black);
-
-              if (level == 0) {
-                /* 1st Level: Filled circle */
-                PaintOval(&bR);
-              } else if (level == 1) {
-                /* 2nd Level: Circle (not filled) */
-                FrameOval(&bR);
-              } else if (level == 2) {
-                /* 3rd Level: Filled square */
-                PaintRect(&bR);
-              } else if (level == 3) {
-                /* 4th Level: Square (not filled) */
-                FrameRect(&bR);
-              }
-            }
-            continue;
-          }
-        }
 
         if (isTaskBox) {
           LONGINT ptVal = TEGetPoint(runStart, te);
@@ -364,26 +321,9 @@ void WEUpdate(const Rect *rect, WEHandle we) {
           short screenH = (short)(ptVal & 0xFFFF);
           if (screenV + fi.descent >= rect->top &&
               screenV - fi.ascent <= rect->bottom) {
-            short boxRunW = 0;
-            short ci;
-            for (ci = runStart; ci < runEnd; ci++) {
-              char c = (*(**te).hText)[ci];
-              boxRunW += CharWidth(c);
-            }
-            if (boxRunW == 0) boxRunW = 24;
-
-            Rect cellR;
-            cellR.left = screenH;
-            cellR.right = screenH + boxRunW;
-            cellR.top = screenV - fi.ascent;
-            cellR.bottom = screenV + fi.descent;
-
-            RGBColor whiteColor = {0xFFFF, 0xFFFF, 0xFFFF};
-            RGBBackColor(&whiteColor);
-            EraseRect(&cellR);
 
             short boxSize = 11;
-            short midY = screenV - (fi.ascent * 3) / 8;
+            short midY = screenV - (fi.ascent * 3) / 8 - 5;
             Rect boxR;
             boxR.left = screenH + 2;
             boxR.right = boxR.left + boxSize;
@@ -637,7 +577,8 @@ void WEPinScroll(long dx, long dy, WEHandle we) {
     long viewHeight = viewRect.bottom - viewRect.top;
     long totalHeight = WEGetHeight(0, WEGetLineCount(we), we);
 
-    (**te).destRect.bottom = (**te).destRect.top + (short)(totalHeight + viewHeight / 2);
+    (**te).destRect.bottom =
+        (**te).destRect.top + (short)(totalHeight + viewHeight / 2);
 
     TEPinScroll((short)dx, (short)dy, te);
     if (gHideMarkdown) {

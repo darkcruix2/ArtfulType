@@ -1073,7 +1073,7 @@ static void DoMenuCommand(long menuResult)
         ToggleCode();
         break;
       case iCodeBlock:
-        ToggleCode();
+        ToggleCodeBlockHidden();
         break;
       case iStrike:
         ToggleStrike();
@@ -1314,7 +1314,7 @@ static Boolean HandleCheckboxClick(Point pt) {
       FontInfo fi;
       GetFontInfo(&fi);
 
-      short midY = screenV - (fi.ascent * 3) / 8;
+      short midY = screenV - (fi.ascent * 3) / 8 - 5;
       short boxSize = 11;
 
       Rect hitR;
@@ -1327,50 +1327,40 @@ static Boolean HandleCheckboxClick(Point pt) {
         HUnlock((Handle)styleTab);
         HUnlock((Handle)teStyles);
 
-        Handle hText = (**te).hText;
-        if (hText != NULL && runStart + 1 < (**te).teLength) {
-          HLock(hText);
-          char c = (*hText)[runStart + 1];
-          Boolean isCurrentlyChecked = (c == 'x' || c == 'X');
-          short newChecked = isCurrentlyChecked ? 0 : 1;
+        short newChecked = (st.stColor.green == 1) ? 0 : 1;
 
-          PushUndoSnapshot();
-          gTypingRunActive = false;
+        PushUndoSnapshot();
+        gTypingRunActive = false;
 
-          (*hText)[runStart + 1] = newChecked ? 'X' : ' ';
-          HUnlock(hText);
+        WESetSelect(runStart, runEnd, gActiveTE);
+        WETextStyle ts;
+        ts.tsColor.red = 255;
+        ts.tsColor.green = newChecked;
+        ts.tsColor.blue = 0;
+        WESetStyle(weDoColor, &ts, gActiveTE);
 
-          WESetSelect(runStart, runStart + 4, gActiveTE);
-          WETextStyle ts;
-          ts.tsColor.red = 255;
-          ts.tsColor.green = newChecked;
-          ts.tsColor.blue = 0;
-          WESetStyle(weDoColor, &ts, gActiveTE);
+        WESetSelect(runEnd, runEnd, gActiveTE);
 
-          WESetSelect(runStart + 4, runStart + 4, gActiveTE);
-
-          if (gWriterOpsH != NULL) {
-            HLock(gWriterOpsH);
-            StyleOp *ops = (StyleOp *)*gWriterOpsH;
-            short k;
-            long globalOffset = gWindowStart + runStart;
-            for (k = 0; k < gWriterOpCount; k++) {
-              if (ops[k].kind == 'K' && ops[k].start <= globalOffset &&
-                  ops[k].end > globalOffset) {
-                ops[k].level = newChecked;
-                break;
-              }
+        if (gWriterOpsH != NULL) {
+          HLock(gWriterOpsH);
+          StyleOp *ops = (StyleOp *)*gWriterOpsH;
+          short k;
+          long globalOffset = gWindowStart + runStart;
+          for (k = 0; k < gWriterOpCount; k++) {
+            if (ops[k].kind == 'K' && ops[k].start <= globalOffset &&
+                ops[k].end > globalOffset) {
+              ops[k].level = newChecked;
+              break;
             }
-            HUnlock(gWriterOpsH);
           }
+          HUnlock(gWriterOpsH);
+        }
 
-          SetDirty(true);
-          SyncWindowToBacking();
+        SetDirty(true);
+        SyncWindowToBacking();
 
-          if (gWindow != NULL) {
-            InvalRect(&gWindow->portRect);
-          }
-          return true;
+        if (gWindow != NULL) {
+          InvalRect(&gWindow->portRect);
         }
         return true;
       }
@@ -1988,14 +1978,7 @@ static void EventLoop(void) {
                       short newNesting = newSpaceCount / 2;
                       char newBullet = '\245';
                       if (gHideMarkdown) {
-                        if (newNesting == 1)
-                          newBullet = 'o';
-                        else if (newNesting == 2)
-                          newBullet = 's';
-                        else if (newNesting == 3)
-                          newBullet = 'o';
-                        else if (newNesting >= 4)
-                          newBullet = '-';
+                        /* filled bullet for all nesting levels in Writer mode */
                       } else {
                         newBullet = '-';
                       }
@@ -2083,7 +2066,17 @@ static void EventLoop(void) {
                   newTs.tsSize = CurrentFontSize();
                   long newSelStart, newSelEnd;
                   WEGetSelection(&newSelStart, &newSelEnd, gActiveTE);
-                  WESetStyle(weDoFace + weDoSize, &newTs, gActiveTE);
+                  /* Apply normal style to the \r we just inserted (at newSelStart-1)
+                     so every subsequent keystroke inherits from it. Relying on a
+                     pending-style on a zero-length caret does not survive across
+                     event-loop iterations in WASTE. */
+                  if (newSelStart > 0) {
+                    WESetSelect(newSelStart - 1, newSelStart, gActiveTE);
+                    WESetStyle(weDoFace + weDoSize, &newTs, gActiveTE);
+                    WESetSelect(newSelStart, newSelStart, gActiveTE);
+                  } else {
+                    WESetStyle(weDoFace + weDoSize, &newTs, gActiveTE);
+                  }
                 }
                 if (prefixLen > 0) {
                   char nextPrefix[64];
@@ -2122,7 +2115,8 @@ static void EventLoop(void) {
               if (gHideMarkdown) {
                 if (scan < caret &&
                     ((unsigned char)(*hText)[scan] == 0xA5 ||
-                     (*hText)[scan] == 'o' || (*hText)[scan] == '-') &&
+                     (*hText)[scan] == 'o' || (*hText)[scan] == 's' ||
+                     (*hText)[scan] == '-') &&
                     scan + 1 < caret && (*hText)[scan + 1] == ' ') {
                   prefixLen = (scan + 2) - lineStart;
                 }
@@ -2196,14 +2190,7 @@ static void EventLoop(void) {
                   short newNesting = newSpaceCount / 2;
                   char newBullet = '\245';
                   if (gHideMarkdown) {
-                    if (newNesting == 1)
-                      newBullet = 'o';
-                    else if (newNesting == 2)
-                      newBullet = 's';
-                    else if (newNesting == 3)
-                      newBullet = 'o';
-                    else if (newNesting >= 4)
-                      newBullet = '-';
+                    /* filled bullet for all nesting levels in Writer mode */
                   } else {
                     newBullet = '-';
                   }
