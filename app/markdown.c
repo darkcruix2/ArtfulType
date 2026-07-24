@@ -19,6 +19,122 @@ short AddLinkURL(const unsigned char *url)
     return gLinkCount;
 }
 
+/* -----------------------------------------------------------------------
+   Table parsing helpers
+   ----------------------------------------------------------------------- */
+
+/* Returns true if the line srcH[lineStart..lineEnd) is a GFM table
+   delimiter row: only hyphens, colons, pipes, and spaces. Must have at
+   least one hyphen. */
+static Boolean IsTableDelimRow(Handle srcH, long lineStart, long lineEnd)
+{
+    long k;
+    Boolean hasHyphen = false;
+    Boolean hasPipe   = false;
+    if (lineEnd <= lineStart) return false;
+    for (k = lineStart; k < lineEnd; k++) {
+        char c = (*srcH)[k];
+        if (c == '-') { hasHyphen = true; }
+        else if (c == '|') { hasPipe = true; }
+        else if (c == ':' || c == ' ') { /* ok */ }
+        else return false;
+    }
+    return hasHyphen;
+}
+
+/* Returns true if the line srcH[lineStart..lineEnd) looks like a table
+   data/header row: contains at least one pipe character. */
+static Boolean IsTableDataRow(Handle srcH, long lineStart, long lineEnd)
+{
+    long k;
+    if (lineEnd <= lineStart) return false;
+    for (k = lineStart; k < lineEnd; k++) {
+        if ((*srcH)[k] == '|') return true;
+    }
+    return false;
+}
+
+/*
+   Count columns in a delimiter row by counting '-' groups between pipes.
+   Returns at least 1.
+*/
+static short CountTableCols(Handle srcH, long lineStart, long lineEnd)
+{
+    short cols = 0;
+    Boolean inCell = false;
+    long k;
+    /* strip leading/trailing pipes */
+    long s = lineStart, e = lineEnd;
+    while (s < e && (*srcH)[s] == '|') s++;
+    while (e > s && (*srcH)[e-1] == '|') e--;
+    for (k = s; k <= e; k++) {
+        char c = (k < e) ? (*srcH)[k] : '|';
+        if (c == '|') {
+            if (inCell) { cols++; inCell = false; }
+        } else {
+            inCell = true;
+        }
+    }
+    if (!inCell && cols == 0) cols = 1; /* degenerate case */
+    return cols;
+}
+
+/*
+   Parse the pipe-delimited cells of a table row, storing trimmed cell
+   text as C strings in cellBufs[0..numCols-1].  Each cellBuf[i] must
+   be at least MAX_TABLE_CELL_LEN+1 bytes.
+   Returns the number of cells found (may differ from numCols).
+*/
+#define MAX_TABLE_COLS     32
+#define MAX_TABLE_CELL_LEN 120
+
+static short ParseTableRow(Handle srcH, long lineStart, long lineEnd,
+                           char cellBufs[][MAX_TABLE_CELL_LEN+1],
+                           short maxCols)
+{
+    short col = 0;
+    long k = lineStart;
+    /* skip leading pipe */
+    if (k < lineEnd && (*srcH)[k] == '|') k++;
+    while (col < maxCols) {
+        /* scan to next unescaped pipe or EOL */
+        long cellStart = k;
+        long cellEnd   = k;
+        while (k < lineEnd) {
+            char c = (*srcH)[k];
+            if (c == '\\' && k + 1 < lineEnd && (*srcH)[k+1] == '|') {
+                k += 2; /* escaped pipe — keep scanning */
+                cellEnd = k;
+            } else if (c == '|') {
+                break;
+            } else {
+                k++;
+                cellEnd = k;
+            }
+        }
+        /* trim leading whitespace */
+        while (cellStart < cellEnd && (*srcH)[cellStart] == ' ') cellStart++;
+        /* trim trailing whitespace */
+        while (cellEnd > cellStart && (*srcH)[cellEnd-1] == ' ') cellEnd--;
+        /* copy, replace escaped pipes with literal pipe */
+        short outI = 0;
+        long r = cellStart;
+        while (r < cellEnd && outI < MAX_TABLE_CELL_LEN) {
+            if ((*srcH)[r] == '\\' && r + 1 < cellEnd && (*srcH)[r+1] == '|') {
+                cellBufs[col][outI++] = '|';
+                r += 2;
+            } else {
+                cellBufs[col][outI++] = (*srcH)[r++];
+            }
+        }
+        cellBufs[col][outI] = '\0';
+        col++;
+        if (k >= lineEnd) break;
+        k++; /* skip the pipe */
+    }
+    return col;
+}
+
 /*
     Markdown mode shows raw syntax with no visual styling at all -- just
     plain uniform text at the current zoom size. Selection is preserved
@@ -484,7 +600,165 @@ void BuildHiddenView(void)
                     continue;
                 }
             }
-            
+
+
+            /* ---- GFM Table detection ----
+               Fires when the current line looks like a data row AND the next
+               line is a valid delimiter row.  We call EmitTableBlock() which
+               fully consumes all rows, writes to outH, tags 'W' ops, and
+               sets i to the position after the last row's \r.
+            */
+            if ((*srcH)[i] == '|' || (p < len && (*srcH)[p] == '|')) {
+                long hdrStart = i;
+                long hdrEnd   = i;
+                while (hdrEnd < len && (*srcH)[hdrEnd] != '\r') hdrEnd++;
+
+                long delimStart = hdrEnd + 1;
+                long delimEnd   = delimStart;
+                while (delimEnd < len && (*srcH)[delimEnd] != '\r') delimEnd++;
+
+                if (IsTableDataRow(srcH, hdrStart, hdrEnd) &&
+                    delimStart < len &&
+                    IsTableDelimRow(srcH, delimStart, delimEnd))
+                {
+                    static short colWidths[MAX_TABLE_COLS];
+                    static char  rowCells[MAX_TABLE_COLS][MAX_TABLE_CELL_LEN+1];
+                    short c;
+
+                    short numCols = CountTableCols(srcH, delimStart, delimEnd);
+                    if (numCols < 1)  numCols = 1;
+                    if (numCols > MAX_TABLE_COLS) numCols = MAX_TABLE_COLS;
+
+                    /* Blank line before table */
+                    if (outLen > 0 && (*outH)[outLen-1] != '\r')
+                        (*outH)[outLen++] = '\r';
+                    if (outLen > 1 && (*outH)[outLen-2] != '\r')
+                        (*outH)[outLen++] = '\r';
+
+                    /* ---- Pass 1: measure column widths ---- */
+                    for (c = 0; c < numCols; c++) colWidths[c] = 3;
+                    {
+                        short fc, found2;
+                        found2 = ParseTableRow(srcH, hdrStart, hdrEnd, rowCells, numCols);
+                        for (fc = 0; fc < found2 && fc < numCols; fc++) {
+                            short ww = (short)strlen(rowCells[fc]);
+                            if (ww > colWidths[fc]) colWidths[fc] = ww;
+                        }
+                    }
+                    {
+                        long bs = delimEnd + 1;
+                        while (bs < len) {
+                            long be = bs;
+                            while (be < len && (*srcH)[be] != '\r') be++;
+                            if (!IsTableDataRow(srcH, bs, be)) break;
+                            {
+                                short fc, found2 = ParseTableRow(srcH, bs, be, rowCells, numCols);
+                                for (fc = 0; fc < found2 && fc < numCols; fc++) {
+                                    short ww = (short)strlen(rowCells[fc]);
+                                    if (ww > colWidths[fc]) colWidths[fc] = ww;
+                                }
+                            }
+                            bs = be + 1;
+                        }
+                    }
+
+                    /* ---- Emit header row ---- */
+                    {
+                        long rowOutStart = outLen;
+                        short ci, found2 = ParseTableRow(srcH, hdrStart, hdrEnd, rowCells, numCols);
+                        (*outH)[outLen++] = '|';
+                        for (c = 0; c < numCols; c++) {
+                            const char *cell = (c < found2) ? rowCells[c] : "";
+                            short cLen = (short)strlen(cell), pad;
+                            (*outH)[outLen++] = ' ';
+                            for (ci = 0; ci < cLen && ci < colWidths[c]; ci++)
+                                (*outH)[outLen++] = cell[ci];
+                            for (pad = cLen; pad < colWidths[c]; pad++)
+                                (*outH)[outLen++] = ' ';
+                            (*outH)[outLen++] = ' ';
+                            (*outH)[outLen++] = '|';
+                        }
+                        if (gWriterOpCount < MAX_STYLE_OPS) {
+                            ops[gWriterOpCount].start  = rowOutStart;
+                            ops[gWriterOpCount].end    = outLen;
+                            ops[gWriterOpCount].kind   = 'W';
+                            ops[gWriterOpCount].level  = 0;
+                            ops[gWriterOpCount].linkID = numCols;
+                            gWriterOpCount++;
+                        }
+                        (*outH)[outLen++] = '\r';
+                    }
+
+                    /* ---- Emit delimiter row ---- */
+                    {
+                        long rowOutStart = outLen;
+                        short ci;
+                        (*outH)[outLen++] = '|';
+                        for (c = 0; c < numCols; c++) {
+                            (*outH)[outLen++] = ' ';
+                            for (ci = 0; ci < colWidths[c]; ci++)
+                                (*outH)[outLen++] = '-';
+                            (*outH)[outLen++] = ' ';
+                            (*outH)[outLen++] = '|';
+                        }
+                        if (gWriterOpCount < MAX_STYLE_OPS) {
+                            ops[gWriterOpCount].start  = rowOutStart;
+                            ops[gWriterOpCount].end    = outLen;
+                            ops[gWriterOpCount].kind   = 'W';
+                            ops[gWriterOpCount].level  = 1;
+                            ops[gWriterOpCount].linkID = numCols;
+                            gWriterOpCount++;
+                        }
+                        (*outH)[outLen++] = '\r';
+                    }
+
+                    /* ---- Emit body rows ---- */
+                    {
+                        long bs = delimEnd + 1;
+                        while (bs < len) {
+                            long be = bs;
+                            while (be < len && (*srcH)[be] != '\r') be++;
+                            if (!IsTableDataRow(srcH, bs, be)) break;
+                            {
+                                long rowOutStart = outLen;
+                                short ci, found2 = ParseTableRow(srcH, bs, be, rowCells, numCols);
+                                (*outH)[outLen++] = '|';
+                                for (c = 0; c < numCols; c++) {
+                                    const char *cell = (c < found2) ? rowCells[c] : "";
+                                    short cLen = (short)strlen(cell), pad;
+                                    (*outH)[outLen++] = ' ';
+                                    for (ci = 0; ci < cLen && ci < colWidths[c]; ci++)
+                                        (*outH)[outLen++] = cell[ci];
+                                    for (pad = cLen; pad < colWidths[c]; pad++)
+                                        (*outH)[outLen++] = ' ';
+                                    (*outH)[outLen++] = ' ';
+                                    (*outH)[outLen++] = '|';
+                                }
+                                if (gWriterOpCount < MAX_STYLE_OPS) {
+                                    ops[gWriterOpCount].start  = rowOutStart;
+                                    ops[gWriterOpCount].end    = outLen;
+                                    ops[gWriterOpCount].kind   = 'W';
+                                    ops[gWriterOpCount].level  = 2;
+                                    ops[gWriterOpCount].linkID = numCols;
+                                    gWriterOpCount++;
+                                }
+                                (*outH)[outLen++] = '\r';
+                            }
+                            bs = be + 1;
+                        }
+                        i = bs;
+                    }
+
+                    /* Trailing blank line after table */
+                    if (outLen > 0 && (*outH)[outLen-1] == '\r') {
+                        if (outLen < 2 || (*outH)[outLen-2] != '\r')
+                            (*outH)[outLen++] = '\r';
+                    }
+                    continue;
+                }
+            }
+
+
             short level = 0;
             while (level < 6 && p + level < len && (*srcH)[p + level] == '#')
                 level++;
@@ -998,6 +1272,45 @@ void SyncHiddenToCanonical(void)
         Boolean isHR = false;
         WETextStyle firstStyle;
         long textOffset = lineStart;
+
+        /* Check for a table row ('W' op) that starts at this line.
+           Table rows are stored verbatim (pipe-delimited) in gWriterText.
+           Emit the row text as-is.  The delimiter row (level=1) gets emitted
+           as |---|---| etc.  For the header row (level=0) we rebuild a proper
+           GFM delimiter row after it.  Body rows (level=2) are emitted as-is. */
+        if (gWriterOpsH != NULL) {
+            short k;
+            StyleOp *ops;
+            HLock(gWriterOpsH);
+            ops = (StyleOp *) *gWriterOpsH;
+            for (k = 0; k < gWriterOpCount; k++) {
+                if (ops[k].kind == 'W' &&
+                    ops[k].start <= lineStart && ops[k].end > lineStart) {
+                    /* A table row covers this lineStart. */
+                    short rowLevel = ops[k].level; /* 0=hdr, 1=delim, 2=body */
+                    long rowEnd = ops[k].end;
+
+                    /* Emit this row text verbatim (it's already pipe-delimited) */
+                    long m;
+                    for (m = lineStart; m < rowEnd && m < len; m++) {
+                        char c = (*srcH)[m];
+                        if (c == '\r') break;
+                        (*outH)[outLen++] = c;
+                    }
+                    (*outH)[outLen++] = '\r';
+
+                    /* If this was the header row, the next op should be the
+                       delimiter row — it will be handled on the next iteration.
+                       Just skip past the row's \r. */
+                    lineStart = rowEnd;
+                    if (lineStart < len && (*srcH)[lineStart] == '\r') lineStart++;
+
+                    HUnlock(gWriterOpsH);
+                    goto nextLine;
+                }
+            }
+            HUnlock(gWriterOpsH);
+        }
 
         /* Check for a fenced code block ('C' op with level=1) that starts at or
            before this line.  If found, emit the entire block as ```...``` in one
@@ -3372,8 +3685,23 @@ void LoadTextWindow(long startOffset)
                     opStyle.tsFace = outline;
                     WESetStyle(weDoFace, &opStyle, te);
                     break;
-            }
-        }
+                case 'W':
+                    /* Table row — text rendered white (invisible) so TEUpdate
+                       draws nothing.  WEUpdate erases each line and redraws:
+                       cell content + QuickDraw grid lines.
+                       stFace encodes the row type: bold=header, normal=body/delim. */
+                    opStyle.tsFace = normal;
+                    if (ops[k].level == 0) {
+                        opStyle.tsFace = bold;   /* header row */
+                    }
+                    /* TRUE white = invisible on white background */
+                    opStyle.tsColor.red   = 0xFFFF;
+                    opStyle.tsColor.green = 0xFFFF;
+                    opStyle.tsColor.blue  = 0xFFFF;
+                    WESetStyle(weDoFace + weDoColor, &opStyle, te);
+                    break;
+            } /* end switch(ops[k].kind) */
+        } /* end for(k) */
         HUnlock(gWriterOpsH);
     }
     
@@ -3462,6 +3790,7 @@ void SyncWindowToBacking(void)
             Boolean isFencedCode = (ops[k].kind == 'C' && ops[k].level == 1);
             Boolean isBlockOp = (ops[k].kind == 'H' || ops[k].kind == 'R' ||
                                  ops[k].kind == 'Q' || ops[k].kind == 'q' ||
+                                 ops[k].kind == 'W' ||   /* table row */
                                  isFencedCode);
             
             if (inWindowRange && !isBlockOp) {

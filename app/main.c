@@ -55,6 +55,7 @@ Boolean gScrollBarVisible = false;
 
 Boolean gHaveFile = false;
 Boolean gDirty = false;
+Boolean gWriterDirty = false;  /* tracks actual typing in Writer mode */
 Str255 gFileName;
 short gVRefNum;
 Boolean gHideMarkdown = true;
@@ -216,9 +217,42 @@ void UpdateMenuBarLook(void) { DrawMenuBar(); }
 
 static void DrawTopMiddleButtons(WindowPtr w);
 
+/* Returns true when the caret (or selection start) is on a TE line that
+   begins with '|', i.e. the line is part of a table row.
+   Used to make table rows non-editable in Writer mode. */
+static Boolean CaretIsInTableRow(void) {
+  if (!gHideMarkdown || gActiveTE == NULL) return false;
+  TEHandle te = (*gActiveTE)->te;
+  if (te == NULL) return false;
+  long selStart, selEnd;
+  WEGetSelection(&selStart, &selEnd, gActiveTE);
+  Handle hText = (**te).hText;
+  short nLines = (**te).nLines;
+  short caretPos = (short)selStart;
+  HLock(hText);
+  Boolean result = false;
+  short l;
+  for (l = 0; l < nLines; l++) {
+    short lineStart = (**te).lineStarts[l];
+    short lineEnd   = (l + 1 < nLines)
+                        ? (**te).lineStarts[l + 1]
+                        : (short)(**te).teLength;
+    if (caretPos >= lineStart && caretPos <= lineEnd) {
+      result = (lineStart < (short)(**te).teLength &&
+                (*hText)[lineStart] == '|');
+      break;
+    }
+  }
+  HUnlock(hText);
+  return result;
+}
+
+
 void SetDirty(Boolean dirty) {
   Boolean oldDirty = gDirty;
   gDirty = dirty;
+  if (dirty && gHideMarkdown)
+    gWriterDirty = true;
   if (oldDirty != dirty && gWindow != NULL) {
     DrawTopMiddleButtons(gWindow);
   }
@@ -1713,6 +1747,10 @@ static void EventLoop(void) {
         Boolean handled = false;
 
         if (keyCode == 0x75) { /* Del (Forward Delete) */
+          /* Block forward-delete inside a table row */
+          if (gHideMarkdown && CaretIsInTableRow()) {
+            handled = true;
+          } else {
           long selStart, selEnd;
           WEGetSelection(&selStart, &selEnd, gActiveTE);
 
@@ -1731,6 +1769,7 @@ static void EventLoop(void) {
           ScrollCaretIntoView(false);
           UpdateScrollbarRange();
           handled = true;
+          } /* end forward-delete table guard */
         } else if (keyCode == 0x73) { /* Home */
           short lineStart, lineEnd;
           GetCurrentLineRange(&lineStart, &lineEnd);
@@ -1781,6 +1820,11 @@ static void EventLoop(void) {
           WESetSelect(lineEnd, lineEnd, gActiveTE);
           ScrollCaretIntoView(false);
 
+          handled = true;
+        }
+
+        /* Block content keys when caret is inside a table row */
+        if (!handled && gHideMarkdown && isContentKey && CaretIsInTableRow()) {
           handled = true;
         }
 

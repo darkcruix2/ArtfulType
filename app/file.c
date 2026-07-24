@@ -24,10 +24,16 @@ void SetViewMode(Boolean hideMarkdown)
         gHideMarkdown = true;
         gActiveTE = gHiddenTE;
         BuildHiddenView();
+        gWriterDirty = false;   /* entering Writer: start tracking edits fresh */
     } else {
-        /* Sync Writer changes before switching */
+        /* Sync Writer changes before switching.
+           Only reconstruct gMarkdownText when the user actually made edits in
+           Writer mode — otherwise the round-trip through SyncHiddenToCanonical
+           subtly corrupts the markdown (spurious # signs, extra blank lines). */
         SyncWindowToBacking();
-        SyncHiddenToCanonical();
+        if (gWriterDirty)
+            SyncHiddenToCanonical();
+        gWriterDirty = false;
         
         gHideMarkdown = false;
         gActiveTE = gTE;

@@ -215,6 +215,7 @@ typedef struct DocumentRecord {
 
     Boolean haveFile;
     Boolean dirty;
+    Boolean writerDirty;   /* true only when edits were made in Writer mode */
     Str255 fileName;
     short vRefNum;
     Boolean hideMarkdown;
@@ -262,6 +263,7 @@ extern DocumentRecord *gDocumentList;
 
 #define gHaveFile (gActiveDoc->haveFile)
 #define gDirty (gActiveDoc->dirty)
+#define gWriterDirty (gActiveDoc->writerDirty)
 #define gFileName (gActiveDoc->fileName)
 #define gVRefNum (gActiveDoc->vRefNum)
 #define gHideMarkdown (gActiveDoc->hideMarkdown)
@@ -327,6 +329,7 @@ extern ControlHandle gScrollBar;
 extern Boolean gScrollBarVisible;
 extern Boolean gHaveFile;
 extern Boolean gDirty;
+extern Boolean gWriterDirty;   /* true only when edits were made in Writer mode */
 void SetDirty(Boolean dirty);
 extern Str255 gFileName;
 extern short gVRefNum;

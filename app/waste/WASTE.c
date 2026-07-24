@@ -280,6 +280,311 @@ void WEUpdate(const Rect *rect, WEHandle we) {
           }
         }
       }
+ 
+      /* --- Table rendering pass (whole-table pre-calculation) ---
+         When the start of a table is found (a pipe-line NOT preceded by another
+         pipe-line), we collect ALL rows, compute canonical column X positions
+         once from the header row, compute all row Y extents, then erase the
+         entire table area and draw borders + text in a single unified pass so
+         that all horizontal and vertical lines are perfectly aligned.
+      */
+      if (gHideMarkdown) {
+        #define MAX_TABLE_PIPES 36
+        #define MAX_TABLE_ROWS  64
+
+        Handle hText = (**te).hText;
+        HLock(hText);
+        short nLines2 = (**te).nLines;
+        short teLen2  = (short)(**te).teLength;
+
+        for (l = 0; l < nLines2; l++) {
+          short ls0 = (**te).lineStarts[l];
+          if (ls0 >= teLen2) continue;
+          if ((*hText)[ls0] != '|') continue;
+
+          /* Only process the FIRST row of each table */
+          if (l > 0) {
+            short ps = (**te).lineStarts[l - 1];
+            if (ps < teLen2 && (*hText)[ps] == '|') continue;
+          }
+
+          /* ---- Start of a table at line l ---- */
+
+          /* Step 1: Find all consecutive rows of this table */
+          short tblStart = l;
+          short tblEnd   = l;
+          while (tblEnd < nLines2) {
+            short ts = (**te).lineStarts[tblEnd];
+            if (ts >= teLen2 || (*hText)[ts] != '|') break;
+            tblEnd++;
+          }
+          short nRows = tblEnd - tblStart;
+          if (nRows > MAX_TABLE_ROWS) nRows = MAX_TABLE_ROWS;
+
+          /* Step 2: Get font/style from header row style run */
+          short tblSI = -1;
+          short hdrLS = (**te).lineStarts[tblStart];
+          {
+            short rr;
+            for (rr = 0; rr < nRuns; rr++) {
+              if ((**teStyles).runs[rr].startChar <= hdrLS &&
+                  (rr + 1 == nRuns ||
+                   (**teStyles).runs[rr + 1].startChar > hdrLS)) {
+                tblSI = (**teStyles).runs[rr].styleIndex;
+                break;
+              }
+            }
+          }
+          /* Set PLAIN face for geometry measurement */
+          if (tblSI >= 0) {
+            STElement sl = (*styleTab)[tblSI];
+            TextFont(sl.stFont);
+            TextFace(sl.stFace & ~bold);
+            TextSize(sl.stSize);
+          }
+          FontInfo fi2;
+          GetFontInfo(&fi2);
+          short pw2 = CharWidth('|');
+
+          /* Step 3: Canonical column X positions — computed ONCE from header row */
+          short colX[MAX_TABLE_PIPES];
+          short nCols = 0;
+          {
+            short hdrLE = (tblStart + 1 < nLines2)
+                            ? (**te).lineStarts[tblStart + 1] : teLen2;
+            short hdrLTE = hdrLE;
+            while (hdrLTE > hdrLS &&
+                   ((*hText)[hdrLTE-1]=='\r'||(*hText)[hdrLTE-1]=='\n'))
+              hdrLTE--;
+            short ci;
+            for (ci = hdrLS; ci < hdrLTE && nCols < MAX_TABLE_PIPES; ci++) {
+              if ((*hText)[ci] == '|') {
+                LONGINT pv = TEGetPoint(ci, te);
+                colX[nCols++] = (short)(pv & 0xFFFF);
+              }
+            }
+          }
+          if (nCols < 2) { l = tblEnd - 1; continue; }
+
+          /* Table spans the full view width with equal-width columns.
+             This eliminates the 'extra column' gap between the computed right
+             border and the window edge. */
+          short tblLeft  = vr.left;
+          short tblRight = vr.right;
+          short nDataCols = nCols - 1;  /* number of data cells */
+          short colWid    = (tblRight - tblLeft) / nDataCols;
+
+          /* Step 4: Row Y extents */
+          short rowTopY[MAX_TABLE_ROWS + 1];
+          short rowBaseV[MAX_TABLE_ROWS];
+          {
+            short r;
+            for (r = 0; r < nRows; r++) {
+              LONGINT pv = TEGetPoint((**te).lineStarts[tblStart + r], te);
+              rowBaseV[r] = (short)(pv >> 16);
+              rowTopY[r]  = rowBaseV[r] - fi2.ascent;
+            }
+            /* Bottom of last row */
+            if (tblEnd < nLines2) {
+              LONGINT pv = TEGetPoint((**te).lineStarts[tblEnd], te);
+              rowTopY[nRows] = (short)(pv >> 16) - fi2.ascent;
+            } else {
+              rowTopY[nRows] = rowBaseV[nRows - 1] + fi2.descent + fi2.leading;
+            }
+          }
+          short tblTop    = rowTopY[0];
+          short tblBottom = rowTopY[nRows];
+
+          /* Skip if entirely off-screen */
+          if (tblBottom < rect->top || tblTop > rect->bottom) {
+            l = tblEnd - 1;
+            continue;
+          }
+
+          /* Step 5: Classify each row (delimiter = only |,-,:,space + has hyphen) */
+          Boolean rowIsDelim[MAX_TABLE_ROWS];
+          {
+            short r;
+            for (r = 0; r < nRows; r++) {
+              short rls = (**te).lineStarts[tblStart + r];
+              short rle = (tblStart + r + 1 < nLines2)
+                            ? (**te).lineStarts[tblStart + r + 1] : teLen2;
+              short rlte = rle;
+              while (rlte > rls &&
+                     ((*hText)[rlte-1]=='\r'||(*hText)[rlte-1]=='\n'))
+                rlte--;
+              Boolean isD = true; Boolean hasH = false; short k;
+              for (k = rls; k < rlte; k++) {
+                char c = (*hText)[k];
+                if      (c == '-') hasH = true;
+                else if (c != '|' && c != ':' && c != ' ')
+                  { isD = false; break; }
+              }
+              rowIsDelim[r] = isD && hasH;
+            }
+          }
+
+          /* Step 5b: Empty row — all cells contain only spaces/tabs.
+             These rows are invisible (no borders, no text), just like delimiter rows. */
+          Boolean rowIsEmpty[MAX_TABLE_ROWS];
+          {
+            short r;
+            for (r = 0; r < nRows; r++) {
+              if (rowIsDelim[r]) { rowIsEmpty[r] = false; continue; }
+              short rls = (**te).lineStarts[tblStart + r];
+              short rle = (tblStart + r + 1 < nLines2)
+                            ? (**te).lineStarts[tblStart + r + 1] : teLen2;
+              short rlte = rle;
+              while (rlte > rls &&
+                     ((*hText)[rlte-1]=='\r'||(*hText)[rlte-1]=='\n'))
+                rlte--;
+              /* Scan: if any character other than '|', ' ', '\t' exists → not empty */
+              Boolean hasContent = false;
+              short k;
+              for (k = rls; k < rlte && !hasContent; k++) {
+                char c = (*hText)[k];
+                if (c != '|' && c != ' ' && c != '\t')
+                  hasContent = true;
+              }
+              rowIsEmpty[r] = !hasContent;
+            }
+          }
+
+          /* Step 6: Erase ENTIRE table area with explicit white */
+          {
+            Rect tblR;
+            tblR.left   = vr.left;
+            tblR.right  = vr.right;
+            tblR.top    = tblTop;
+            tblR.bottom = tblBottom;
+            RGBColor white = {0xFFFF, 0xFFFF, 0xFFFF};
+            RGBForeColor(&white);
+            PaintRect(&tblR);
+          }
+
+          /* Set black pen for all drawing */
+          PenNormal();
+          PenSize(1, 1);
+          {
+            RGBColor black = {0, 0, 0};
+            RGBForeColor(&black);
+          }
+
+          /* Step 7: HORIZONTAL BORDERS — all at canonical tblLeft/tblRight */
+
+          /* Outer top border */
+          MoveTo(tblLeft, tblTop);
+          LineTo(tblRight, tblTop);
+
+          /* Per-row bottom lines — delimiter and empty rows are INVISIBLE whitespace */
+          {
+            short r;
+            for (r = 0; r < nRows; r++) {
+              short rBot = rowTopY[r + 1];
+
+              /* Invisible row types: skip, draw nothing */
+              if (rowIsDelim[r] || rowIsEmpty[r]) continue;
+
+              if (r + 1 < nRows && (rowIsDelim[r + 1] || rowIsEmpty[r + 1])) {
+                /* Row followed by invisible row: draw separator at this row's bottom.
+                   Header (r==0) gets a double line, others a single line. */
+                if (r == 0) {
+                  MoveTo(tblLeft, rBot - 1); LineTo(tblRight, rBot - 1);
+                  MoveTo(tblLeft, rBot + 1); LineTo(tblRight, rBot + 1);
+                } else {
+                  MoveTo(tblLeft, rBot); LineTo(tblRight, rBot);
+                }
+              } else {
+                /* Normal row separator */
+                MoveTo(tblLeft, rBot);
+                LineTo(tblRight, rBot);
+              }
+            }
+          }
+
+          /* Outer bottom border */
+          MoveTo(tblLeft, tblBottom);
+          LineTo(tblRight, tblBottom);
+
+          /* Step 8: VERTICAL DIVIDERS — equal-width columns spanning full view */
+          {
+            short i;
+            for (i = 0; i <= nDataCols; i++) {
+              short px = (i == nDataCols) ? tblRight
+                                          : tblLeft + i * colWid;
+              MoveTo(px, tblTop);
+              LineTo(px, tblBottom);
+            }
+          }
+
+          /* Step 9: CELL TEXT — skip delimiter and empty rows */
+          {
+            short r;
+            for (r = 0; r < nRows; r++) {
+              if (rowIsDelim[r] || rowIsEmpty[r]) continue;
+
+              Boolean isHeader = (r == 0);
+              if (tblSI >= 0) {
+                STElement sl = (*styleTab)[tblSI];
+                TextFont(sl.stFont);
+                TextFace(isHeader ? bold : normal);
+                TextSize(sl.stSize);
+              }
+
+              short row    = tblStart + r;
+              short rowLS  = (**te).lineStarts[row];
+              short rowLE  = (row + 1 < nLines2)
+                               ? (**te).lineStarts[row + 1] : teLen2;
+              short rowLTE = rowLE;
+              while (rowLTE > rowLS &&
+                     ((*hText)[rowLTE-1]=='\r'||(*hText)[rowLTE-1]=='\n'))
+                rowLTE--;
+
+              /* Collect pipe char positions in this row */
+              short rPipePos[MAX_TABLE_PIPES];
+              short rNPipes = 0;
+              {
+                short ci;
+                for (ci = rowLS; ci < rowLTE && rNPipes < MAX_TABLE_PIPES; ci++) {
+                  if ((*hText)[ci] == '|')
+                    rPipePos[rNPipes++] = ci;
+                }
+              }
+
+              /* Draw each cell at canonical column X */
+              short col;
+              for (col = 0; col < nCols - 1 && col < rNPipes - 1; col++) {
+                short cellS = rPipePos[col] + 1;
+                short cellE = rPipePos[col + 1];
+                while (cellS < cellE && (*hText)[cellS] == ' ')   cellS++;
+                while (cellE > cellS && (*hText)[cellE - 1] == ' ') cellE--;
+                short cellLen = cellE - cellS;
+                if (cellLen <= 0) continue;
+                /* Left-aligned, 4px from the left column border */
+                short colLeft = tblLeft + col * colWid;
+                MoveTo(colLeft + 4, rowBaseV[r]);
+                DrawText(*hText, cellS, cellLen);
+              }
+            }
+          }
+
+          /* Restore plain face */
+          if (tblSI >= 0) {
+            STElement sl = (*styleTab)[tblSI];
+            TextFace(sl.stFace & ~bold);
+          }
+
+          /* Advance l past the entire table */
+          l = tblEnd - 1;
+
+        } /* end for l */
+
+        HUnlock(hText);
+        #undef MAX_TABLE_PIPES
+        #undef MAX_TABLE_ROWS
+      }
+
+
 
       /* Remember last HR baseline to only draw the line once per line */
       short lastHRScreenY = -32000;
