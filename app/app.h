@@ -18,6 +18,13 @@
 #include <TextUtils.h>
 #include <Multiverse.h>
 
+#ifndef HiWord
+#define HiWord(aLong) ((short)(((aLong) >> 16) & 0xFFFF))
+#endif
+#ifndef LoWord
+#define LoWord(aLong) ((short)((aLong) & 0xFFFF))
+#endif
+
 
 #define MARGIN_H     64
 #define MARGIN_TOP   32

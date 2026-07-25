@@ -1,0 +1,5 @@
+# Hashes of file build rules.
+b893e88f5782d1b57adc59d6727ea31b ArtfulTypePro.bin
+4d526c4b7f44bc36f0d083c0b08e5eb3 ArtfulTypePro.pef
+f13d4cc03aa578b63d741dcdf721c5d2 CMakeFiles/ArtfulTypePro_APPL
+d21b8b2e590b36efdb612cf8ff4b9d7a main_pro.r.rsrc.bin

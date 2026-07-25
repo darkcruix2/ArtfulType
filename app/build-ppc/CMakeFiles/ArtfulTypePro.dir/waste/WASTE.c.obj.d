@@ -1,0 +1,32 @@
+CMakeFiles/ArtfulTypePro.dir/waste/WASTE.c.obj: \
+ /mnt/volume1/MyCode/workspace/ArtfulType/app/waste/WASTE.c \
+ /mnt/volume1/MyCode/workspace/ArtfulType/app/waste/WASTE.h \
+ /opt/Retro68-build/toolchain/multiversal/CIncludes/Quickdraw.h \
+ /opt/Retro68-build/toolchain/multiversal/CIncludes/Multiverse.h \
+ /opt/Retro68-build/toolchain/m68k-apple-macos/include/stdint.h \
+ /opt/Retro68-build/toolchain/m68k-apple-macos/include/machine/_default_types.h \
+ /opt/Retro68-build/toolchain/m68k-apple-macos/include/sys/features.h \
+ /opt/Retro68-build/toolchain/m68k-apple-macos/include/_newlib_version.h \
+ /opt/Retro68-build/toolchain/m68k-apple-macos/include/sys/_intsup.h \
+ /opt/Retro68-build/toolchain/m68k-apple-macos/include/sys/_stdint.h \
+ /opt/Retro68-build/toolchain/lib/gcc/m68k-apple-macos/16.1.0/include/stdbool.h \
+ /opt/Retro68-build/toolchain/lib/gcc/m68k-apple-macos/16.1.0/include/stddef.h \
+ /mnt/volume1/MyCode/workspace/ArtfulType/app/waste/../app.h \
+ /mnt/volume1/MyCode/workspace/ArtfulType/app/waste/WASTE.h \
+ /opt/Retro68-build/toolchain/m68k-apple-macos/include/stdio.h \
+ /opt/Retro68-build/toolchain/m68k-apple-macos/include/_ansi.h \
+ /opt/Retro68-build/toolchain/m68k-apple-macos/include/newlib.h \
+ /opt/Retro68-build/toolchain/m68k-apple-macos/include/sys/config.h \
+ /opt/Retro68-build/toolchain/m68k-apple-macos/include/machine/ieeefp.h \
+ /opt/Retro68-build/toolchain/m68k-apple-macos/include/sys/cdefs.h \
+ /opt/Retro68-build/toolchain/lib/gcc/m68k-apple-macos/16.1.0/include/stdarg.h \
+ /opt/Retro68-build/toolchain/m68k-apple-macos/include/sys/reent.h \
+ /opt/Retro68-build/toolchain/m68k-apple-macos/include/_ansi.h \
+ /opt/Retro68-build/toolchain/m68k-apple-macos/include/sys/_types.h \
+ /opt/Retro68-build/toolchain/m68k-apple-macos/include/machine/_types.h \
+ /opt/Retro68-build/toolchain/m68k-apple-macos/include/sys/lock.h \
+ /opt/Retro68-build/toolchain/m68k-apple-macos/include/sys/stdio.h \
+ /opt/Retro68-build/toolchain/m68k-apple-macos/include/string.h \
+ /opt/Retro68-build/toolchain/m68k-apple-macos/include/sys/_locale.h \
+ /opt/Retro68-build/toolchain/m68k-apple-macos/include/strings.h \
+ /opt/Retro68-build/toolchain/m68k-apple-macos/include/sys/string.h

@@ -1,0 +1,4 @@
+/mnt/volume1/MyCode/workspace/ArtfulType/app/build-ppc/CMakeFiles/ArtfulTypePro.dir
+/mnt/volume1/MyCode/workspace/ArtfulType/app/build-ppc/CMakeFiles/ArtfulTypePro_APPL.dir
+/mnt/volume1/MyCode/workspace/ArtfulType/app/build-ppc/CMakeFiles/edit_cache.dir
+/mnt/volume1/MyCode/workspace/ArtfulType/app/build-ppc/CMakeFiles/rebuild_cache.dir

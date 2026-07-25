@@ -2419,11 +2419,15 @@ int main(void) {
      (before any other update has occurred) doesn't render reliably. */
   DoUpdate(gWindow);
 
+#if !defined(__powerpc__) && !defined(__ppc__)
   CountAppFiles(&message, &count);
   if (count >= 1 && message == appOpen)
     DoStartupOpen();
   else
     ShowSplashScreen();
+#else
+  ShowSplashScreen();
+#endif
 
   EventLoop();
   return 0;

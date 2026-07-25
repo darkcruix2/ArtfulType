@@ -181,6 +181,7 @@ static void ReadFile(StringPtr name, short vRefNum)
 
 void DoStartupOpen(void)
 {
+#if !defined(__powerpc__) && !defined(__ppc__)
     short message, count;
     AppFile theFile;
 
@@ -209,6 +210,7 @@ void DoStartupOpen(void)
     gHaveFile = true;
     ReadFile(gFileName, gVRefNum);
     ClrAppFiles(1);
+#endif
 #endif
 }
 
