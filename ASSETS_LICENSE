@@ -8,8 +8,8 @@ The following are NOT covered by that license, and are instead all
 rights reserved by Sean Malseed (Action Retro):
 
 - The "ArtfulType" name and any associated branding
-- The application icon (artful.png, and its compiled form embedded
-  in app/main.r)
+- The application icons (artful.png, artful_pro.png, and their compiled form embedded
+  in app/main_pro.r)
 - The splash screen artwork (type.png, and its compiled form embedded
   in app/main.c)
 - Screenshots and other promotional images (e.g. screenshot1.png)
