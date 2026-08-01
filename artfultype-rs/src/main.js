@@ -1,15 +1,16 @@
-const { invoke } = window.__TAURI__.core;
+const { invoke, convertFileSrc } = window.__TAURI__.core;
 
 // ─── State ────────────────────────────────────────────────────────────────────
-let markdownInputEl;   // hidden textarea — stores raw markdown as source cache
-let writerViewEl;      // contenteditable div — primary editing surface
+let markdownInputEl;
+let writerViewEl;
 let toggleModeBtn;
 let modeIndicatorEl;
-let isMarkdownMode = false; // false = Writer (default), true = raw Markdown
+let isMarkdownMode = false;
 let statusMessageEl;
 let wordCountEl;
 let charCountEl;
 let currentFilePath = null;
+let currentFileDir  = null; // directory of the open file, for resolving relative image paths
 let platform = "linux";
 
 // ─── Debounce ─────────────────────────────────────────────────────────────────
@@ -36,22 +37,62 @@ function updateStats(text) {
 }
 
 const debouncedStats = debounce(() => {
-  // In Writer mode get text from the contenteditable
   const text = isMarkdownMode
     ? markdownInputEl.value
     : (writerViewEl.innerText || writerViewEl.textContent || "");
   updateStats(text);
 }, 150);
 
+// ─── Image URL Helpers ────────────────────────────────────────────────────────
+
+/**
+ * Returns true if a URL is a local filesystem path (not http/https/data/blob).
+ */
+function isLocalPath(src) {
+  if (!src) return false;
+  return !/^(https?:|data:|blob:|asset:|tauri:)/i.test(src);
+}
+
+/**
+ * Resolves a potentially-relative src to an absolute path using the
+ * directory of the currently open file, then converts it to a tauri
+ * asset:// URL that the webview can display.
+ */
+function resolveImageSrc(src) {
+  if (!isLocalPath(src)) return src; // already an absolute URL
+
+  // If it looks like an absolute filesystem path (/home/...) use it directly
+  if (src.startsWith("/")) {
+    return convertFileSrc(src);
+  }
+
+  // Relative path — resolve against the directory of the open file
+  if (currentFileDir) {
+    const sep = "/";
+    const abs = currentFileDir.replace(/\\/g, "/").replace(/\/$/, "") + sep + src.replace(/\\/g, "/");
+    return convertFileSrc(abs);
+  }
+
+  return src; // can't resolve without a base dir — leave as-is
+}
+
+/**
+ * After rendering HTML into the writer view, walk all <img> tags and convert
+ * local src paths to asset:// URLs so the webview can display them.
+ */
+function fixImageSrcs(el) {
+  el.querySelectorAll("img").forEach((img) => {
+    const src = img.getAttribute("src");
+    if (src) {
+      img.setAttribute("src", resolveImageSrc(src));
+    }
+  });
+}
+
 // ─── HTML → Reduced Markdown Serializer ──────────────────────────────────────
-// Converts the contenteditable HTML back to a readable Markdown subset.
-// Does not aim for perfect round-trip fidelity — it produces clean,
-// readable Markdown that covers the features available in the toolbar.
 
 function nodeToMd(node) {
-  if (node.nodeType === Node.TEXT_NODE) {
-    return node.textContent;
-  }
+  if (node.nodeType === Node.TEXT_NODE) return node.textContent;
   if (node.nodeType !== Node.ELEMENT_NODE) return "";
 
   const tag = node.tagName.toLowerCase();
@@ -65,7 +106,7 @@ function nodeToMd(node) {
     case "h5": return `##### ${children().trim()}\n\n`;
     case "h6": return `###### ${children().trim()}\n\n`;
     case "p":  return `${children()}\n\n`;
-    case "br": return "  \n"; // markdown hard line break
+    case "br": return "  \n";
     case "strong":
     case "b":  return `**${children()}**`;
     case "em":
@@ -73,7 +114,6 @@ function nodeToMd(node) {
     case "del":
     case "s":  return `~~${children()}~~`;
     case "code": {
-      // Inside a <pre> block — let the pre case handle it
       if (node.parentElement && node.parentElement.tagName.toLowerCase() === "pre") {
         return node.textContent;
       }
@@ -81,9 +121,7 @@ function nodeToMd(node) {
     }
     case "pre": {
       const codeEl = node.querySelector("code");
-      const lang = codeEl
-        ? (codeEl.className.replace(/language-/, "").trim())
-        : "";
+      const lang = codeEl ? codeEl.className.replace(/language-/, "").trim() : "";
       const code = codeEl ? codeEl.textContent : node.textContent;
       return `\`\`\`${lang}\n${code}\n\`\`\`\n\n`;
     }
@@ -91,42 +129,35 @@ function nodeToMd(node) {
       const href = node.getAttribute("href") || "";
       return `[${children()}](${href})`;
     }
+    case "img": {
+      const alt = node.getAttribute("alt") || "";
+      // Recover the original src, not the resolved asset:// URL
+      const src = node.dataset.originalSrc || node.getAttribute("src") || "";
+      return `![${alt}](${src})`;
+    }
     case "ul": {
       const items = Array.from(node.children)
-        .map((li) => `- ${liToMd(li)}`)
-        .join("\n");
+        .map((li) => `- ${liToMd(li)}`).join("\n");
       return `${items}\n\n`;
     }
     case "ol": {
       const items = Array.from(node.children)
-        .map((li, i) => `${i + 1}. ${liToMd(li)}`)
-        .join("\n");
+        .map((li, i) => `${i + 1}. ${liToMd(li)}`).join("\n");
       return `${items}\n\n`;
     }
     case "li": return liToMd(node);
     case "blockquote": {
-      const inner = children()
-        .trim()
-        .split("\n")
-        .map((l) => `> ${l}`)
-        .join("\n");
+      const inner = children().trim().split("\n").map((l) => `> ${l}`).join("\n");
       return `${inner}\n\n`;
     }
     case "hr": return `---\n\n`;
     case "table": {
       const rows = Array.from(node.querySelectorAll("tr"));
       if (rows.length === 0) return children();
-      const headers = Array.from(rows[0].querySelectorAll("th,td")).map(
-        (c) => c.textContent.trim()
-      );
+      const headers = Array.from(rows[0].querySelectorAll("th,td")).map((c) => c.textContent.trim());
       const sep = headers.map(() => "---").join(" | ");
-      const body = rows
-        .slice(1)
-        .map((r) =>
-          Array.from(r.querySelectorAll("td,th"))
-            .map((c) => c.textContent.trim())
-            .join(" | ")
-        )
+      const body = rows.slice(1)
+        .map((r) => Array.from(r.querySelectorAll("td,th")).map((c) => c.textContent.trim()).join(" | "))
         .filter(Boolean);
       return [headers.join(" | "), sep, ...body].join("\n") + "\n\n";
     }
@@ -134,11 +165,9 @@ function nodeToMd(node) {
     case "section":
     case "article": {
       const inner = children();
-      // Add a trailing newline only if the div doesn't already end with one
       return inner.endsWith("\n") ? inner : `${inner}\n`;
     }
     case "span": return children();
-    // Ignore purely structural / style elements
     case "script":
     case "style": return "";
     default: return children();
@@ -146,7 +175,6 @@ function nodeToMd(node) {
 }
 
 function liToMd(li) {
-  // Handle nested lists inside <li>
   let text = "";
   for (const child of li.childNodes) {
     if (child.nodeType === Node.TEXT_NODE) {
@@ -154,14 +182,8 @@ function liToMd(li) {
     } else if (child.nodeType === Node.ELEMENT_NODE) {
       const t = child.tagName.toLowerCase();
       if (t === "ul" || t === "ol") {
-        // Indent nested list by 2 spaces
         const nested = nodeToMd(child).trimEnd();
-        text +=
-          "\n" +
-          nested
-            .split("\n")
-            .map((l) => `  ${l}`)
-            .join("\n");
+        text += "\n" + nested.split("\n").map((l) => `  ${l}`).join("\n");
       } else {
         text += nodeToMd(child);
       }
@@ -174,25 +196,283 @@ function htmlToMarkdown(el) {
   return Array.from(el.childNodes)
     .map(nodeToMd)
     .join("")
-    .replace(/\n{3,}/g, "\n\n") // collapse excess blank lines
+    .replace(/\n{3,}/g, "\n\n")
     .trim();
 }
 
 // ─── Markdown Render (Rust → HTML) ───────────────────────────────────────────
+
 async function renderMarkdownToWriter(markdownText) {
   try {
     const html = await invoke("parse_markdown", { text: markdownText });
     writerViewEl.innerHTML = html;
+    // Tag each img with its original src before we replace it, so the
+    // serializer can write back the original path (not the asset:// URL)
+    writerViewEl.querySelectorAll("img").forEach((img) => {
+      const src = img.getAttribute("src");
+      if (src) img.dataset.originalSrc = src;
+    });
+    fixImageSrcs(writerViewEl);
   } catch (e) {
     console.error("parse_markdown failed", e);
     writerViewEl.innerHTML = `<p style="color:#f87171">Render error: ${e}</p>`;
   }
 }
 
+// ─── Live Markdown Syntax Detection ──────────────────────────────────────────
+// When typing in Writer mode, detect markdown syntax and apply formatting
+// in real time (Typora-style):
+//   # /## /### at line start → heading
+//   **text** → bold, *text* → italic, `text` → code
+//   ![alt](path) → rendered image
+
+const BLOCK_TAGS = new Set(["P","DIV","H1","H2","H3","H4","H5","H6",
+                             "LI","BLOCKQUOTE","PRE","SECTION","ARTICLE"]);
+
+function isBlockEl(el) {
+  return el && BLOCK_TAGS.has(el.tagName);
+}
+
+/** Returns the nearest block-level ancestor of a node within writerViewEl. */
+function getBlockAncestor(node) {
+  let el = node.nodeType === Node.TEXT_NODE ? node.parentElement : node;
+  while (el && el !== writerViewEl) {
+    if (isBlockEl(el)) return el;
+    el = el.parentElement;
+  }
+  return null;
+}
+
+/**
+ * Saves cursor position as {node, offset} for later restoration.
+ * We use the text-node + character-offset approach so we survive
+ * innerHTML replacements that keep the same DOM structure.
+ */
+function saveCursor() {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0) return null;
+  const range = sel.getRangeAt(0);
+  return { node: range.startContainer, offset: range.startOffset };
+}
+
+function restoreCursor(saved) {
+  if (!saved) return;
+  try {
+    const sel = window.getSelection();
+    const range = document.createRange();
+    range.setStart(saved.node, Math.min(saved.offset, saved.node.textContent?.length ?? 0));
+    range.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(range);
+  } catch (_) {/* ignore stale nodes */}
+}
+
+// ── Heading detection ──
+
+/**
+ * If the block containing the cursor starts with ^#{1,3} $,
+ * convert it to the corresponding heading element and strip the prefix.
+ * Called on every space input while in a non-heading block.
+ */
+function tryApplyHeading() {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0) return;
+  const range = sel.getRangeAt(0);
+  const block = getBlockAncestor(range.startContainer);
+  if (!block) return;
+
+  // Only fire when block is a plain paragraph (not already a heading)
+  if (/^H[1-6]$/.test(block.tagName)) return;
+
+  const text = block.textContent;
+  const m = text.match(/^(#{1,3}) /);
+  if (!m) return;
+
+  const level = m[1].length;
+  const tag = `h${level}`;
+  const content = text.slice(m[0].length); // strip "# "
+
+  // Apply the heading via execCommand (keeps undo history)
+  document.execCommand("formatBlock", false, tag);
+
+  // Now strip the leading "# " from the new block's text content
+  const newSel = window.getSelection();
+  if (!newSel || newSel.rangeCount === 0) return;
+  const newBlock = getBlockAncestor(newSel.getRangeAt(0).startContainer);
+  if (!newBlock) return;
+
+  if (newBlock.textContent.startsWith(m[0])) {
+    // Preserve child nodes but strip the prefix from the first text node
+    const firstText = newBlock.firstChild;
+    if (firstText && firstText.nodeType === Node.TEXT_NODE) {
+      firstText.textContent = firstText.textContent.slice(m[0].length);
+    } else {
+      // Fallback: set plain text content
+      newBlock.textContent = content;
+    }
+    // Place cursor at start of heading content
+    const r = document.createRange();
+    const textNode = newBlock.firstChild || newBlock;
+    r.setStart(textNode, 0);
+    r.collapse(true);
+    newSel.removeAllRanges();
+    newSel.addRange(r);
+  }
+}
+
+// ── Inline formatting detection ──
+
+/**
+ * Scans a text node for a complete inline markdown pattern.
+ * When found (and the cursor is past the closing delimiter), replaces
+ * the raw text with the formatted element and returns true.
+ */
+function tryInlinePattern(textNode, cursorOffset, regex, createElement) {
+  const text = textNode.textContent;
+  let match;
+  // Reset lastIndex to scan from start
+  regex.lastIndex = 0;
+  while ((match = regex.exec(text)) !== null) {
+    const matchEnd = match.index + match[0].length;
+    // Only transform patterns that are fully before the cursor
+    if (matchEnd > cursorOffset) continue;
+
+    const before = text.slice(0, match.index);
+    const after  = text.slice(matchEnd);
+
+    const parent = textNode.parentNode;
+    if (!parent) return false;
+
+    // Build the replacement fragment
+    const frag = document.createDocumentFragment();
+    if (before) frag.appendChild(document.createTextNode(before));
+    frag.appendChild(createElement(match[1]));
+    const afterNode = document.createTextNode(after);
+    frag.appendChild(afterNode);
+
+    parent.replaceChild(frag, textNode);
+
+    // Restore cursor right after the newly inserted element
+    const sel = window.getSelection();
+    const r = document.createRange();
+    r.setStart(afterNode, 0);
+    r.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(r);
+
+    return true; // transformed — stop scanning this node
+  }
+  return false;
+}
+
+/**
+ * Scans the text node at the cursor for completed inline markdown patterns.
+ * Order matters: check bold (**) before italic (*) to avoid false positives.
+ */
+function tryApplyInlineFormats(range) {
+  const node = range.startContainer;
+  if (node.nodeType !== Node.TEXT_NODE) return;
+  const offset = range.startOffset;
+
+  // Bold: **content**
+  if (tryInlinePattern(node, offset, /\*\*([^*\n]+)\*\*/g, (c) => {
+    const el = document.createElement("strong"); el.textContent = c; return el;
+  })) return;
+
+  // Italic: *content* (not preceded/followed by another *)
+  if (tryInlinePattern(node, offset, /(?<!\*)\*([^*\n]+)\*(?!\*)/g, (c) => {
+    const el = document.createElement("em"); el.textContent = c; return el;
+  })) return;
+
+  // Inline code: `content`
+  if (tryInlinePattern(node, offset, /`([^`\n]+)`/g, (c) => {
+    const el = document.createElement("code"); el.textContent = c; return el;
+  })) return;
+
+  // Strikethrough: ~~content~~
+  if (tryInlinePattern(node, offset, /~~([^~\n]+)~~/g, (c) => {
+    const el = document.createElement("del"); el.textContent = c; return el;
+  })) return;
+}
+
+/**
+ * Detects a complete ![alt](path) image syntax in the current text node,
+ * replaces it with a live <img> element, and converts local paths to asset URLs.
+ */
+function tryApplyImageSyntax(range) {
+  const node = range.startContainer;
+  if (node.nodeType !== Node.TEXT_NODE) return;
+  const text = node.textContent;
+  const offset = range.startOffset;
+
+  const imgRx = /!\[([^\]]*)\]\(([^)]+)\)/g;
+  let match;
+  while ((match = imgRx.exec(text)) !== null) {
+    if (match.index + match[0].length > offset) continue;
+
+    const alt  = match[1];
+    const src  = match[2];
+    const before = text.slice(0, match.index);
+    const after  = text.slice(match.index + match[0].length);
+
+    const parent = node.parentNode;
+    if (!parent) return;
+
+    const frag = document.createDocumentFragment();
+    if (before) frag.appendChild(document.createTextNode(before));
+
+    // Wrap in a paragraph-ish element so the image isn't inline in a text run
+    const img = document.createElement("img");
+    img.setAttribute("alt", alt);
+    img.dataset.originalSrc = src;
+    img.setAttribute("src", resolveImageSrc(src));
+    img.className = "writer-image";
+    frag.appendChild(img);
+
+    const afterNode = document.createTextNode(after);
+    frag.appendChild(afterNode);
+    parent.replaceChild(frag, node);
+
+    const sel = window.getSelection();
+    const r = document.createRange();
+    r.setStart(afterNode, 0);
+    r.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(r);
+    return;
+  }
+}
+
+/**
+ * Master handler wired to the 'input' event on writerViewEl.
+ * Dispatches to the appropriate live-markdown transformation.
+ */
+function handleLiveMarkdown(e) {
+  if (isMarkdownMode) return;
+
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0) return;
+  const range = sel.getRangeAt(0);
+
+  // ── Heading: triggered by typing a space ──
+  if (e.inputType === "insertText" && e.data === " ") {
+    tryApplyHeading();
+    return; // heading check takes priority; don't also do inline on same space
+  }
+
+  // ── Closing delimiter typed — check for complete inline patterns ──
+  // We check after *, `, ~, and ) (for images)
+  const trigger = e.data;
+  if (trigger === "*" || trigger === "`" || trigger === "~" || trigger === ")") {
+    tryApplyInlineFormats(range);
+    if (trigger === ")") tryApplyImageSyntax(range);
+  }
+}
+
 // ─── Mode Toggle ──────────────────────────────────────────────────────────────
+
 async function toggleMode() {
   if (isMarkdownMode) {
-    // Markdown → Writer: parse textarea content, render into writer view
     const md = markdownInputEl.value;
     isMarkdownMode = false;
     markdownInputEl.classList.add("hidden");
@@ -202,7 +482,6 @@ async function toggleMode() {
     await renderMarkdownToWriter(md);
     writerViewEl.focus();
   } else {
-    // Writer → Markdown: serialize HTML to markdown, show in textarea
     const md = htmlToMarkdown(writerViewEl);
     isMarkdownMode = true;
     writerViewEl.classList.add("hidden");
@@ -216,10 +495,6 @@ async function toggleMode() {
 
 // ─── Formatting — Writer Mode ─────────────────────────────────────────────────
 
-/**
- * Apply rich-text formatting in Writer mode using execCommand,
- * or wrap markdown syntax in Markdown mode.
- */
 function applyRichFormat(execCmd, mdPrefix, mdSuffix = mdPrefix) {
   if (!isMarkdownMode) {
     document.execCommand(execCmd);
@@ -229,13 +504,8 @@ function applyRichFormat(execCmd, mdPrefix, mdSuffix = mdPrefix) {
   }
 }
 
-/**
- * Apply a block-level heading in Writer mode.
- * Uses execCommand('formatBlock') which works reliably in WebKit.
- */
 function applyHeading(level) {
   if (!isMarkdownMode) {
-    // execCommand formatBlock expects angle-bracketed tag names
     document.execCommand("formatBlock", false, `h${level}`);
     writerViewEl.focus();
   } else {
@@ -243,10 +513,6 @@ function applyHeading(level) {
   }
 }
 
-/**
- * Insert inline code around selection.
- * execCommand has no 'code' command so we use the Range API.
- */
 function applyCode() {
   if (!isMarkdownMode) {
     const sel = window.getSelection();
@@ -257,7 +523,6 @@ function applyCode() {
     const code = document.createElement("code");
     code.textContent = selected || " ";
     range.insertNode(code);
-    // Place cursor after the element
     range.setStartAfter(code);
     range.setEndAfter(code);
     sel.removeAllRanges();
@@ -275,19 +540,17 @@ function wrapMarkdownSelection(prefix, suffix = prefix) {
   const s = ta.selectionStart;
   const e = ta.selectionEnd;
   const before = ta.value.slice(0, s);
-  const sel = ta.value.slice(s, e);
-  const after = ta.value.slice(e);
-
+  const sel    = ta.value.slice(s, e);
+  const after  = ta.value.slice(e);
   if (sel.startsWith(prefix) && sel.endsWith(suffix)) {
-    // Toggle off
     const inner = sel.slice(prefix.length, sel.length - suffix.length);
     ta.value = before + inner + after;
     ta.selectionStart = s;
-    ta.selectionEnd = s + inner.length;
+    ta.selectionEnd   = s + inner.length;
   } else {
     ta.value = before + prefix + sel + suffix + after;
     ta.selectionStart = s + prefix.length;
-    ta.selectionEnd = s + prefix.length + sel.length;
+    ta.selectionEnd   = s + prefix.length + sel.length;
   }
   ta.focus();
   updateStats(ta.value);
@@ -297,7 +560,7 @@ function setMarkdownHeading(level) {
   const ta = markdownInputEl;
   const pos = ta.selectionStart;
   const lineStart = ta.value.lastIndexOf("\n", pos - 1) + 1;
-  const lineEnd = ta.value.indexOf("\n", pos);
+  const lineEnd   = ta.value.indexOf("\n", pos);
   const end = lineEnd === -1 ? ta.value.length : lineEnd;
   const line = ta.value.slice(lineStart, end);
   const stripped = line.replace(/^#{1,6}\s*/, "");
@@ -309,6 +572,7 @@ function setMarkdownHeading(level) {
 }
 
 // ─── Insert at Cursor ─────────────────────────────────────────────────────────
+
 function formatTime(d) {
   return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
@@ -318,7 +582,6 @@ function formatDate(d) {
 
 function insertAtCursor(text) {
   if (!isMarkdownMode) {
-    // Insert into contenteditable via Selection API
     const sel = window.getSelection();
     if (sel && sel.rangeCount > 0) {
       const range = sel.getRangeAt(0);
@@ -343,13 +606,8 @@ function insertAtCursor(text) {
 
 // ─── File Operations ──────────────────────────────────────────────────────────
 
-/** Gets the current markdown content regardless of active mode. */
 function getCurrentMarkdown() {
-  if (isMarkdownMode) {
-    return markdownInputEl.value;
-  }
-  // Serialize Writer mode HTML → Markdown
-  return htmlToMarkdown(writerViewEl);
+  return isMarkdownMode ? markdownInputEl.value : htmlToMarkdown(writerViewEl);
 }
 
 async function openFile() {
@@ -358,18 +616,17 @@ async function openFile() {
     const fileData = await invoke("open_file_dialog");
     if (fileData) {
       currentFilePath = fileData.path;
+      // Derive the directory from the full path
+      currentFileDir = fileData.path.replace(/[/\\][^/\\]+$/, "") || null;
+
       document.querySelector(".file-item.active").textContent = fileData.name;
       statusMessageEl.textContent = `Opened: ${fileData.name}`;
+      markdownInputEl.value = fileData.content;
 
       if (isMarkdownMode) {
-        // In Markdown mode just load raw text into textarea
-        markdownInputEl.value = fileData.content;
         updateStats(fileData.content);
       } else {
-        // In Writer mode render the file into the contenteditable
         await renderMarkdownToWriter(fileData.content);
-        // Keep raw markdown cached for mode-switching
-        markdownInputEl.value = fileData.content;
         updateStats(fileData.content);
       }
     } else {
@@ -392,6 +649,7 @@ async function saveFile() {
       const savedPath = await invoke("save_file_dialog", { content });
       if (savedPath) {
         currentFilePath = savedPath;
+        currentFileDir  = savedPath.replace(/[/\\][^/\\]+$/, "") || null;
         const filename = savedPath.split(/[/\\]/).pop();
         document.querySelector(".file-item.active").textContent = filename;
         statusMessageEl.textContent = `Saved: ${filename}`;
@@ -407,6 +665,7 @@ async function saveFile() {
 
 function newFile() {
   currentFilePath = null;
+  currentFileDir  = null;
   markdownInputEl.value = "";
   writerViewEl.innerHTML = "";
   document.querySelector(".file-item.active").textContent = "untitled.md";
@@ -417,40 +676,32 @@ function newFile() {
 }
 
 // ─── Keyboard Shortcuts ───────────────────────────────────────────────────────
+
 function handleKeydown(e) {
   const mod = isPrimaryMod(e);
 
   if (mod && !e.altKey) {
     switch (e.key.toLowerCase()) {
-      case "s": e.preventDefault(); saveFile(); return;
-      case "o": e.preventDefault(); openFile(); return;
-      case "n": e.preventDefault(); newFile(); return;
-      case "m": e.preventDefault(); toggleMode(); return;
+      case "s": e.preventDefault(); saveFile();      return;
+      case "o": e.preventDefault(); openFile();      return;
+      case "n": e.preventDefault(); newFile();       return;
+      case "m": e.preventDefault(); toggleMode();    return;
       case "b": e.preventDefault(); applyRichFormat("bold",   "**"); return;
       case "i": e.preventDefault(); applyRichFormat("italic", "*");  return;
-      case "k": e.preventDefault(); applyCode(); return;
+      case "k": e.preventDefault(); applyCode();     return;
       case "1": e.preventDefault(); applyHeading(1); return;
       case "2": e.preventDefault(); applyHeading(2); return;
       case "3": e.preventDefault(); applyHeading(3); return;
     }
   }
-
-  // Ctrl+Alt+T — insert current time
-  if (mod && e.altKey && (e.key === "t" || e.key === "T")) {
-    e.preventDefault();
-    insertAtCursor(formatTime(new Date()));
-    return;
-  }
-
-  // Ctrl+Alt+D — insert current date
-  if (mod && e.altKey && (e.key === "d" || e.key === "D")) {
-    e.preventDefault();
-    insertAtCursor(formatDate(new Date()));
-    return;
+  if (mod && e.altKey) {
+    if (e.key === "t" || e.key === "T") { e.preventDefault(); insertAtCursor(formatTime(new Date())); return; }
+    if (e.key === "d" || e.key === "D") { e.preventDefault(); insertAtCursor(formatDate(new Date())); return; }
   }
 }
 
 // ─── Initialisation ───────────────────────────────────────────────────────────
+
 window.addEventListener("DOMContentLoaded", async () => {
   markdownInputEl = document.getElementById("markdown-input");
   writerViewEl    = document.getElementById("writer-view");
@@ -460,11 +711,13 @@ window.addEventListener("DOMContentLoaded", async () => {
   wordCountEl     = document.getElementById("word-count");
   charCountEl     = document.getElementById("char-count");
 
-  // Detect platform from Rust
   try { platform = await invoke("get_platform"); } catch (_) { platform = "linux"; }
 
-  // ── Stats update on input ──
-  writerViewEl.addEventListener("input", debouncedStats);
+  // ── Input listeners ──
+  writerViewEl.addEventListener("input", (e) => {
+    handleLiveMarkdown(e);
+    debouncedStats();
+  });
   markdownInputEl.addEventListener("input", debouncedStats);
 
   // ── Buttons ──
@@ -483,7 +736,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   document.getElementById("time-btn").addEventListener("click",   () => insertAtCursor(formatTime(new Date())));
   document.getElementById("date-btn").addEventListener("click",   () => insertAtCursor(formatDate(new Date())));
 
-  // ── Keyboard shortcuts ──
+  // ── Global keyboard shortcuts ──
   window.addEventListener("keydown", handleKeydown);
 
   // ── Default content ──
@@ -510,7 +763,6 @@ window.addEventListener("DOMContentLoaded", async () => {
   markdownInputEl.value = defaultMd;
   markdownInputEl.classList.add("hidden");
 
-  // Start in Writer Mode — render the default content
   isMarkdownMode = false;
   writerViewEl.classList.remove("hidden");
   modeIndicatorEl.textContent = "Writer Mode";

@@ -307,3 +307,41 @@ body {
   color: var(--accent);
   opacity: 0.85;
 }
+
+/* ── Images in Writer View ───────────────────────────────────────────────── */
+#writer-view img,
+#writer-view .writer-image {
+  max-width: 100%;
+  height: auto;
+  border-radius: 8px;
+  display: block;
+  margin: 1.25rem auto;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+  border: 1px solid var(--border);
+}
+
+/* Broken image placeholder */
+#writer-view img:not([src]),
+#writer-view img[src=""] {
+  display: inline-block;
+  width: 120px;
+  height: 80px;
+  background: rgba(255,255,255,0.05);
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+}
+
+/* ── Live-format flash: subtle glow when a pattern is transformed ────────── */
+@keyframes formatFlash {
+  0%   { background: rgba(56, 189, 248, 0.25); }
+  100% { background: transparent; }
+}
+
+#writer-view strong.just-formatted,
+#writer-view em.just-formatted,
+#writer-view code.just-formatted,
+#writer-view del.just-formatted {
+  animation: formatFlash 0.6s ease-out forwards;
+  border-radius: 3px;
+}
+
