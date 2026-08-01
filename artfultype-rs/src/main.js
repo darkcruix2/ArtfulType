@@ -630,6 +630,22 @@ async function tryApplyImageSyntax(range) {
   }
 }
 
+/**
+ * Clears the text content of a block element while keeping the cursor inside it.
+ * Setting textContent directly loses the DOM cursor reference in WebKit.
+ * Instead we select all content via Range and delete it with execCommand,
+ * which leaves an empty block with a valid cursor position.
+ */
+function clearBlockKeepingCursor(block) {
+  const r = document.createRange();
+  r.selectNodeContents(block);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(r);
+  // Use insertText("") to delete the selection and keep undo history
+  document.execCommand("insertText", false, "");
+}
+
 /** Try to auto-convert list/blockquote syntax on Space. */
 function tryApplyBlockSyntax() {
   const sel = window.getSelection();
@@ -642,20 +658,20 @@ function tryApplyBlockSyntax() {
 
   // Unordered list: "- " or "* "
   if (text === "- " || text === "* ") {
-    block.textContent = "";
+    clearBlockKeepingCursor(block);
     document.execCommand("insertUnorderedList");
     return;
   }
   // Ordered list: "1. "
   if (/^1\. $/.test(text)) {
-    block.textContent = "";
+    clearBlockKeepingCursor(block);
     document.execCommand("insertOrderedList");
     return;
   }
   // Task list: "- [ ] " or "- [x] "
   if (/^- \[[ x]\] $/.test(text)) {
     const checked = text.includes("[x]");
-    block.textContent = "";
+    // Replace the whole block with a task-list ul
     const ul = document.createElement("ul");
     ul.className = "contains-task-list";
     const li = document.createElement("li");
@@ -672,7 +688,7 @@ function tryApplyBlockSyntax() {
   }
   // Blockquote: "> "
   if (text === "> ") {
-    block.textContent = "";
+    clearBlockKeepingCursor(block);
     document.execCommand("formatBlock", false, "blockquote");
     return;
   }
@@ -842,6 +858,31 @@ function handleKeydown(e) {
     if (handleWriterEnter(e)) return;
   }
 
+  // Tab / Shift+Tab — indent/outdent list items in Writer mode
+  if (!isMarkdownMode && e.key === "Tab" && !mod) {
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount > 0) {
+      // Walk up to find the nearest LI ancestor
+      let node = sel.getRangeAt(0).startContainer;
+      let li = null;
+      while (node && node !== writerViewEl) {
+        if (node.nodeType === Node.ELEMENT_NODE && node.tagName === "LI") {
+          li = node; break;
+        }
+        node = node.parentNode;
+      }
+      if (li) {
+        e.preventDefault();
+        if (e.shiftKey) {
+          document.execCommand("outdent");
+        } else {
+          document.execCommand("indent");
+        }
+        return;
+      }
+    }
+  }
+
   if (mod && !e.altKey) {
     switch (e.key.toLowerCase()) {
       case "s": e.preventDefault(); saveFile();          return;
@@ -952,6 +993,7 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   markdownInputEl.value = defaultMd;
   markdownInputEl.classList.add("hidden");
+  writerViewEl.classList.remove("hidden");   // ← fix: ensure writer view is visible at startup
   isMarkdownMode = false;
   modeIndicatorEl.textContent = "Writer Mode";
   toggleModeBtn.textContent = "Markdown Mode";
