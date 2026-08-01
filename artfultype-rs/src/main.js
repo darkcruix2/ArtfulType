@@ -1,4 +1,4 @@
-const { invoke, convertFileSrc } = window.__TAURI__.core;
+const { invoke } = window.__TAURI__.core;
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let markdownInputEl;
@@ -46,7 +46,8 @@ const debouncedStats = debounce(() => {
 // ─── Image URL Helpers ────────────────────────────────────────────────────────
 
 /**
- * Returns true if a URL is a local filesystem path (not http/https/data/blob).
+ * Returns true if a src value is a local filesystem path
+ * (not http/https/data/blob/asset/tauri).
  */
 function isLocalPath(src) {
   if (!src) return false;
@@ -54,39 +55,62 @@ function isLocalPath(src) {
 }
 
 /**
- * Resolves a potentially-relative src to an absolute path using the
- * directory of the currently open file, then converts it to a tauri
- * asset:// URL that the webview can display.
+ * Normalise a filesystem path, resolving `..` and `.` segments.
+ * Works for POSIX paths (Linux/macOS).
  */
-function resolveImageSrc(src) {
-  if (!isLocalPath(src)) return src; // already an absolute URL
-
-  // If it looks like an absolute filesystem path (/home/...) use it directly
-  if (src.startsWith("/")) {
-    return convertFileSrc(src);
+function normalizePath(path) {
+  const parts = path.split("/");
+  const out = [];
+  for (const p of parts) {
+    if (p === ".." && out.length > 0) out.pop();
+    else if (p !== ".") out.push(p);
   }
-
-  // Relative path — resolve against the directory of the open file
-  if (currentFileDir) {
-    const sep = "/";
-    const abs = currentFileDir.replace(/\\/g, "/").replace(/\/$/, "") + sep + src.replace(/\\/g, "/");
-    return convertFileSrc(abs);
-  }
-
-  return src; // can't resolve without a base dir — leave as-is
+  return out.join("/");
 }
 
 /**
- * After rendering HTML into the writer view, walk all <img> tags and convert
- * local src paths to asset:// URLs so the webview can display them.
+ * Resolves a src (possibly relative) to an absolute filesystem path,
+ * using the directory of the currently open file as the base.
  */
-function fixImageSrcs(el) {
-  el.querySelectorAll("img").forEach((img) => {
+function resolveToAbsolute(src) {
+  if (!isLocalPath(src)) return null; // not a local file
+  if (src.startsWith("/")) return normalizePath(src); // already absolute
+  if (currentFileDir) {
+    return normalizePath(currentFileDir.replace(/\\/g, "/") + "/" + src);
+  }
+  return null; // can't resolve without a base dir
+}
+
+/**
+ * Loads a local image via the Rust backend (read_image_base64) and
+ * sets the element's src to the returned data: URI.
+ * Falls back gracefully if the file cannot be read.
+ */
+async function loadLocalImage(img, src) {
+  const absPath = resolveToAbsolute(src);
+  if (!absPath) return; // nothing we can do
+  try {
+    const dataUrl = await invoke("read_image_base64", { path: absPath });
+    img.setAttribute("src", dataUrl);
+  } catch (err) {
+    console.warn(`Could not load image "${absPath}":`, err);
+    img.setAttribute("alt", img.getAttribute("alt") + " [not found]");
+  }
+}
+
+/**
+ * After rendering HTML into the writer view, replace all local <img> srcs
+ * with embedded data: URIs fetched from the Rust backend.
+ * The original src is preserved in data-originalSrc for the Markdown serializer.
+ */
+async function fixImageSrcs(el) {
+  const imgs = Array.from(el.querySelectorAll("img"));
+  await Promise.all(imgs.map(async (img) => {
     const src = img.getAttribute("src");
-    if (src) {
-      img.setAttribute("src", resolveImageSrc(src));
-    }
-  });
+    if (!src || !isLocalPath(src)) return;
+    img.dataset.originalSrc = src; // preserve for htmlToMarkdown()
+    await loadLocalImage(img, src);
+  }));
 }
 
 // ─── HTML → Reduced Markdown Serializer ──────────────────────────────────────
@@ -206,13 +230,8 @@ async function renderMarkdownToWriter(markdownText) {
   try {
     const html = await invoke("parse_markdown", { text: markdownText });
     writerViewEl.innerHTML = html;
-    // Tag each img with its original src before we replace it, so the
-    // serializer can write back the original path (not the asset:// URL)
-    writerViewEl.querySelectorAll("img").forEach((img) => {
-      const src = img.getAttribute("src");
-      if (src) img.dataset.originalSrc = src;
-    });
-    fixImageSrcs(writerViewEl);
+    // fixImageSrcs is async — it fetches each image as base64 via Rust
+    await fixImageSrcs(writerViewEl);
   } catch (e) {
     console.error("parse_markdown failed", e);
     writerViewEl.innerHTML = `<p style="color:#f87171">Render error: ${e}</p>`;
@@ -397,9 +416,9 @@ function tryApplyInlineFormats(range) {
 
 /**
  * Detects a complete ![alt](path) image syntax in the current text node,
- * replaces it with a live <img> element, and converts local paths to asset URLs.
+ * replaces it with a live <img> element, and loads the image via Rust.
  */
-function tryApplyImageSyntax(range) {
+async function tryApplyImageSyntax(range) {
   const node = range.startContainer;
   if (node.nodeType !== Node.TEXT_NODE) return;
   const text = node.textContent;
@@ -410,8 +429,8 @@ function tryApplyImageSyntax(range) {
   while ((match = imgRx.exec(text)) !== null) {
     if (match.index + match[0].length > offset) continue;
 
-    const alt  = match[1];
-    const src  = match[2];
+    const alt    = match[1];
+    const src    = match[2];
     const before = text.slice(0, match.index);
     const after  = text.slice(match.index + match[0].length);
 
@@ -421,24 +440,28 @@ function tryApplyImageSyntax(range) {
     const frag = document.createDocumentFragment();
     if (before) frag.appendChild(document.createTextNode(before));
 
-    // Wrap in a paragraph-ish element so the image isn't inline in a text run
     const img = document.createElement("img");
     img.setAttribute("alt", alt);
     img.dataset.originalSrc = src;
-    img.setAttribute("src", resolveImageSrc(src));
     img.className = "writer-image";
+    // Show a placeholder immediately while we load
+    img.setAttribute("src", "");
     frag.appendChild(img);
 
     const afterNode = document.createTextNode(after);
     frag.appendChild(afterNode);
     parent.replaceChild(frag, node);
 
+    // Restore cursor, then load image in background
     const sel = window.getSelection();
     const r = document.createRange();
     r.setStart(afterNode, 0);
     r.collapse(true);
     sel.removeAllRanges();
     sel.addRange(r);
+
+    // Load asynchronously so it doesn't block typing
+    loadLocalImage(img, src);
     return;
   }
 }
