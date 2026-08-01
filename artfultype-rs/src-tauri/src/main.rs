@@ -91,6 +91,20 @@ fn save_file(path: &str, content: &str) -> Result<(), String> {
     fs::write(path, content).map_err(|e| e.to_string())
 }
 
+/// Opens a file by absolute path without showing a dialog.
+/// Used by the recent-files sidebar.
+#[tauri::command]
+fn read_file(path: String) -> Result<FileData, String> {
+    let path_buf = std::path::PathBuf::from(&path);
+    let content = fs::read_to_string(&path_buf)
+        .map_err(|e| format!("Cannot open {path}: {e}"))?;
+    let name = path_buf
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "untitled.md".into());
+    Ok(FileData { path, name, content })
+}
+
 /// Reads an image from an absolute local path and returns it as a
 /// "data:image/TYPE;base64,DATA" URL ready to use as an <img src>.
 /// This avoids all asset-protocol / CSP / scope issues.
@@ -126,6 +140,7 @@ fn main() {
             open_file_dialog,
             save_file_dialog,
             save_file,
+            read_file,
             read_image_base64
         ])
         .run(tauri::generate_context!())
