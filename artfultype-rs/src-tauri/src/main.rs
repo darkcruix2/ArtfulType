@@ -1,15 +1,22 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use pulldown_cmark::{Parser, html};
-use rfd::FileDialog;
+use pulldown_cmark::{Parser, Options, html};
+use rfd::AsyncFileDialog;
 use std::fs;
 use serde::{Serialize, Deserialize};
 
 #[tauri::command]
 fn parse_markdown(text: &str) -> String {
-    let parser = Parser::new(text);
-    let mut html_output = String::new();
+    // Enable common markdown extensions for better rendering
+    let mut opts = Options::empty();
+    opts.insert(Options::ENABLE_STRIKETHROUGH);
+    opts.insert(Options::ENABLE_TABLES);
+    opts.insert(Options::ENABLE_FOOTNOTES);
+    opts.insert(Options::ENABLE_TASKLISTS);
+
+    let parser = Parser::new_ext(text, opts);
+    let mut html_output = String::with_capacity(text.len() * 2);
     html::push_html(&mut html_output, parser);
     html_output
 }
@@ -21,15 +28,37 @@ struct FileData {
     content: String,
 }
 
+/// Returns the current platform so the frontend can adjust keyboard shortcuts.
+/// Values: "linux", "windows", "macos"
 #[tauri::command]
-fn open_file_dialog() -> Option<FileData> {
-    let file = FileDialog::new()
-        .add_filter("Markdown", &["md", "markdown", "txt"])
-        .pick_file();
+fn get_platform() -> &'static str {
+    if cfg!(target_os = "linux") {
+        "linux"
+    } else if cfg!(target_os = "windows") {
+        "windows"
+    } else {
+        "macos"
+    }
+}
 
-    if let Some(path) = file {
+/// Opens a native file-picker dialog asynchronously.
+/// Using AsyncFileDialog prevents the GTK dialog from blocking the main thread
+/// on Linux, which was the cause of the application freeze.
+#[tauri::command]
+async fn open_file_dialog() -> Option<FileData> {
+    let file = AsyncFileDialog::new()
+        .add_filter("Markdown", &["md", "markdown", "txt"])
+        .pick_file()
+        .await;
+
+    if let Some(handle) = file {
+        let path = handle.path().to_path_buf();
+        // Read file content asynchronously to avoid blocking
         let content = fs::read_to_string(&path).unwrap_or_default();
-        let name = path.file_name().unwrap().to_string_lossy().into_owned();
+        let name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "untitled.md".to_string());
         return Some(FileData {
             path: path.to_string_lossy().into_owned(),
             name,
@@ -39,14 +68,17 @@ fn open_file_dialog() -> Option<FileData> {
     None
 }
 
+/// Opens a native save dialog asynchronously.
 #[tauri::command]
-fn save_file_dialog(content: &str) -> Option<String> {
-    let file = FileDialog::new()
+async fn save_file_dialog(content: String) -> Option<String> {
+    let file = AsyncFileDialog::new()
         .add_filter("Markdown", &["md", "markdown", "txt"])
-        .save_file();
+        .save_file()
+        .await;
 
-    if let Some(path) = file {
-        let _ = fs::write(&path, content);
+    if let Some(handle) = file {
+        let path = handle.path().to_path_buf();
+        let _ = fs::write(&path, content.as_bytes());
         return Some(path.to_string_lossy().into_owned());
     }
     None
@@ -62,6 +94,7 @@ fn main() {
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             parse_markdown,
+            get_platform,
             open_file_dialog,
             save_file_dialog,
             save_file
