@@ -77,13 +77,9 @@ function applyAutoSaveSetting(intervalMinutes) {
 }
 
 function updateAutoSaveUI(intervalMinutes) {
-  const items = document.querySelectorAll(".autosave-option");
-  items.forEach(el => {
-    el.classList.toggle("active", parseInt(el.dataset.minutes) === intervalMinutes);
-  });
-  const label = document.getElementById("autosave-label");
-  if (label) {
-    label.textContent = intervalMinutes === 0 ? "Auto-save: Off" : `Auto-save: ${intervalMinutes}m`;
+  const select = document.getElementById("autosave-select");
+  if (select) {
+    select.value = String(intervalMinutes);
   }
 }
 
@@ -1119,16 +1115,20 @@ function doRedo() {
   else markdownInputEl.focus();
 }
 
-// ─── Auto-save dropdown ───────────────────────────────────────────────────────
-function toggleAutoSaveMenu(e) {
+// ─── Main Menu & Modals ───────────────────────────────────────────────────────
+function toggleMainMenu(e) {
   e.stopPropagation();
-  const menu = document.getElementById("autosave-menu");
-  const btn  = e.currentTarget;
-  const rect = btn.getBoundingClientRect();
-  // Position the fixed-position menu below the button
-  menu.style.top  = (rect.bottom + 4) + "px";
-  menu.style.right = (window.innerWidth - rect.right) + "px";
-  menu.classList.toggle("open");
+  const menu = document.getElementById("main-menu");
+  menu.classList.toggle("hidden");
+}
+
+function openModal(id) {
+  document.getElementById("main-menu").classList.add("hidden");
+  document.getElementById(id).showModal();
+}
+
+function closeModal(id) {
+  document.getElementById(id).close();
 }
 
 // ─── Initialisation ───────────────────────────────────────────────────────────
@@ -1180,25 +1180,33 @@ window.addEventListener("DOMContentLoaded", async () => {
   document.getElementById("time-btn").addEventListener("click",  () => insertAtCursor(formatTime(new Date())));
   document.getElementById("date-btn").addEventListener("click",  () => insertAtCursor(formatDate(new Date())));
 
-  // ── Auto-save menu ──
-  const autoSaveBtn = document.getElementById("autosave-btn");
-  if (autoSaveBtn) {
-    autoSaveBtn.addEventListener("click", toggleAutoSaveMenu);
+  // ── Main Menu ──
+  const mainMenuBtn = document.getElementById("main-menu-btn");
+  if (mainMenuBtn) {
+    mainMenuBtn.addEventListener("click", toggleMainMenu);
   }
-  document.querySelectorAll(".autosave-option").forEach(el => {
-    el.addEventListener("click", (e) => {
-      applyAutoSaveSetting(parseInt(el.dataset.minutes));
-      document.getElementById("autosave-menu").classList.remove("open");
-    });
-  });
-  // Close when clicking outside both the button and the menu
+  document.getElementById("menu-about-btn")?.addEventListener("click", () => openModal("about-modal"));
+  document.getElementById("menu-prefs-btn")?.addEventListener("click", () => openModal("prefs-modal"));
+
+  document.getElementById("close-about-btn")?.addEventListener("click", () => closeModal("about-modal"));
+  document.getElementById("close-prefs-btn")?.addEventListener("click", () => closeModal("prefs-modal"));
+
+  // Close main menu when clicking outside
   document.addEventListener("click", (e) => {
-    const menu = document.getElementById("autosave-menu");
-    const btn  = document.getElementById("autosave-btn");
+    const menu = document.getElementById("main-menu");
+    const btn = document.getElementById("main-menu-btn");
     if (menu && btn && !menu.contains(e.target) && !btn.contains(e.target)) {
-      menu.classList.remove("open");
+      menu.classList.add("hidden");
     }
   });
+
+  // ── Auto-save Preferences ──
+  const autoSaveSelect = document.getElementById("autosave-select");
+  if (autoSaveSelect) {
+    autoSaveSelect.addEventListener("change", (e) => {
+      applyAutoSaveSetting(parseInt(e.target.value));
+    });
+  }
 
   // ── Global keyboard shortcuts ──
   window.addEventListener("keydown", handleKeydown);
