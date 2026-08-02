@@ -12,9 +12,12 @@ let charCountEl;
 let currentFilePath = null;
 let currentFileDir  = null;
 let platform = "linux";
+let isDirty = false;
+let autoSaveTimer = null;
 
-const RECENT_KEY = "artfultype-recent-v1";
-const RECENT_MAX = 10;
+const RECENT_KEY    = "artfultype-recent-v1";
+const RECENT_MAX    = 10;
+const SETTINGS_KEY  = "artfultype-settings-v1";
 
 // ─── Debounce ─────────────────────────────────────────────────────────────────
 function debounce(fn, wait) {
@@ -31,6 +34,59 @@ function isPrimaryMod(e) {
   return e.ctrlKey && !e.metaKey;
 }
 
+// ─── Settings ─────────────────────────────────────────────────────────────────
+function loadSettings() {
+  try { return JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}"); }
+  catch { return {}; }
+}
+function saveSettings(obj) {
+  const current = loadSettings();
+  localStorage.setItem(SETTINGS_KEY, JSON.stringify({ ...current, ...obj }));
+}
+
+// ─── Dirty / Unsaved indicator ────────────────────────────────────────────────
+function setDirty(dirty) {
+  isDirty = dirty;
+  const btn = document.getElementById("save-file-btn");
+  if (!btn) return;
+  if (dirty) {
+    btn.classList.add("dirty");
+    btn.title = "Unsaved changes – Save (Ctrl+S)";
+  } else {
+    btn.classList.remove("dirty");
+    btn.title = "Save File (Ctrl+S)";
+  }
+}
+
+// ─── Auto-save ────────────────────────────────────────────────────────────────
+function startAutoSave(intervalMinutes) {
+  clearInterval(autoSaveTimer);
+  if (intervalMinutes > 0) {
+    autoSaveTimer = setInterval(() => {
+      if (isDirty && currentFilePath) {
+        saveFile(true);
+      }
+    }, intervalMinutes * 60 * 1000);
+  }
+}
+
+function applyAutoSaveSetting(intervalMinutes) {
+  saveSettings({ autoSaveMinutes: intervalMinutes });
+  startAutoSave(intervalMinutes);
+  updateAutoSaveUI(intervalMinutes);
+}
+
+function updateAutoSaveUI(intervalMinutes) {
+  const items = document.querySelectorAll(".autosave-option");
+  items.forEach(el => {
+    el.classList.toggle("active", parseInt(el.dataset.minutes) === intervalMinutes);
+  });
+  const label = document.getElementById("autosave-label");
+  if (label) {
+    label.textContent = intervalMinutes === 0 ? "Auto-save: Off" : `Auto-save: ${intervalMinutes}m`;
+  }
+}
+
 // ─── Stats ────────────────────────────────────────────────────────────────────
 function updateStats(text) {
   const trimmed = text.trim();
@@ -44,18 +100,38 @@ const debouncedStats = debounce(() => {
     ? markdownInputEl.value
     : (writerViewEl.innerText || writerViewEl.textContent || "");
   updateStats(text);
+  setDirty(true);
 }, 150);
+
+// ─── Saved Selection (for toolbar buttons that steal focus) ───────────────────
+// When a toolbar button is clicked, the browser moves focus away from the
+// contenteditable and the selection is lost. We save the last known range
+// and restore it before any format operation so it targets the right place.
+let _savedRange = null;
+
+function saveSelection() {
+  if (isMarkdownMode) return;
+  const sel = window.getSelection();
+  if (sel && sel.rangeCount > 0) {
+    _savedRange = sel.getRangeAt(0).cloneRange();
+  }
+}
+
+function restoreSelection() {
+  if (!_savedRange || isMarkdownMode) return;
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(_savedRange);
+}
 
 // ─── Recent Files ─────────────────────────────────────────────────────────────
 function loadRecentFiles() {
   try { return JSON.parse(localStorage.getItem(RECENT_KEY) || "[]"); }
   catch { return []; }
 }
-
 function saveRecentFiles(list) {
   localStorage.setItem(RECENT_KEY, JSON.stringify(list));
 }
-
 function addToRecentFiles(path, name) {
   let recent = loadRecentFiles().filter(f => f.path !== path);
   recent.unshift({ path, name });
@@ -63,12 +139,10 @@ function addToRecentFiles(path, name) {
   saveRecentFiles(recent);
   renderFileList();
 }
-
 function removeFromRecentFiles(path) {
   saveRecentFiles(loadRecentFiles().filter(f => f.path !== path));
   renderFileList();
 }
-
 function renderFileList() {
   const list = document.getElementById("file-list");
   list.innerHTML = "";
@@ -107,7 +181,6 @@ function isLocalPath(src) {
   if (!src) return false;
   return !/^(https?:|data:|blob:|asset:|tauri:)/i.test(src);
 }
-
 function normalizePath(path) {
   const parts = path.split("/");
   const out = [];
@@ -117,14 +190,12 @@ function normalizePath(path) {
   }
   return out.join("/");
 }
-
 function resolveToAbsolute(src) {
   if (!isLocalPath(src)) return null;
   if (src.startsWith("/")) return normalizePath(src);
   if (currentFileDir) return normalizePath(currentFileDir.replace(/\\/g, "/") + "/" + src);
   return null;
 }
-
 async function loadLocalImage(img, src) {
   const absPath = resolveToAbsolute(src);
   if (!absPath) return;
@@ -136,7 +207,6 @@ async function loadLocalImage(img, src) {
     img.setAttribute("alt", (img.getAttribute("alt") || "") + " [not found]");
   }
 }
-
 async function fixImageSrcs(el) {
   const imgs = Array.from(el.querySelectorAll("img"));
   await Promise.all(imgs.map(async (img) => {
@@ -153,7 +223,6 @@ function nodeToMd(node) {
   if (node.nodeType !== Node.ELEMENT_NODE) return "";
   const tag = node.tagName.toLowerCase();
   const children = () => Array.from(node.childNodes).map(nodeToMd).join("");
-
   switch (tag) {
     case "h1": return `# ${children().trim()}\n\n`;
     case "h2": return `## ${children().trim()}\n\n`;
@@ -218,7 +287,6 @@ function nodeToMd(node) {
     default: return children();
   }
 }
-
 function liToMd(li) {
   let text = "";
   for (const child of li.childNodes) {
@@ -237,7 +305,6 @@ function liToMd(li) {
   }
   return text.trim();
 }
-
 function htmlToMarkdown(el) {
   return Array.from(el.childNodes)
     .map(nodeToMd).join("")
@@ -282,9 +349,7 @@ const BLOCK_TAGS = new Set([
   "P","DIV","H1","H2","H3","H4","H5","H6",
   "LI","BLOCKQUOTE","PRE","SECTION","ARTICLE"
 ]);
-
 function isBlockEl(el) { return el && BLOCK_TAGS.has(el.tagName); }
-
 function getBlockAncestor(node) {
   let el = node.nodeType === Node.TEXT_NODE ? node.parentElement : node;
   while (el && el !== writerViewEl) {
@@ -293,8 +358,6 @@ function getBlockAncestor(node) {
   }
   return null;
 }
-
-/** Place the caret at a specific offset inside a node. */
 function placeCaret(node, offset) {
   const sel = window.getSelection();
   const r = document.createRange();
@@ -302,13 +365,10 @@ function placeCaret(node, offset) {
   r.collapse(true);
   sel.removeAllRanges();
   sel.addRange(r);
+  _savedRange = r.cloneRange();
 }
 
 // ─── Direct DOM List / Block Builders ────────────────────────────────────────
-// Build DOM structures directly instead of relying on execCommand after clearing
-// a block — execCommand("insertUnorderedList") is unreliable in GTK WebKit when
-// the cursor loses its anchor because block.textContent was set to "".
-
 function buildUL(replaceTarget, remainingText) {
   const ul = document.createElement("ul");
   const li = document.createElement("li");
@@ -317,7 +377,6 @@ function buildUL(replaceTarget, remainingText) {
   replaceTarget.parentNode.replaceChild(ul, replaceTarget);
   placeCaret(tn, 0);
 }
-
 function buildOL(replaceTarget, remainingText) {
   const ol = document.createElement("ol");
   const li = document.createElement("li");
@@ -326,7 +385,6 @@ function buildOL(replaceTarget, remainingText) {
   replaceTarget.parentNode.replaceChild(ol, replaceTarget);
   placeCaret(tn, 0);
 }
-
 function buildTaskItem(replaceTarget, checked, remainingText) {
   const ul = document.createElement("ul");
   ul.className = "contains-task-list";
@@ -339,7 +397,6 @@ function buildTaskItem(replaceTarget, checked, remainingText) {
   replaceTarget.parentNode.replaceChild(ul, replaceTarget);
   placeCaret(tn, 0);
 }
-
 function buildBlockquote(replaceTarget, remainingText) {
   const bq = document.createElement("blockquote");
   const tn = document.createTextNode(remainingText);
@@ -348,24 +405,49 @@ function buildBlockquote(replaceTarget, remainingText) {
   placeCaret(tn, 0);
 }
 
-// ─── Space Key: Block Syntax Trigger ─────────────────────────────────────────
-// Called from keydown BEFORE the space character is inserted.
-// Returns true if it converted the current line to a block element
-// (caller should preventDefault).
+// Creates a new task-list <li> (with checkbox) and appends it after afterLi.
+function newTaskListItem(afterLi, parentUl) {
+  const li = document.createElement("li");
+  li.className = "task-list-item";
+  const cb = document.createElement("input");
+  cb.type = "checkbox";
+  const tn = document.createTextNode("");
+  li.appendChild(cb); li.appendChild(tn);
+  parentUl.insertBefore(li, afterLi.nextSibling);
+  placeCaret(tn, 0);
+}
 
+// Exits (or unindents) a task list when Enter is pressed on an empty item.
+function exitTaskList(li, parentUl) {
+  const grandParentLi = parentUl.parentElement;
+  if (grandParentLi && grandParentLi.tagName === "LI") {
+    // We are in a nested list — outdent instead of fully exiting
+    document.execCommand("outdent");
+    return;
+  }
+  // Top-level task list → insert paragraph after and remove empty item
+  const p = document.createElement("p");
+  const tn = document.createTextNode("");
+  p.appendChild(tn);
+  parentUl.parentNode.insertBefore(p, parentUl.nextSibling);
+  if (parentUl.children.length === 1) {
+    parentUl.parentNode.removeChild(parentUl);
+  } else {
+    parentUl.removeChild(li);
+  }
+  placeCaret(tn, 0);
+}
+
+// ─── Space Key: Block Syntax Trigger ─────────────────────────────────────────
 function handleSpaceInWriter() {
   const sel = window.getSelection();
   if (!sel || !sel.rangeCount) return false;
   const range = sel.getRangeAt(0);
   if (!range.collapsed) return false;
-
   const container = range.startContainer;
   if (container.nodeType !== Node.TEXT_NODE) return false;
-
   const textBefore = container.textContent.slice(0, range.startOffset);
   const textAfter  = container.textContent.slice(range.startOffset);
-
-  // Only convert when the trigger is the entire content of the block
   const block = getBlockAncestor(container);
   if (block) {
     if (/^H[1-6]|LI|BLOCKQUOTE|PRE/.test(block.tagName)) return false;
@@ -373,9 +455,7 @@ function handleSpaceInWriter() {
   } else {
     if (container.parentNode !== writerViewEl) return false;
   }
-
   const target = block || container;
-
   switch (textBefore) {
     case "-":
     case "*": buildUL(target, textAfter); return true;
@@ -390,10 +470,15 @@ function handleSpaceInWriter() {
 }
 
 // ─── Formatting — Writer Mode ─────────────────────────────────────────────────
+function writerExec(cmd) {
+  restoreSelection();
+  document.execCommand(cmd);
+  writerViewEl.focus();
+}
+
 function applyRichFormat(execCmd, mdPrefix, mdSuffix = mdPrefix) {
   if (!isMarkdownMode) {
-    document.execCommand(execCmd);
-    writerViewEl.focus();
+    writerExec(execCmd);
   } else {
     wrapMarkdownSelection(mdPrefix, mdSuffix);
   }
@@ -401,6 +486,7 @@ function applyRichFormat(execCmd, mdPrefix, mdSuffix = mdPrefix) {
 
 function applyHeading(level) {
   if (!isMarkdownMode) {
+    restoreSelection();
     document.execCommand("formatBlock", false, `h${level}`);
     writerViewEl.focus();
   } else {
@@ -410,6 +496,7 @@ function applyHeading(level) {
 
 function applyCode() {
   if (!isMarkdownMode) {
+    restoreSelection();
     const sel = window.getSelection();
     if (!sel || !sel.rangeCount) return;
     const range = sel.getRangeAt(0);
@@ -426,6 +513,7 @@ function applyCode() {
 
 function applyBlockquote() {
   if (!isMarkdownMode) {
+    restoreSelection();
     document.execCommand("formatBlock", false, "blockquote");
     writerViewEl.focus();
   } else { wrapMarkdownLines("> "); }
@@ -433,7 +521,7 @@ function applyBlockquote() {
 
 function applyUnorderedList() {
   if (!isMarkdownMode) {
-    // Use execCommand when not triggered by keyboard (toolbar button)
+    restoreSelection();
     document.execCommand("insertUnorderedList");
     writerViewEl.focus();
   } else {
@@ -451,6 +539,7 @@ function applyUnorderedList() {
 
 function applyOrderedList() {
   if (!isMarkdownMode) {
+    restoreSelection();
     document.execCommand("insertOrderedList");
     writerViewEl.focus();
   } else {
@@ -465,30 +554,36 @@ function applyOrderedList() {
 
 function applyCheckboxList() {
   if (!isMarkdownMode) {
+    // Restore focus + selection that was lost when toolbar button was clicked
+    restoreSelection();
     const sel = window.getSelection();
-    if (!sel || !sel.rangeCount) return;
+    if (!sel || !sel.rangeCount) {
+      // No known selection — append at end of editor
+      const ul = makeTaskListUL();
+      writerViewEl.appendChild(ul);
+      const tn = ul.querySelector("li").lastChild;
+      placeCaret(tn, 0);
+      writerViewEl.focus();
+      return;
+    }
+
     const range = sel.getRangeAt(0);
     const block = getBlockAncestor(range.startContainer);
+    const ul = makeTaskListUL();
 
-    const ul = document.createElement("ul");
-    ul.className = "contains-task-list";
-    const li = document.createElement("li");
-    li.className = "task-list-item";
-    const cb = document.createElement("input");
-    cb.type = "checkbox";
-    const tn = document.createTextNode("");
-    li.appendChild(cb); li.appendChild(tn); ul.appendChild(li);
-
-    // Replace current block if empty; otherwise insert after it
     if (block && block !== writerViewEl) {
-      if (block.textContent.trim() === "") {
+      // If block is empty (only whitespace / <br>), replace it
+      if (block.textContent.trim() === "" && block.tagName !== "LI") {
         block.parentNode.replaceChild(ul, block);
       } else {
+        // Insert after current block
         block.parentNode.insertBefore(ul, block.nextSibling);
       }
     } else {
       writerViewEl.appendChild(ul);
     }
+
+    const tn = ul.querySelector("li").lastChild;
     placeCaret(tn, 0);
     writerViewEl.focus();
   } else {
@@ -501,8 +596,21 @@ function applyCheckboxList() {
   }
 }
 
+function makeTaskListUL() {
+  const ul = document.createElement("ul");
+  ul.className = "contains-task-list";
+  const li = document.createElement("li");
+  li.className = "task-list-item";
+  const cb = document.createElement("input");
+  cb.type = "checkbox";
+  const tn = document.createTextNode("");
+  li.appendChild(cb); li.appendChild(tn); ul.appendChild(li);
+  return ul;
+}
+
 function applyHorizontalRule() {
   if (!isMarkdownMode) {
+    restoreSelection();
     document.execCommand("insertHorizontalRule");
     writerViewEl.focus();
   } else {
@@ -530,7 +638,6 @@ function wrapMarkdownSelection(prefix, suffix = prefix) {
   }
   ta.focus(); debouncedStats();
 }
-
 function wrapMarkdownLines(prefix) {
   const ta = markdownInputEl;
   const s = ta.selectionStart;
@@ -539,7 +646,6 @@ function wrapMarkdownLines(prefix) {
   ta.selectionStart = ta.selectionEnd = s + prefix.length;
   ta.focus();
 }
-
 function setMarkdownHeading(level) {
   const ta = markdownInputEl;
   const pos = ta.selectionStart;
@@ -561,9 +667,9 @@ function formatTime(d) {
 function formatDate(d) {
   return d.toLocaleDateString([], { year: "numeric", month: "long", day: "numeric" });
 }
-
 function insertAtCursor(text) {
   if (!isMarkdownMode) {
+    restoreSelection();
     const sel = window.getSelection();
     if (sel && sel.rangeCount > 0) {
       const range = sel.getRangeAt(0);
@@ -584,29 +690,21 @@ function insertAtCursor(text) {
 }
 
 // ─── Live Markdown Syntax ─────────────────────────────────────────────────────
-// Block syntax (lists, blockquotes) is detected in keydown via handleSpaceInWriter,
-// so the space character is never inserted before the conversion.
-// Headings (# followed by space) are still handled here via tryApplyHeading.
-
 function tryApplyHeading() {
   const sel = window.getSelection();
   if (!sel || !sel.rangeCount) return;
   const block = getBlockAncestor(sel.getRangeAt(0).startContainer);
   if (!block || /^H[1-6]$/.test(block.tagName)) return;
-
   const text = block.textContent;
   const m = text.match(/^(#{1,6}) /);
   if (!m) return;
-
   const level = m[1].length;
   const content = text.slice(m[0].length);
   document.execCommand("formatBlock", false, `h${level}`);
-
   const newSel = window.getSelection();
   if (!newSel || !newSel.rangeCount) return;
   const newBlock = getBlockAncestor(newSel.getRangeAt(0).startContainer);
   if (!newBlock) return;
-
   if (newBlock.textContent.startsWith(m[0])) {
     const first = newBlock.firstChild;
     if (first?.nodeType === Node.TEXT_NODE) {
@@ -704,12 +802,10 @@ function handleLiveMarkdown(e) {
   const sel = window.getSelection();
   if (!sel || !sel.rangeCount) return;
   const range = sel.getRangeAt(0);
-
   if (e.inputType === "insertText" && e.data === " ") {
-    tryApplyHeading(); // headings only; list/blockquote handled in keydown
+    tryApplyHeading();
     return;
   }
-
   const trigger = e.data;
   if (trigger === "*" || trigger === "`" || trigger === "~") {
     tryApplyInlineFormats(range);
@@ -721,32 +817,6 @@ function handleLiveMarkdown(e) {
 }
 
 // ─── Enter Key in Writer Mode ─────────────────────────────────────────────────
-// Handles: task-list Enter, heading-on-Enter (# text), HR (---).
-
-function newTaskListItem(afterLi, parentUl) {
-  const li = document.createElement("li");
-  li.className = "task-list-item";
-  const cb = document.createElement("input");
-  cb.type = "checkbox";
-  const tn = document.createTextNode("");
-  li.appendChild(cb); li.appendChild(tn);
-  parentUl.insertBefore(li, afterLi.nextSibling);
-  placeCaret(tn, 0);
-}
-
-function exitTaskList(li, parentUl) {
-  const p = document.createElement("p");
-  const tn = document.createTextNode("");
-  p.appendChild(tn);
-  parentUl.parentNode.insertBefore(p, parentUl.nextSibling);
-  if (parentUl.children.length === 1) {
-    parentUl.parentNode.removeChild(parentUl);
-  } else {
-    parentUl.removeChild(li);
-  }
-  placeCaret(tn, 0);
-}
-
 function handleWriterEnter(e) {
   const sel = window.getSelection();
   if (!sel || !sel.rangeCount) return false;
@@ -755,22 +825,22 @@ function handleWriterEnter(e) {
   if (!block) return false;
 
   // ── Task-list item Enter ──
+  // Detect by class on the <li> itself so indented items (nested UL without
+  // the contains-task-list class added by indent) are handled correctly.
   if (block.tagName === "LI") {
-    const parentUl = block.parentElement;
-    if (parentUl && parentUl.classList.contains("contains-task-list")) {
+    const isTaskItem = block.classList.contains("task-list-item");
+    if (isTaskItem) {
       e.preventDefault();
-      // Empty item → exit the list
       if (!block.textContent.trim()) {
-        exitTaskList(block, parentUl);
+        exitTaskList(block, block.parentElement);
       } else {
-        newTaskListItem(block, parentUl);
+        newTaskListItem(block, block.parentElement);
       }
       return true;
     }
     return false; // regular list: let browser handle
   }
 
-  // Skip headings and blockquotes
   if (/^H[1-6]$/.test(block.tagName)) return false;
   if (block.tagName === "BLOCKQUOTE") return false;
 
@@ -805,7 +875,6 @@ function handleWriterEnter(e) {
     document.execCommand("formatBlock", false, "p");
     return true;
   }
-
   return false;
 }
 
@@ -825,6 +894,7 @@ async function applyOpenedFile(fileData) {
     await renderMarkdownToWriter(fileData.content);
     updateStats(fileData.content);
   }
+  setDirty(false);
 }
 
 async function openFile() {
@@ -843,28 +913,30 @@ async function openFile() {
   }
 }
 
-async function saveFile() {
+async function saveFile(silent = false) {
   const content = getCurrentMarkdown();
   try {
     if (currentFilePath) {
       await invoke("save_file", { path: currentFilePath, content });
-      statusMessageEl.textContent = "Saved.";
+      setDirty(false);
+      if (!silent) statusMessageEl.textContent = "Saved.";
     } else {
-      statusMessageEl.textContent = "Saving…";
+      if (!silent) statusMessageEl.textContent = "Saving…";
       const savedPath = await invoke("save_file_dialog", { content });
       if (savedPath) {
         currentFilePath = savedPath;
         currentFileDir  = savedPath.replace(/[/\\][^/\\]+$/, "") || null;
         const filename = savedPath.split(/[/\\]/).pop();
         addToRecentFiles(savedPath, filename);
-        statusMessageEl.textContent = `Saved: ${filename}`;
+        setDirty(false);
+        if (!silent) statusMessageEl.textContent = `Saved: ${filename}`;
       } else {
-        statusMessageEl.textContent = "Save cancelled.";
+        if (!silent) statusMessageEl.textContent = "Save cancelled.";
       }
     }
   } catch (e) {
     console.error(e);
-    statusMessageEl.textContent = "Error saving file";
+    if (!silent) statusMessageEl.textContent = "Error saving file";
   }
 }
 
@@ -875,6 +947,7 @@ function newFile() {
   writerViewEl.innerHTML = "";
   renderFileList();
   updateStats("");
+  setDirty(false);
   statusMessageEl.textContent = "New file";
   if (!isMarkdownMode) writerViewEl.focus();
   else markdownInputEl.focus();
@@ -884,18 +957,14 @@ function newFile() {
 function handleKeydown(e) {
   const mod = isPrimaryMod(e);
 
-  // Writer mode Enter
   if (!isMarkdownMode && e.key === "Enter" && !e.shiftKey && !mod) {
     if (handleWriterEnter(e)) return;
   }
 
-  // Space in Writer mode: block syntax triggers (list, blockquote)
-  // Fires BEFORE the space is inserted so we can build DOM and preventDefault.
   if (!isMarkdownMode && e.key === " " && !mod && !e.altKey && !e.shiftKey) {
     if (handleSpaceInWriter()) { e.preventDefault(); return; }
   }
 
-  // Tab / Shift+Tab: indent/outdent list items
   if (!isMarkdownMode && e.key === "Tab" && !mod) {
     const sel = window.getSelection();
     if (sel && sel.rangeCount > 0) {
@@ -917,18 +986,11 @@ function handleKeydown(e) {
   if (mod && !e.altKey) {
     const k = e.key.toLowerCase();
     if (k === "z") {
-      if (!isMarkdownMode) {
-        e.preventDefault();
-        document.execCommand(e.shiftKey ? "redo" : "undo");
-      }
-      // markdown mode: browser handles textarea undo natively
+      if (!isMarkdownMode) { e.preventDefault(); document.execCommand(e.shiftKey ? "redo" : "undo"); }
       return;
     }
     if (k === "y") {
-      if (!isMarkdownMode) {
-        e.preventDefault();
-        document.execCommand("redo");
-      }
+      if (!isMarkdownMode) { e.preventDefault(); document.execCommand("redo"); }
       return;
     }
   }
@@ -957,7 +1019,7 @@ function handleKeydown(e) {
   }
 }
 
-// ─── Undo / Redo toolbar actions ──────────────────────────────────────────────
+// ─── Undo / Redo toolbar ──────────────────────────────────────────────────────
 function doUndo() {
   if (!isMarkdownMode) { document.execCommand("undo"); writerViewEl.focus(); }
   else markdownInputEl.focus();
@@ -965,6 +1027,13 @@ function doUndo() {
 function doRedo() {
   if (!isMarkdownMode) { document.execCommand("redo"); writerViewEl.focus(); }
   else markdownInputEl.focus();
+}
+
+// ─── Auto-save dropdown ───────────────────────────────────────────────────────
+function toggleAutoSaveMenu(e) {
+  e.stopPropagation();
+  const menu = document.getElementById("autosave-menu");
+  menu.classList.toggle("open");
 }
 
 // ─── Initialisation ───────────────────────────────────────────────────────────
@@ -979,58 +1048,81 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   try { platform = await invoke("get_platform"); } catch (_) { platform = "linux"; }
 
-  // Input listeners
+  // ── Save selection whenever it changes in writer view ──
+  // This ensures toolbar buttons (which steal focus) still operate
+  // on the correct cursor position.
+  document.addEventListener("selectionchange", () => {
+    if (!isMarkdownMode && document.activeElement === writerViewEl) {
+      saveSelection();
+    }
+  });
+  writerViewEl.addEventListener("blur", saveSelection);
+
+  // ── Input events ──
   writerViewEl.addEventListener("input", (e) => { handleLiveMarkdown(e); debouncedStats(); });
   markdownInputEl.addEventListener("input", debouncedStats);
 
-  // File buttons
+  // ── File buttons ──
   document.getElementById("toggle-mode-btn").addEventListener("click", toggleMode);
   document.getElementById("open-file-btn").addEventListener("click",   openFile);
-  document.getElementById("save-file-btn").addEventListener("click",   saveFile);
+  document.getElementById("save-file-btn").addEventListener("click",   () => saveFile());
   document.getElementById("new-file-btn").addEventListener("click",    newFile);
 
-  // Format toolbar
+  // ── Format toolbar ──
   document.getElementById("bold-btn").addEventListener("click",   () => applyRichFormat("bold",   "**"));
   document.getElementById("italic-btn").addEventListener("click", () => applyRichFormat("italic", "*"));
   document.getElementById("code-btn").addEventListener("click",   () => applyCode());
-
-  // Undo / Redo
-  document.getElementById("undo-btn").addEventListener("click", doUndo);
-  document.getElementById("redo-btn").addEventListener("click", doRedo);
-
-  // Headings H1–H6
+  document.getElementById("undo-btn").addEventListener("click",   doUndo);
+  document.getElementById("redo-btn").addEventListener("click",   doRedo);
   for (let i = 1; i <= 6; i++) {
     document.getElementById(`h${i}-btn`).addEventListener("click", () => applyHeading(i));
   }
-
-  // Lists
   document.getElementById("ul-btn").addEventListener("click",    () => applyUnorderedList());
   document.getElementById("ol-btn").addEventListener("click",    () => applyOrderedList());
   document.getElementById("cb-btn").addEventListener("click",    () => applyCheckboxList());
-
-  // Blocks
   document.getElementById("quote-btn").addEventListener("click", () => applyBlockquote());
   document.getElementById("hr-btn").addEventListener("click",    () => applyHorizontalRule());
-
-  // Insert
   document.getElementById("time-btn").addEventListener("click",  () => insertAtCursor(formatTime(new Date())));
   document.getElementById("date-btn").addEventListener("click",  () => insertAtCursor(formatDate(new Date())));
 
-  // Global keyboard shortcuts
+  // ── Auto-save menu ──
+  const autoSaveBtn = document.getElementById("autosave-btn");
+  if (autoSaveBtn) {
+    autoSaveBtn.addEventListener("click", toggleAutoSaveMenu);
+  }
+  document.querySelectorAll(".autosave-option").forEach(el => {
+    el.addEventListener("click", (e) => {
+      e.stopPropagation();
+      applyAutoSaveSetting(parseInt(el.dataset.minutes));
+      document.getElementById("autosave-menu").classList.remove("open");
+    });
+  });
+  document.addEventListener("click", () => {
+    document.getElementById("autosave-menu")?.classList.remove("open");
+  });
+
+  // ── Global keyboard shortcuts ──
   window.addEventListener("keydown", handleKeydown);
 
-  // File list from localStorage
+  // ── Restore settings ──
+  const settings = loadSettings();
+  const autoSaveMinutes = settings.autoSaveMinutes ?? 0;
+  updateAutoSaveUI(autoSaveMinutes);
+  startAutoSave(autoSaveMinutes);
+
+  // ── File list ──
   renderFileList();
 
-  // Default content
+  // ── Default content ──
   const defaultMd =
     "# Welcome to ArtfulType Pro\n\n" +
     "Start writing your next masterpiece.\n\n" +
     "## Features\n\n" +
     "- **Writer mode** — live Markdown editing\n" +
     "- **Dracula theme** — beautiful dark palette\n" +
-    "- Native file I/O with recent files\n\n" +
-    "### Shortcuts\n\n" +
+    "- Native file I/O with recent files\n" +
+    "- Auto-save support\n\n" +
+    "### Keyboard Shortcuts\n\n" +
     "| Action | Key |\n" +
     "| --- | --- |\n" +
     "| Bold | Ctrl+B |\n" +
@@ -1040,21 +1132,15 @@ window.addEventListener("DOMContentLoaded", async () => {
     "| Blockquote | Ctrl+Q |\n" +
     "| Undo | Ctrl+Z |\n" +
     "| Redo | Ctrl+Y |\n" +
-    "| Insert Time | Ctrl+Alt+T |\n" +
-    "| Insert Date | Ctrl+Alt+D |\n" +
     "| Toggle Mode | Ctrl+M |\n\n" +
     "#### Live triggers in Writer Mode\n\n" +
-    "> Type `- ` at line start → bullet list\n" +
-    "> Type `1. ` → numbered list\n" +
-    "> Type `- [ ] ` → checkbox list\n" +
-    "> Type `> ` → blockquote\n" +
+    "> Type `- ` → bullet list · `1. ` → numbered · `> ` → blockquote\n" +
     "> Type `# ` / `## ` / `### ` → headings\n\n" +
     "##### Task list example\n\n" +
     "- [x] Fix file dialog freeze\n" +
     "- [x] Dracula theme\n" +
     "- [x] Bullet list auto-convert\n" +
     "- [ ] More features\n\n" +
-    "###### Horizontal rule\n\n" +
     "---\n\n";
 
   markdownInputEl.value = defaultMd;
@@ -1065,5 +1151,6 @@ window.addEventListener("DOMContentLoaded", async () => {
   toggleModeBtn.textContent = "Markdown Mode";
   await renderMarkdownToWriter(defaultMd);
   updateStats(defaultMd);
+  setDirty(false);
   writerViewEl.focus();
 });
