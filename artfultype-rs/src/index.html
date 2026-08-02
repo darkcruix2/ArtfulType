@@ -113,23 +113,14 @@
 
           <div class="toolbar-spacer"></div>
 
-          <!-- Auto-save dropdown -->
           <div class="toolbar-group" style="position:relative;">
             <button id="autosave-btn" class="icon-btn autosave-trigger" title="Auto-save settings">
               <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="margin-right:2px"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
               <span id="autosave-label" style="font-size:0.65rem;white-space:nowrap;">Auto-save: Off</span>
               <svg width="8" height="8" viewBox="0 0 10 6" fill="currentColor" style="margin-left:2px"><path d="M0 0l5 6 5-6z"/></svg>
             </button>
-            <div id="autosave-menu" class="autosave-menu">
-              <div class="autosave-menu-title">Auto-save every…</div>
-              <button class="autosave-option" data-minutes="0">Off</button>
-              <button class="autosave-option" data-minutes="1">1 minute</button>
-              <button class="autosave-option" data-minutes="2">2 minutes</button>
-              <button class="autosave-option" data-minutes="5">5 minutes</button>
-              <button class="autosave-option" data-minutes="10">10 minutes</button>
-              <button class="autosave-option" data-minutes="15">15 minutes</button>
-              <button class="autosave-option" data-minutes="30">30 minutes</button>
-            </div>
+            <!-- Menu is rendered as a body-level overlay (see bottom of body)
+                 so it is NOT clipped by the toolbar's backdrop-filter stacking context -->
           </div>
 
           <div class="toolbar-group">
@@ -157,5 +148,20 @@
 
       </main>
     </div>
+
+    <!-- Auto-save dropdown menu — kept at body level so it is NOT inside the
+         toolbar's backdrop-filter stacking context, which would clip/bury it
+         beneath the editor area even with position:fixed on the menu itself. -->
+    <div id="autosave-menu" class="autosave-menu">
+      <div class="autosave-menu-title">Auto-save every…</div>
+      <button class="autosave-option" data-minutes="0">Off</button>
+      <button class="autosave-option" data-minutes="1">1 minute</button>
+      <button class="autosave-option" data-minutes="2">2 minutes</button>
+      <button class="autosave-option" data-minutes="5">5 minutes</button>
+      <button class="autosave-option" data-minutes="10">10 minutes</button>
+      <button class="autosave-option" data-minutes="15">15 minutes</button>
+      <button class="autosave-option" data-minutes="30">30 minutes</button>
+    </div>
+
   </body>
 </html>

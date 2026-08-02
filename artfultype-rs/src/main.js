@@ -219,7 +219,7 @@ async function fixImageSrcs(el) {
 
 // ─── HTML → Markdown Serializer ──────────────────────────────────────────────
 function nodeToMd(node) {
-  if (node.nodeType === Node.TEXT_NODE) return node.textContent;
+  if (node.nodeType === Node.TEXT_NODE) return node.textContent.replace(/\u200B/g, "");
   if (node.nodeType !== Node.ELEMENT_NODE) return "";
   const tag = node.tagName.toLowerCase();
   const children = () => Array.from(node.childNodes).map(nodeToMd).join("");
@@ -291,7 +291,8 @@ function liToMd(li) {
   let text = "";
   for (const child of li.childNodes) {
     if (child.nodeType === Node.TEXT_NODE) {
-      text += child.textContent;
+      // Strip the ZWS (U+200B) we insert as a cursor anchor after checkboxes
+      text += child.textContent.replace(/\u200B/g, "");
     } else if (child.nodeType === Node.ELEMENT_NODE) {
       const t = child.tagName.toLowerCase();
       if (t === "input") continue;
@@ -380,6 +381,27 @@ function placeCaret(node, offset) {
   _savedRange = r.cloneRange();
 }
 
+/**
+ * Place caret right after the checkbox in a task-list <li>.
+ * Uses a ZWS (U+200B) text node as a concrete text anchor so GTK WebKit
+ * renders the cursor visually AFTER the checkbox box, not before it.
+ * Without a non-zero-length text node the browser has no anchor point and
+ * defaults to showing the cursor at the start of the line.
+ */
+function placeCaretInTaskItem(li) {
+  let tn = null;
+  // Find the text node that directly follows the checkbox
+  for (const child of li.childNodes) {
+    if (child.nodeType === Node.TEXT_NODE) { tn = child; break; }
+  }
+  if (!tn) return;
+  // Ensure the text node starts with ZWS so offset 1 is a valid anchor
+  if (!tn.textContent.startsWith("\u200B")) {
+    tn.textContent = "\u200B" + tn.textContent;
+  }
+  placeCaret(tn, 1); // position 1 = right after the ZWS = visually after checkbox
+}
+
 // ─── Direct DOM List / Block Builders ────────────────────────────────────────
 function buildUL(replaceTarget, remainingText) {
   const ul = document.createElement("ul");
@@ -411,10 +433,10 @@ function buildTaskItem(replaceTarget, checked, remainingText) {
   li.className = "task-list-item";
   const cb = document.createElement("input");
   cb.type = "checkbox"; cb.checked = !!checked; cb.tabIndex = -1;
-  const tn = document.createTextNode(remainingText || "");
+  const tn = document.createTextNode(remainingText || "\u200B");
   li.appendChild(cb); li.appendChild(tn); ul.appendChild(li);
   replaceTarget.parentNode.replaceChild(ul, replaceTarget);
-  placeCaretAfter(cb); // cursor AFTER the checkbox, not before it
+  placeCaretInTaskItem(li); // cursor after the checkbox, not before
 }
 function buildBlockquote(replaceTarget, remainingText) {
   const bq = document.createElement("blockquote");
@@ -430,10 +452,10 @@ function newTaskListItem(afterLi, parentUl) {
   li.className = "task-list-item";
   const cb = document.createElement("input");
   cb.type = "checkbox"; cb.tabIndex = -1;
-  const tn = document.createTextNode("");
+  const tn = document.createTextNode("\u200B"); // ZWS anchor for cursor
   li.appendChild(cb); li.appendChild(tn);
   parentUl.insertBefore(li, afterLi.nextSibling);
-  placeCaretAfter(cb); // cursor after the checkbox
+  placeCaretInTaskItem(li); // cursor after the checkbox
 }
 
 // Exits (or unindents) a task list when Enter is pressed on an empty item.
@@ -478,7 +500,7 @@ function indentTaskListItem(li) {
   nestedUl.appendChild(li);
   // Restore caret after the checkbox inside li
   const cb = li.querySelector("input[type=checkbox]");
-  if (cb) placeCaretAfter(cb);
+  if (cb) placeCaretInTaskItem(li);
 }
 
 function outdentTaskListItem(li) {
@@ -492,7 +514,7 @@ function outdentTaskListItem(li) {
   // Clean up empty nested ul
   if (parentUl.children.length === 0) parentLi.removeChild(parentUl);
   const cb = li.querySelector("input[type=checkbox]");
-  if (cb) placeCaretAfter(cb);
+  if (cb) placeCaretInTaskItem(li);
 }
 
 // ─── Space Key: Block Syntax Trigger ─────────────────────────────────────────
@@ -633,8 +655,8 @@ function applyCheckboxList() {
     }
 
     const cb = ul.querySelector("input[type=checkbox]");
-    placeCaretAfter(cb); // cursor AFTER the checkbox, not before it
-    writerViewEl.focus();
+    writerViewEl.focus();       // focus FIRST so WebKit doesn't reset cursor
+    placeCaretInTaskItem(ul.querySelector("li")); // then position cursor
   } else {
     const ta = markdownInputEl;
     const s = ta.selectionStart;
@@ -652,7 +674,7 @@ function makeTaskListUL() {
   li.className = "task-list-item";
   const cb = document.createElement("input");
   cb.type = "checkbox"; cb.tabIndex = -1; // don't steal tab navigation
-  const tn = document.createTextNode("");
+  const tn = document.createTextNode("\u200B"); // ZWS anchor for cursor positioning
   li.appendChild(cb); li.appendChild(tn); ul.appendChild(li);
   return ul;
 }
