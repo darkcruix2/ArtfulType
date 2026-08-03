@@ -864,9 +864,24 @@ async function setupCloseHandler() {
     const appWindow = window.__TAURI__?.window?.getCurrentWindow();
     if (!appWindow) return;
 
-    await appWindow.onCloseRequested(async (event) => {
-      if (isClosingApp) return;
+    // Helper: reliably close the window on Linux/GTK.
+    // destroy() is the correct call; window.close() acts as a belt-and-
+    // suspenders fallback that always works in a Tauri webview context.
+    async function doClose() {
+      try {
+        await appWindow.destroy();
+      } catch (_) {
+        // destroy() failed (e.g. window already gone) — fall back to the
+        // browser-level close which Tauri always handles.
+        window.close();
+      }
+    }
 
+    await appWindow.onCloseRequested(async (event) => {
+      // Always intercept so we can run our logic; we will call doClose()
+      // ourselves when ready.  IMPORTANT: do NOT guard with isClosingApp here
+      // — doing so can permanently lock the window if a previous attempt set
+      // the flag but destroy() never completed (common on Linux/GTK).
       event.preventDefault();
 
       if (isDirty) {
@@ -875,8 +890,7 @@ async function setupCloseHandler() {
           if (currentFilePath) {
             await invoke("save_file", { path: currentFilePath, content });
             setDirty(false);
-            isClosingApp = true;
-            await appWindow.destroy();
+            await doClose();
           } else {
             statusMessageEl.textContent = "Saving before exit…";
             const savedPath = await invoke("save_file_dialog", { content });
@@ -886,20 +900,18 @@ async function setupCloseHandler() {
               const filename  = savedPath.split(/[/\\]/).pop();
               addToRecentFiles(savedPath, filename);
               setDirty(false);
-              isClosingApp = true;
-              await appWindow.destroy();
+              await doClose();
             } else {
+              // User cancelled the save dialog → keep the window open.
               statusMessageEl.textContent = "Save cancelled – keeping window open.";
             }
           }
         } catch (err) {
           console.error("Error saving on close:", err);
-          isClosingApp = true;
-          await appWindow.destroy();
+          await doClose();
         }
       } else {
-        isClosingApp = true;
-        await appWindow.destroy();
+        await doClose();
       }
     });
   } catch (err) {
