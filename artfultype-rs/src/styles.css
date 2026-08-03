@@ -1,8 +1,11 @@
-/* ── Dracula Palette ───────────────────────────────────────────────────────── */
-:root {
+/* ── Dracula Palette (Default) ─────────────────────────────────────────────────── */
+:root,
+[data-theme="dracula"] {
   --bg:           #282a36;
   --bg-sidebar:   #21222c;
+  --bg-header:    rgba(33, 34, 44, 0.95);
   --bg-elevated:  #313442;
+  --bg-editor:    #282a36;
   --selection:    #44475a;
   --fg:           #f8f8f2;
   --comment:      #6272a4;
@@ -24,6 +27,105 @@
 
   --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --font-mono: 'JetBrains Mono', 'Courier New', Courier, monospace;
+
+  --active-file-bg: rgba(189, 147, 249, 0.18);
+  --active-file-fg: var(--purple);
+}
+
+/* ── Classic Mac Theme ──────────────────────────────────────────────────────── */
+[data-theme="classic-mac"] {
+  --bg:           #dddddd;
+  --bg-sidebar:   #d4d4d4;
+  --bg-header:    #e0e0e0;
+  --bg-elevated:  #ffffff;
+  --bg-editor:    #ffffff;
+  --selection:    #0000aa;
+  --fg:           #000000;
+  --comment:      #444444;
+  --cyan:         #006699;
+  --green:        #006600;
+  --orange:       #bb5500;
+  --pink:         #aa0066;
+  --purple:       #0000cc;
+  --red:          #cc0000;
+  --yellow:       #777700;
+  --border:       #000000;
+  --glass-bg:     #ececec;
+
+  --accent:       #0000cc;
+  --accent-hover: #000088;
+  --text-main:    #000000;
+  --text-muted:   #444444;
+
+  --font-sans: 'Geneva', 'Chicago', 'Charcoal', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: 'Monaco', 'Courier New', Courier, monospace;
+
+  --active-file-bg: #0000cc;
+  --active-file-fg: #ffffff;
+}
+
+/* ── Windows 98 Theme ───────────────────────────────────────────────────────── */
+[data-theme="win98"] {
+  --bg:           #008080;
+  --bg-sidebar:   #c0c0c0;
+  --bg-header:    linear-gradient(90deg, #000080, #1084d0);
+  --bg-elevated:  #ffffff;
+  --bg-editor:    #ffffff;
+  --selection:    #000080;
+  --fg:           #000000;
+  --comment:      #333333;
+  --cyan:         #008080;
+  --green:        #008000;
+  --orange:       #804000;
+  --pink:         #800080;
+  --purple:       #000080;
+  --red:          #800000;
+  --yellow:       #808000;
+  --border:       #808080;
+  --glass-bg:     #c0c0c0;
+
+  --accent:       #000080;
+  --accent-hover: #1084d0;
+  --text-main:    #000000;
+  --text-muted:   #404040;
+
+  --font-sans: 'Tahoma', 'MS Sans Serif', 'Microsoft Sans Serif', Arial, sans-serif;
+  --font-mono: 'Courier New', 'Fixedsys', monospace;
+
+  --active-file-bg: #000080;
+  --active-file-fg: #ffffff;
+}
+
+/* ── IRIX CDE Theme ─────────────────────────────────────────────────────────── */
+[data-theme="irix-cde"] {
+  --bg:           #242636;
+  --bg-sidebar:   #34374a;
+  --bg-header:    #3b3e58;
+  --bg-elevated:  #464a62;
+  --bg-editor:    #1c1d28;
+  --selection:    #d48800;
+  --fg:           #e6e6f0;
+  --comment:      #8a90ac;
+  --cyan:         #56b6c2;
+  --green:        #7bc27b;
+  --orange:       #f09838;
+  --pink:         #e06c9f;
+  --purple:       #ae81ff;
+  --red:          #e05252;
+  --yellow:       #e5c07b;
+  --border:       #585e7d;
+  --glass-bg:     #34374a;
+
+  --accent:       #d48800;
+  --accent-hover: #f09838;
+  --text-main:    #e6e6f0;
+  --text-muted:   #8a90ac;
+
+  --font-sans: 'Liberation Sans', 'DejaVu Sans', 'Helvetica', sans-serif;
+  --font-mono: 'Liberation Mono', 'DejaVu Sans Mono', 'Courier New', monospace;
+
+  --active-file-bg: #d48800;
+  --active-file-fg: #111118;
 }
 
 /* ── Reset ─────────────────────────────────────────────────────────────────── */
@@ -691,4 +793,481 @@ body {
 #writer-view del.just-formatted {
   animation: formatFlash 0.5s ease-out forwards;
   border-radius: 3px;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   THEME STYLING OVERRIDES & ESSENTIAL DESIGN ELEMENTS
+   ───────────────────────────────────────────────────────────────────────────── */
+
+/* ── Classic Mac Specific Visuals ────────────────────────────────────────────── */
+[data-theme="classic-mac"] body {
+  background-image: repeating-linear-gradient(0deg, #dddddd, #dddddd 1px, #e6e6e6 1px, #e6e6e6 2px);
+}
+
+[data-theme="classic-mac"] #app-header {
+  background: var(--bg-header);
+  border-bottom: 1px solid #000000;
+  box-shadow: 0 1px 0 #ffffff;
+}
+
+[data-theme="classic-mac"] .app-title {
+  color: #000000;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+[data-theme="classic-mac"] .app-version {
+  border: 1px solid #000000;
+  background: #ffffff;
+  color: #000000;
+  border-radius: 0;
+}
+
+[data-theme="classic-mac"] #sidebar {
+  background: var(--bg-sidebar);
+  border-right: 1px solid #000000;
+}
+
+[data-theme="classic-mac"] .sidebar-header {
+  border-bottom: 1px solid #000000;
+}
+
+[data-theme="classic-mac"] .file-item {
+  border-radius: 0;
+  border: 1px solid transparent;
+  color: #000000;
+}
+
+[data-theme="classic-mac"] .file-item:hover {
+  background: #0000cc;
+  color: #ffffff;
+}
+
+[data-theme="classic-mac"] .file-item.active {
+  background: #0000cc;
+  color: #ffffff;
+  font-weight: 600;
+  border: 1px solid #000000;
+}
+
+[data-theme="classic-mac"] .file-item.active::before {
+  color: #ffffff;
+}
+
+[data-theme="classic-mac"] .icon-btn,
+[data-theme="classic-mac"] .btn {
+  background: #ececec;
+  color: #000000;
+  border: 1px solid #000000;
+  border-radius: 3px;
+  box-shadow: inset 1px 1px 0 #ffffff, 1px 1px 0 #000000;
+}
+
+[data-theme="classic-mac"] .icon-btn:hover,
+[data-theme="classic-mac"] .btn:hover {
+  background: #0000cc;
+  color: #ffffff;
+}
+
+[data-theme="classic-mac"] .primary-btn {
+  background: #0000cc;
+  color: #ffffff;
+  border: 1px solid #000000;
+  font-weight: bold;
+}
+
+[data-theme="classic-mac"] .primary-btn:hover {
+  background: #000088;
+}
+
+[data-theme="classic-mac"] #editor-area {
+  background: #ffffff;
+  border: 1px solid #000000;
+}
+
+[data-theme="classic-mac"] #writer-view,
+[data-theme="classic-mac"] #markdown-input {
+  background: #ffffff;
+  color: #000000;
+}
+
+[data-theme="classic-mac"] #writer-view h1,
+[data-theme="classic-mac"] #writer-view h2,
+[data-theme="classic-mac"] #writer-view h3 {
+  color: #0000cc;
+  border-bottom-color: #000000;
+}
+
+[data-theme="classic-mac"] #status-bar {
+  background: #e0e0e0;
+  border-top: 1px solid #000000;
+  color: #000000;
+}
+
+[data-theme="classic-mac"] .modal-dialog {
+  background: #ffffff;
+  border: 1px solid #000000;
+  outline: 3px double #000000;
+  border-radius: 0;
+  box-shadow: 4px 4px 0 #000000;
+  color: #000000;
+}
+
+[data-theme="classic-mac"] .modal-content h2 {
+  color: #0000cc;
+}
+
+[data-theme="classic-mac"] .dropdown-menu {
+  background: #ffffff;
+  border: 1px solid #000000;
+  border-radius: 0;
+  box-shadow: 3px 3px 0 #000000;
+}
+
+[data-theme="classic-mac"] .menu-item {
+  color: #000000;
+}
+
+[data-theme="classic-mac"] .menu-item:hover {
+  background: #0000cc;
+  color: #ffffff;
+}
+
+/* ── Windows 98 Specific Visuals ────────────────────────────────────────────── */
+[data-theme="win98"] body {
+  background: #008080;
+}
+
+[data-theme="win98"] #app-header {
+  background: linear-gradient(90deg, #000080 0%, #1084d0 100%);
+  border-bottom: 2px solid #ffffff;
+  color: #ffffff;
+}
+
+[data-theme="win98"] .app-title {
+  color: #ffffff;
+  font-weight: 700;
+  font-family: 'Tahoma', 'MS Sans Serif', sans-serif;
+  letter-spacing: 0.03em;
+}
+
+[data-theme="win98"] .app-version {
+  background: #000080;
+  color: #ffffff;
+  border: 1px solid #ffffff;
+  border-radius: 0;
+}
+
+[data-theme="win98"] #sidebar {
+  background: #c0c0c0;
+  border-right: 2px solid;
+  border-color: #ffffff #808080 #808080 #ffffff;
+}
+
+[data-theme="win98"] .sidebar-header {
+  border-bottom: 2px solid #808080;
+}
+
+[data-theme="win98"] .sidebar-header h2 {
+  color: #000000;
+  font-weight: bold;
+}
+
+[data-theme="win98"] #file-list {
+  background: #ffffff;
+  border: 2px solid;
+  border-color: #808080 #ffffff #ffffff #808080;
+  box-shadow: inset 1px 1px 0 #000000;
+  margin: 0.3rem;
+}
+
+[data-theme="win98"] .file-item {
+  border-radius: 0;
+  color: #000000;
+}
+
+[data-theme="win98"] .file-item:hover {
+  background: #000080;
+  color: #ffffff;
+}
+
+[data-theme="win98"] .file-item.active {
+  background: #000080;
+  color: #ffffff;
+  font-weight: bold;
+}
+
+[data-theme="win98"] .file-item.active::before {
+  color: #ffffff;
+}
+
+[data-theme="win98"] #toolbar {
+  background: #c0c0c0;
+  border-bottom: 2px solid;
+  border-color: #ffffff #808080 #808080 #ffffff;
+}
+
+[data-theme="win98"] .toolbar-sep {
+  background: #808080;
+  border-right: 1px solid #ffffff;
+}
+
+[data-theme="win98"] .icon-btn,
+[data-theme="win98"] .btn {
+  background: #c0c0c0;
+  color: #000000;
+  border-radius: 0;
+  border: 2px solid;
+  border-color: #ffffff #404040 #404040 #ffffff;
+  box-shadow: inset -1px -1px #808080, inset 1px 1px #dfdfdf;
+  font-family: 'Tahoma', 'MS Sans Serif', sans-serif;
+}
+
+[data-theme="win98"] .icon-btn:active,
+[data-theme="win98"] .btn:active,
+[data-theme="win98"] .fmt-btn.active {
+  background: #c0c0c0;
+  border-color: #404040 #ffffff #ffffff #404040;
+  box-shadow: inset 1px 1px #808080;
+  color: #000080;
+}
+
+[data-theme="win98"] .primary-btn {
+  background: #c0c0c0;
+  color: #000000;
+  font-weight: bold;
+  border-color: #ffffff #404040 #404040 #ffffff;
+}
+
+[data-theme="win98"] #editor-area {
+  background: #008080;
+  padding: 4px;
+}
+
+[data-theme="win98"] #writer-view,
+[data-theme="win98"] #markdown-input {
+  background: #ffffff;
+  color: #000000;
+  border: 2px solid;
+  border-color: #404040 #ffffff #ffffff #404040;
+  box-shadow: inset 1px 1px 0 #808080;
+}
+
+[data-theme="win98"] #writer-view h1,
+[data-theme="win98"] #writer-view h2,
+[data-theme="win98"] #writer-view h3 {
+  color: #000080;
+  border-bottom-color: #000080;
+}
+
+[data-theme="win98"] #status-bar {
+  background: #c0c0c0;
+  border-top: 2px solid;
+  border-color: #ffffff #808080 #808080 #ffffff;
+  color: #000000;
+}
+
+[data-theme="win98"] #status-message,
+[data-theme="win98"] #mode-indicator,
+[data-theme="win98"] #word-count,
+[data-theme="win98"] #char-count {
+  border: 1px solid;
+  border-color: #808080 #ffffff #ffffff #808080;
+  padding: 1px 6px;
+  background: #c0c0c0;
+  color: #000000;
+}
+
+[data-theme="win98"] .modal-dialog {
+  background: #c0c0c0;
+  border: 2px solid;
+  border-color: #ffffff #404040 #404040 #ffffff;
+  box-shadow: 3px 3px 0 #000000;
+  border-radius: 0;
+  color: #000000;
+}
+
+[data-theme="win98"] .modal-content h2 {
+  background: linear-gradient(90deg, #000080, #1084d0);
+  color: #ffffff;
+  padding: 4px 8px;
+  margin: -1.5rem -1.5rem 0.5rem -1.5rem;
+  font-size: 0.95rem;
+  font-family: 'Tahoma', sans-serif;
+}
+
+[data-theme="win98"] .dropdown-menu {
+  background: #c0c0c0;
+  border: 2px solid;
+  border-color: #ffffff #404040 #404040 #ffffff;
+  border-radius: 0;
+  box-shadow: 2px 2px 0 #000000;
+}
+
+[data-theme="win98"] .menu-item {
+  color: #000000;
+  border-radius: 0;
+}
+
+[data-theme="win98"] .menu-item:hover {
+  background: #000080;
+  color: #ffffff;
+}
+
+/* ── IRIX CDE Specific Visuals ──────────────────────────────────────────────── */
+[data-theme="irix-cde"] body {
+  background: #242636;
+}
+
+[data-theme="irix-cde"] #app-header {
+  background: #3b3e58;
+  border-bottom: 2px solid;
+  border-color: #5c6282 #1b1c28 #1b1c28 #5c6282;
+}
+
+[data-theme="irix-cde"] .app-title {
+  color: #f09838;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+
+[data-theme="irix-cde"] .app-version {
+  background: #1b1c28;
+  color: #f09838;
+  border: 1px solid #5c6282;
+  border-radius: 0;
+}
+
+[data-theme="irix-cde"] #sidebar {
+  background: #34374a;
+  border-right: 2px solid;
+  border-color: #5c6282 #1b1c28 #1b1c28 #5c6282;
+}
+
+[data-theme="irix-cde"] .sidebar-header {
+  border-bottom: 2px solid #1b1c28;
+}
+
+[data-theme="irix-cde"] .sidebar-header h2 {
+  color: #f09838;
+}
+
+[data-theme="irix-cde"] .file-item {
+  border-radius: 0;
+  color: #e6e6f0;
+}
+
+[data-theme="irix-cde"] .file-item:hover {
+  background: #464a62;
+  color: #f09838;
+}
+
+[data-theme="irix-cde"] .file-item.active {
+  background: #d48800;
+  color: #111118;
+  font-weight: bold;
+}
+
+[data-theme="irix-cde"] .file-item.active::before {
+  color: #111118;
+}
+
+[data-theme="irix-cde"] #toolbar {
+  background: #34374a;
+  border-bottom: 2px solid;
+  border-color: #5c6282 #1b1c28 #1b1c28 #5c6282;
+}
+
+[data-theme="irix-cde"] .icon-btn,
+[data-theme="irix-cde"] .btn {
+  background: #464a62;
+  color: #e6e6f0;
+  border-radius: 0;
+  border: 2px solid;
+  border-color: #687094 #202230 #202230 #687094;
+}
+
+[data-theme="irix-cde"] .icon-btn:hover,
+[data-theme="irix-cde"] .btn:hover {
+  background: #565b78;
+  color: #ffffff;
+}
+
+[data-theme="irix-cde"] .fmt-btn.active {
+  background: #d48800;
+  color: #111118;
+  border-color: #202230 #687094 #687094 #202230;
+}
+
+[data-theme="irix-cde"] .primary-btn {
+  background: #d48800;
+  color: #111118;
+  font-weight: bold;
+  border-color: #f0a020 #8a5800 #8a5800 #f0a020;
+}
+
+[data-theme="irix-cde"] .primary-btn:hover {
+  background: #f09838;
+}
+
+[data-theme="irix-cde"] #editor-area {
+  background: #1c1d28;
+  border: 2px solid;
+  border-color: #1b1c28 #5c6282 #5c6282 #1b1c28;
+}
+
+[data-theme="irix-cde"] #writer-view,
+[data-theme="irix-cde"] #markdown-input {
+  background: #1c1d28;
+  color: #e6e6f0;
+  caret-color: #f09838;
+}
+
+[data-theme="irix-cde"] #writer-view h1,
+[data-theme="irix-cde"] #writer-view h2,
+[data-theme="irix-cde"] #writer-view h3 {
+  color: #f09838;
+  border-bottom-color: #d48800;
+}
+
+[data-theme="irix-cde"] #status-bar {
+  background: #34374a;
+  border-top: 2px solid;
+  border-color: #5c6282 #1b1c28 #1b1c28 #5c6282;
+  color: #8a90ac;
+}
+
+[data-theme="irix-cde"] #mode-indicator {
+  color: #f09838;
+}
+
+[data-theme="irix-cde"] .modal-dialog {
+  background: #34374a;
+  border: 2px solid;
+  border-color: #687094 #202230 #202230 #687094;
+  border-radius: 0;
+  color: #e6e6f0;
+  box-shadow: 4px 4px 0 #12131c;
+}
+
+[data-theme="irix-cde"] .modal-content h2 {
+  color: #f09838;
+}
+
+[data-theme="irix-cde"] .dropdown-menu {
+  background: #34374a;
+  border: 2px solid;
+  border-color: #687094 #202230 #202230 #687094;
+  border-radius: 0;
+  box-shadow: 3px 3px 0 #12131c;
+}
+
+[data-theme="irix-cde"] .menu-item {
+  color: #e6e6f0;
+  border-radius: 0;
+}
+
+[data-theme="irix-cde"] .menu-item:hover {
+  background: #d48800;
+  color: #111118;
 }

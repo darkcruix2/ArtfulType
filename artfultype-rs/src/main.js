@@ -83,6 +83,23 @@ function updateAutoSaveUI(intervalMinutes) {
   }
 }
 
+// ─── Theme Management ─────────────────────────────────────────────────────────
+const VALID_THEMES = new Set(["dracula", "classic-mac", "win98", "irix-cde"]);
+
+function applyThemeSetting(themeName) {
+  const validTheme = VALID_THEMES.has(themeName) ? themeName : "dracula";
+  saveSettings({ theme: validTheme });
+  document.documentElement.setAttribute("data-theme", validTheme);
+  updateThemeUI(validTheme);
+}
+
+function updateThemeUI(themeName) {
+  const select = document.getElementById("theme-select");
+  if (select) {
+    select.value = themeName;
+  }
+}
+
 // ─── Stats ────────────────────────────────────────────────────────────────────
 function updateStats(text) {
   const trimmed = text.trim();
@@ -1208,6 +1225,14 @@ window.addEventListener("DOMContentLoaded", async () => {
     });
   }
 
+  // ── Theme Preference ──
+  const themeSelect = document.getElementById("theme-select");
+  if (themeSelect) {
+    themeSelect.addEventListener("change", (e) => {
+      applyThemeSetting(e.target.value);
+    });
+  }
+
   // ── Global keyboard shortcuts ──
   window.addEventListener("keydown", handleKeydown);
 
@@ -1216,6 +1241,9 @@ window.addEventListener("DOMContentLoaded", async () => {
   const autoSaveMinutes = settings.autoSaveMinutes ?? 0;
   updateAutoSaveUI(autoSaveMinutes);
   startAutoSave(autoSaveMinutes);
+
+  const themeName = settings.theme || "dracula";
+  applyThemeSetting(themeName);
 
   // ── File list ──
   renderFileList();
