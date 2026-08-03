@@ -6,7 +6,7 @@
   --bg-header:    rgba(33, 34, 44, 0.95);
   --bg-elevated:  #313442;
   --bg-editor:    #282a36;
-  --selection:    #44475a;
+  --selection:    #6c56a8;
   --fg:           #f8f8f2;
   --comment:      #6272a4;
   --cyan:         #8be9fd;
@@ -39,28 +39,28 @@
   --bg-header:    #e0e0e0;
   --bg-elevated:  #ffffff;
   --bg-editor:    #ffffff;
-  --selection:    #0000aa;
+  --selection:    #000000;
   --fg:           #000000;
   --comment:      #444444;
-  --cyan:         #006699;
-  --green:        #006600;
-  --orange:       #bb5500;
-  --pink:         #aa0066;
-  --purple:       #0000cc;
+  --cyan:         #000000;
+  --green:        #000000;
+  --orange:       #000000;
+  --pink:         #000000;
+  --purple:       #000000;
   --red:          #cc0000;
-  --yellow:       #777700;
+  --yellow:       #000000;
   --border:       #000000;
   --glass-bg:     #ececec;
 
-  --accent:       #0000cc;
-  --accent-hover: #000088;
+  --accent:       #000000;
+  --accent-hover: #333333;
   --text-main:    #000000;
   --text-muted:   #444444;
 
   --font-sans: 'Geneva', 'Chicago', 'Charcoal', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --font-mono: 'Monaco', 'Courier New', Courier, monospace;
 
-  --active-file-bg: #0000cc;
+  --active-file-bg: #000000;
   --active-file-fg: #ffffff;
 }
 
@@ -417,10 +417,10 @@ body {
 /* Headings — Dracula-colored per level */
 #writer-view h1 {
   font-size: 2.1rem; font-weight: 700;
-  color: var(--yellow);
+  color: #9b6bd6;
   margin: 0 0 0.9rem;
   padding-bottom: 0.4rem;
-  border-bottom: 1px solid rgba(241, 250, 140, 0.25);
+  border-bottom: 1px solid rgba(155, 107, 214, 0.3);
 }
 #writer-view h1:not(:first-child) { margin-top: 2rem; }
 
@@ -799,7 +799,45 @@ body {
    THEME STYLING OVERRIDES & ESSENTIAL DESIGN ELEMENTS
    ───────────────────────────────────────────────────────────────────────────── */
 
-/* ── Classic Mac Specific Visuals ────────────────────────────────────────────── */
+/* ── Selection Styling ─────────────────────────────────────────────────────── */
+::selection {
+  background: var(--selection);
+  color: #ffffff;
+}
+::-moz-selection {
+  background: var(--selection);
+  color: #ffffff;
+}
+
+[data-theme="dracula"] ::selection,
+:root ::selection {
+  background: #6c56a8;
+  color: #ffffff;
+}
+
+/* ── Dracula Theme Overrides ───────────────────────────────────────────────── */
+[data-theme="dracula"] .pref-select,
+[data-theme="dracula"] .pref-select option {
+  background: #21222c;
+  color: #f8f8f2;
+}
+
+[data-theme="dracula"] .dropdown-menu {
+  background: #21222c;
+  border: 1px solid rgba(98, 114, 164, 0.5);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+}
+
+[data-theme="dracula"] .menu-item {
+  color: #f8f8f2;
+}
+
+[data-theme="dracula"] .menu-item:hover {
+  background: #6c56a8;
+  color: #ffffff;
+}
+
+/* ── Classic Mac Specific Visuals (All Accents Black) ───────────────────────── */
 [data-theme="classic-mac"] body {
   background-image: repeating-linear-gradient(0deg, #dddddd, #dddddd 1px, #e6e6e6 1px, #e6e6e6 2px);
 }
@@ -839,12 +877,12 @@ body {
 }
 
 [data-theme="classic-mac"] .file-item:hover {
-  background: #0000cc;
+  background: #000000;
   color: #ffffff;
 }
 
 [data-theme="classic-mac"] .file-item.active {
-  background: #0000cc;
+  background: #000000;
   color: #ffffff;
   font-weight: 600;
   border: 1px solid #000000;
@@ -865,19 +903,19 @@ body {
 
 [data-theme="classic-mac"] .icon-btn:hover,
 [data-theme="classic-mac"] .btn:hover {
-  background: #0000cc;
+  background: #000000;
   color: #ffffff;
 }
 
 [data-theme="classic-mac"] .primary-btn {
-  background: #0000cc;
+  background: #000000;
   color: #ffffff;
   border: 1px solid #000000;
   font-weight: bold;
 }
 
 [data-theme="classic-mac"] .primary-btn:hover {
-  background: #000088;
+  background: #333333;
 }
 
 [data-theme="classic-mac"] #editor-area {
@@ -893,9 +931,17 @@ body {
 
 [data-theme="classic-mac"] #writer-view h1,
 [data-theme="classic-mac"] #writer-view h2,
-[data-theme="classic-mac"] #writer-view h3 {
-  color: #0000cc;
+[data-theme="classic-mac"] #writer-view h3,
+[data-theme="classic-mac"] #writer-view h4,
+[data-theme="classic-mac"] #writer-view h5,
+[data-theme="classic-mac"] #writer-view h6 {
+  color: #000000;
   border-bottom-color: #000000;
+}
+
+[data-theme="classic-mac"] #writer-view a {
+  color: #000000;
+  border-bottom: 1px solid #000000;
 }
 
 [data-theme="classic-mac"] #status-bar {
@@ -914,7 +960,7 @@ body {
 }
 
 [data-theme="classic-mac"] .modal-content h2 {
-  color: #0000cc;
+  color: #000000;
 }
 
 [data-theme="classic-mac"] .dropdown-menu {
@@ -929,8 +975,15 @@ body {
 }
 
 [data-theme="classic-mac"] .menu-item:hover {
-  background: #0000cc;
+  background: #000000;
   color: #ffffff;
+}
+
+[data-theme="classic-mac"] .pref-select,
+[data-theme="classic-mac"] .pref-select option {
+  background: #ffffff;
+  color: #000000;
+  border: 1px solid #000000;
 }
 
 /* ── Windows 98 Specific Visuals ────────────────────────────────────────────── */
@@ -1114,6 +1167,14 @@ body {
   color: #ffffff;
 }
 
+[data-theme="win98"] .pref-select,
+[data-theme="win98"] .pref-select option {
+  background: #ffffff;
+  color: #000000;
+  border: 2px solid;
+  border-color: #404040 #ffffff #ffffff #404040;
+}
+
 /* ── IRIX CDE Specific Visuals ──────────────────────────────────────────────── */
 [data-theme="irix-cde"] body {
   background: #242636;
@@ -1270,4 +1331,12 @@ body {
 [data-theme="irix-cde"] .menu-item:hover {
   background: #d48800;
   color: #111118;
+}
+
+[data-theme="irix-cde"] .pref-select,
+[data-theme="irix-cde"] .pref-select option {
+  background: #1c1d28;
+  color: #e6e6f0;
+  border: 2px solid;
+  border-color: #1b1c28 #5c6282 #5c6282 #1b1c28;
 }
