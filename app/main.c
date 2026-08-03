@@ -290,7 +290,7 @@ static void MakeMenu(void) {
   styleMenu = NewMenu(mStyle, "\pStyle");
   AppendMenu(styleMenu,
              "\pBold/B;Italic/I;In-line Code/K;Code Block;Strikethrough;Highlight/H;(-;"
-             "Blockquote;Checkbox;Bullet Points;Numbered List;(-;"
+             "Blockquote;Bullet Points;Numbered List;(-;"
              "Heading 1/1;Heading 2/2;Heading 3/3;(-;Link/L;(-;None");
   InsertMenu(styleMenu, 0);
 
@@ -1118,9 +1118,6 @@ static void DoMenuCommand(long menuResult)
       case iBlockquote:
         ApplyLinePrefixHidden("\t");
         break;
-      case iCheckbox:
-        ApplyLinePrefixHidden("[ ] ");
-        break;
       case iBulletPoints:
         ApplyLinePrefixHidden("\245 ");
         break;
@@ -1167,9 +1164,6 @@ static void DoMenuCommand(long menuResult)
         break;
       case iBlockquote:
         ApplyLinePrefix("> ");
-        break;
-      case iCheckbox:
-        ApplyLinePrefix("- [ ] ");
         break;
       case iBulletPoints:
         ApplyLinePrefix("- ");
@@ -1307,104 +1301,7 @@ static void GetCurrentParagraphRange(short *paraStart, short *paraEnd) {
   *paraEnd = (short)end;
 }
 
-static Boolean HandleCheckboxClick(Point pt) {
-  if (!gHideMarkdown || gActiveTE == NULL || (*gActiveTE)->te == NULL) {
-    return false;
-  }
 
-  TEHandle te = (*gActiveTE)->te;
-  TEStyleHandle teStyles = TEGetStyleHandle(te);
-  if (teStyles == NULL)
-    return false;
-
-  HLock((Handle)teStyles);
-  short nRuns = (**teStyles).nRuns;
-  STHandle styleTab = (**teStyles).styleTab;
-  if (styleTab == NULL) {
-    HUnlock((Handle)teStyles);
-    return false;
-  }
-  HLock((Handle)styleTab);
-
-  short r;
-  for (r = 0; r < nRuns; r++) {
-    short runStart = (**teStyles).runs[r].startChar;
-    short runEnd = (r + 1 < nRuns) ? (**teStyles).runs[r + 1].startChar
-                                   : (short)(**te).teLength;
-    if (runEnd <= runStart)
-      continue;
-
-    short styleIdx = (**teStyles).runs[r].styleIndex;
-    STElement st = (*styleTab)[styleIdx];
-
-    if (st.stColor.red == 255) {
-      LONGINT ptVal = TEGetPoint(runStart, te);
-      short screenV = (short)(ptVal >> 16);
-      short screenH = (short)(ptVal & 0xFFFF);
-
-      TextFont(st.stFont);
-      TextSize(st.stSize);
-      TextFace(st.stFace);
-      FontInfo fi;
-      GetFontInfo(&fi);
-
-      short midY = screenV - (fi.ascent * 3) / 8 - 5;
-      short boxSize = 11;
-
-      Rect hitR;
-      hitR.left = screenH - 2;
-      hitR.right = screenH + boxSize + 6;
-      hitR.top = midY - boxSize / 2 - 3;
-      hitR.bottom = midY + boxSize / 2 + 4;
-
-      if (PtInRect(pt, &hitR)) {
-        HUnlock((Handle)styleTab);
-        HUnlock((Handle)teStyles);
-
-        short newChecked = (st.stColor.green == 1) ? 0 : 1;
-
-        PushUndoSnapshot();
-        gTypingRunActive = false;
-
-        WESetSelect(runStart, runEnd, gActiveTE);
-        WETextStyle ts;
-        ts.tsColor.red = 255;
-        ts.tsColor.green = newChecked;
-        ts.tsColor.blue = 0;
-        WESetStyle(weDoColor, &ts, gActiveTE);
-
-        WESetSelect(runEnd, runEnd, gActiveTE);
-
-        if (gWriterOpsH != NULL) {
-          HLock(gWriterOpsH);
-          StyleOp *ops = (StyleOp *)*gWriterOpsH;
-          short k;
-          long globalOffset = gWindowStart + runStart;
-          for (k = 0; k < gWriterOpCount; k++) {
-            if (ops[k].kind == 'K' && ops[k].start <= globalOffset &&
-                ops[k].end > globalOffset) {
-              ops[k].level = newChecked;
-              break;
-            }
-          }
-          HUnlock(gWriterOpsH);
-        }
-
-        SetDirty(true);
-        SyncWindowToBacking();
-
-        if (gWindow != NULL) {
-          InvalRect(&gWindow->portRect);
-        }
-        return true;
-      }
-    }
-  }
-
-  HUnlock((Handle)styleTab);
-  HUnlock((Handle)teStyles);
-  return false;
-}
 
 static void EventLoop(void) {
   EventRecord event;
@@ -1619,13 +1516,9 @@ static void EventLoop(void) {
                 }
               }
             } else {
-              if (gHideMarkdown && HandleCheckboxClick(event.where)) {
-                /* Handled checkbox click */
-              } else {
-                gTypingRunActive = false;
-                WEClick(event.where, (event.modifiers & shiftKey) != 0,
-                        gActiveTE);
-              }
+              gTypingRunActive = false;
+              WEClick(event.where, (event.modifiers & shiftKey) != 0,
+                      gActiveTE);
             }
           }
         }
@@ -1718,12 +1611,8 @@ static void EventLoop(void) {
               }
             }
           } else {
-            if (gHideMarkdown && HandleCheckboxClick(event.where)) {
-              /* Handled checkbox click */
-            } else {
-              gTypingRunActive = false;
-              WEClick(event.where, (event.modifiers & shiftKey) != 0, gActiveTE);
-            }
+            gTypingRunActive = false;
+            WEClick(event.where, (event.modifiers & shiftKey) != 0, gActiveTE);
           }
         }
 #endif

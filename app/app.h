@@ -86,14 +86,13 @@ void ToggleCodeBlockHidden(void);
 #define iStrike      5
 #define iHighlight   6
 #define iBlockquote  8
-#define iCheckbox    9
-#define iBulletPoints 10
-#define iNumberedList 11
-#define iH1          13
-#define iH2          14
-#define iH3          15
-#define iLink        17
-#define iNone        19
+#define iBulletPoints 9
+#define iNumberedList 10
+#define iH1          12
+#define iH2          13
+#define iH3          14
+#define iLink        16
+#define iNone        18
 
 #define kSaveChangesAlert 130
 #define kSaveBtn          1

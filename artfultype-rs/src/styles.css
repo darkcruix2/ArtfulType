@@ -128,6 +128,38 @@
   --active-file-fg: #111118;
 }
 
+/* ── Calm Theme (SchemeColor) ─────────────────────────────────────────────── */
+[data-theme="calm-rs"] {
+  --bg:           #eae7e2;
+  --bg-sidebar:   #d7e2e8;
+  --bg-header:    rgba(215, 226, 232, 0.95);
+  --bg-elevated:  #ffffff;
+  --bg-editor:    #eae7e2;
+  --selection:    #b9cbd9;
+  --fg:           #2c3e50;
+  --comment:      #5c6f80;
+  --cyan:         #396e8f;
+  --green:        #3b7a77;
+  --orange:       #c76861;
+  --pink:         #b8527a;
+  --purple:       #4c6a81;
+  --red:          #cb4b4b;
+  --yellow:       #b37b38;
+  --border:       rgba(185, 203, 217, 0.6);
+  --glass-bg:     rgba(215, 226, 232, 0.9);
+
+  --accent:       #4c6a81;
+  --accent-hover: #374d5e;
+  --text-main:    #2c3e50;
+  --text-muted:   #5c6f80;
+
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', 'Courier New', Courier, monospace;
+
+  --active-file-bg: #b9cbd9;
+  --active-file-fg: #1e2b37;
+}
+
 /* ── Reset ─────────────────────────────────────────────────────────────────── */
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -552,28 +584,7 @@ body {
   margin-bottom: 0.2rem;
 }
 
-/* Task / checkbox lists */
-#writer-view ul.contains-task-list,
-#writer-view ul li.task-list-item {
-  list-style: none;
-  padding-left: 0;
-}
 
-#writer-view li.task-list-item {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.5rem;
-  padding-left: 0;
-}
-
-#writer-view input[type="checkbox"] {
-  accent-color: var(--green);
-  width: 0.95rem;
-  height: 0.95rem;
-  margin-top: 0.3rem;
-  cursor: pointer;
-  flex-shrink: 0;
-}
 
 /* Bold & italic */
 #writer-view strong { color: var(--orange); font-weight: 700; }
@@ -826,6 +837,14 @@ body {
   color: #111118 !important;
 }
 
+[data-theme="calm-rs"] ::selection,
+[data-theme="calm-rs"] *::selection,
+[data-theme="calm-rs"] ::-moz-selection,
+[data-theme="calm-rs"] *::-moz-selection {
+  background: #b9cbd9 !important;
+  color: #1e2b37 !important;
+}
+
 /* ── Base Select Styling ───────────────────────────────────────────────────── */
 .pref-select {
   appearance: none;
@@ -878,6 +897,34 @@ body {
 [data-theme="dracula"] .menu-item:hover {
   background-color: #6c56a8 !important;
   color: #ffffff !important;
+}
+
+/* ── Calm Theme Overrides ────────────────────────────────────────────────── */
+[data-theme="calm-rs"] .pref-select {
+  background-color: #d7e2e8 !important;
+  color: #2c3e50 !important;
+  border: 1px solid #b9cbd9 !important;
+}
+
+[data-theme="calm-rs"] .pref-select option {
+  background-color: #ffffff !important;
+  color: #2c3e50 !important;
+}
+
+[data-theme="calm-rs"] .dropdown-menu {
+  background-color: #ffffff !important;
+  border: 1px solid #b9cbd9 !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15) !important;
+}
+
+[data-theme="calm-rs"] .menu-item {
+  color: #2c3e50 !important;
+  background-color: transparent !important;
+}
+
+[data-theme="calm-rs"] .menu-item:hover {
+  background-color: #b9cbd9 !important;
+  color: #1e2b37 !important;
 }
 
 /* ── Classic Mac Specific Visuals (All Accents Black) ───────────────────────── */

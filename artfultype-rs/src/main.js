@@ -84,7 +84,7 @@ function updateAutoSaveUI(intervalMinutes) {
 }
 
 // ─── Theme Management ─────────────────────────────────────────────────────────
-const VALID_THEMES = new Set(["dracula", "classic-mac", "win98", "irix-cde"]);
+const VALID_THEMES = new Set(["dracula", "classic-mac", "win98", "irix-cde", "calm-rs"]);
 
 function applyThemeSetting(themeName) {
   const validTheme = VALID_THEMES.has(themeName) ? themeName : "dracula";
@@ -263,11 +263,7 @@ function nodeToMd(node) {
       return `![${node.getAttribute("alt") || ""}](${src})`;
     }
     case "ul": {
-      const items = Array.from(node.children).map((li) => {
-        const cb = li.querySelector("input[type=checkbox]");
-        if (cb) return `- [${cb.checked ? "x" : " "}] ${liToMd(li)}`;
-        return `- ${liToMd(li)}`;
-      }).join("\n");
+      const items = Array.from(node.children).map((li) => `- ${liToMd(li)}`).join("\n");
       return `${items}\n\n`;
     }
     case "ol": {
@@ -394,26 +390,7 @@ function placeCaret(node, offset) {
   _savedRange = r.cloneRange();
 }
 
-/**
- * Place caret right after the checkbox in a task-list <li>.
- * Uses a ZWS (U+200B) text node as a concrete text anchor so GTK WebKit
- * renders the cursor visually AFTER the checkbox box, not before it.
- * Without a non-zero-length text node the browser has no anchor point and
- * defaults to showing the cursor at the start of the line.
- */
-function placeCaretInTaskItem(li) {
-  let tn = null;
-  // Find the text node that directly follows the checkbox
-  for (const child of li.childNodes) {
-    if (child.nodeType === Node.TEXT_NODE) { tn = child; break; }
-  }
-  if (!tn) return;
-  // Ensure the text node starts with ZWS so offset 1 is a valid anchor
-  if (!tn.textContent.startsWith("\u200B")) {
-    tn.textContent = "\u200B" + tn.textContent;
-  }
-  placeCaret(tn, 1); // position 1 = right after the ZWS = visually after checkbox
-}
+
 
 // ─── Direct DOM List / Block Builders ────────────────────────────────────────
 function buildUL(replaceTarget, remainingText) {
@@ -439,18 +416,7 @@ function buildOL(replaceTarget, remainingText) {
   const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r);
   _savedRange = r.cloneRange();
 }
-function buildTaskItem(replaceTarget, checked, remainingText) {
-  const ul = document.createElement("ul");
-  ul.className = "contains-task-list";
-  const li = document.createElement("li");
-  li.className = "task-list-item";
-  const cb = document.createElement("input");
-  cb.type = "checkbox"; cb.checked = !!checked; cb.tabIndex = -1;
-  const tn = document.createTextNode(remainingText || "\u200B");
-  li.appendChild(cb); li.appendChild(tn); ul.appendChild(li);
-  replaceTarget.parentNode.replaceChild(ul, replaceTarget);
-  placeCaretInTaskItem(li); // cursor after the checkbox, not before
-}
+
 function buildBlockquote(replaceTarget, remainingText) {
   const bq = document.createElement("blockquote");
   const tn = document.createTextNode(remainingText);
@@ -459,76 +425,7 @@ function buildBlockquote(replaceTarget, remainingText) {
   placeCaret(tn, 0);
 }
 
-// Creates a new task-list <li> (with checkbox) after afterLi.
-function newTaskListItem(afterLi, parentUl) {
-  const li = document.createElement("li");
-  li.className = "task-list-item";
-  const cb = document.createElement("input");
-  cb.type = "checkbox"; cb.tabIndex = -1;
-  const tn = document.createTextNode("\u200B"); // ZWS anchor for cursor
-  li.appendChild(cb); li.appendChild(tn);
-  parentUl.insertBefore(li, afterLi.nextSibling);
-  placeCaretInTaskItem(li); // cursor after the checkbox
-}
 
-// Exits (or unindents) a task list when Enter is pressed on an empty item.
-function exitTaskList(li, parentUl) {
-  // If nested, try outdenting to parent level first
-  const grandParentLi = parentUl.parentElement;
-  if (grandParentLi && grandParentLi.tagName === "LI") {
-    outdentTaskListItem(li);
-    return;
-  }
-  // Top-level task list → insert a paragraph after the list
-  const p = document.createElement("p");
-  const tn = document.createTextNode("");
-  p.appendChild(tn);
-  parentUl.parentNode.insertBefore(p, parentUl.nextSibling);
-  if (parentUl.children.length === 1) {
-    parentUl.parentNode.removeChild(parentUl);
-  } else {
-    parentUl.removeChild(li);
-  }
-  const r = document.createRange();
-  r.setStart(tn, 0); r.collapse(true);
-  const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r);
-  _savedRange = r.cloneRange();
-}
-
-// ── Custom task-list indent / outdent ────────────────────────────────────────
-// GTK WebKit's execCommand("indent") wraps content in a <blockquote> rather
-// than a nested <ul>, breaking class-based task-item detection.
-// These functions build the nested structure directly via DOM.
-
-function indentTaskListItem(li) {
-  const prev = li.previousElementSibling;
-  if (!prev) return; // nothing to nest under
-  // Find or create a nested ul at the end of the previous sibling
-  let nestedUl = prev.querySelector(":scope > ul.contains-task-list");
-  if (!nestedUl) {
-    nestedUl = document.createElement("ul");
-    nestedUl.className = "contains-task-list";
-    prev.appendChild(nestedUl);
-  }
-  nestedUl.appendChild(li);
-  // Restore caret after the checkbox inside li
-  const cb = li.querySelector("input[type=checkbox]");
-  if (cb) placeCaretInTaskItem(li);
-}
-
-function outdentTaskListItem(li) {
-  const parentUl = li.parentElement;
-  if (!parentUl) return;
-  const parentLi = parentUl.parentElement;
-  if (!parentLi || parentLi.tagName !== "LI") return; // already top-level
-  const grandParentUl = parentLi.parentElement;
-  // Move li after its parent li in the grandparent ul
-  grandParentUl.insertBefore(li, parentLi.nextSibling);
-  // Clean up empty nested ul
-  if (parentUl.children.length === 0) parentLi.removeChild(parentUl);
-  const cb = li.querySelector("input[type=checkbox]");
-  if (cb) placeCaretInTaskItem(li);
-}
 
 // ─── Space Key: Block Syntax Trigger ─────────────────────────────────────────
 function handleSpaceInWriter() {
@@ -554,10 +451,7 @@ function handleSpaceInWriter() {
     case "1.": buildOL(target, textAfter); return true;
     case ">": buildBlockquote(target, textAfter); return true;
   }
-  if (/^- \[[ x]\]$/.test(textBefore)) {
-    buildTaskItem(target, textBefore.includes("[x]"), textAfter);
-    return true;
-  }
+
   return false;
 }
 
@@ -644,53 +538,7 @@ function applyOrderedList() {
   }
 }
 
-function applyCheckboxList() {
-  if (!isMarkdownMode) {
-    // Restore focus + selection lost when toolbar button was clicked
-    restoreSelection();
-    const sel = window.getSelection();
-    const ul = makeTaskListUL();
 
-    if (sel && sel.rangeCount > 0) {
-      const range = sel.getRangeAt(0);
-      const block = getBlockAncestor(range.startContainer);
-      if (block && block !== writerViewEl) {
-        if (block.textContent.trim() === "" && block.tagName !== "LI") {
-          block.parentNode.replaceChild(ul, block);
-        } else {
-          block.parentNode.insertBefore(ul, block.nextSibling);
-        }
-      } else {
-        writerViewEl.appendChild(ul);
-      }
-    } else {
-      writerViewEl.appendChild(ul);
-    }
-
-    const cb = ul.querySelector("input[type=checkbox]");
-    writerViewEl.focus();       // focus FIRST so WebKit doesn't reset cursor
-    placeCaretInTaskItem(ul.querySelector("li")); // then position cursor
-  } else {
-    const ta = markdownInputEl;
-    const s = ta.selectionStart;
-    const ins = "- [ ] ";
-    ta.value = ta.value.slice(0, s) + ins + ta.value.slice(s);
-    ta.selectionStart = ta.selectionEnd = s + ins.length;
-    ta.focus();
-  }
-}
-
-function makeTaskListUL() {
-  const ul = document.createElement("ul");
-  ul.className = "contains-task-list";
-  const li = document.createElement("li");
-  li.className = "task-list-item";
-  const cb = document.createElement("input");
-  cb.type = "checkbox"; cb.tabIndex = -1; // don't steal tab navigation
-  const tn = document.createTextNode("\u200B"); // ZWS anchor for cursor positioning
-  li.appendChild(cb); li.appendChild(tn); ul.appendChild(li);
-  return ul;
-}
 
 function applyHorizontalRule() {
   if (!isMarkdownMode) {
@@ -908,33 +756,7 @@ function handleWriterEnter(e) {
   const block = getBlockAncestor(range.startContainer);
   if (!block) return false;
 
-  // ── Task-list item Enter ──
-  // Walk up to find any ancestor <li class="task-list-item"> — this works even
-  // when the cursor lands inside a <blockquote> that execCommand("indent")
-  // may have created inside the task item.
-  let taskLi = null;
-  {
-    let node = range.startContainer;
-    while (node && node !== writerViewEl) {
-      if (node.nodeType === Node.ELEMENT_NODE &&
-          node.tagName === "LI" &&
-          node.classList.contains("task-list-item")) {
-        taskLi = node;
-        break;
-      }
-      node = node.parentNode;
-    }
-  }
-  if (taskLi) {
-    e.preventDefault();
-    // Empty item (text content only, ignoring the checkbox) → exit or outdent
-    if (!taskLi.textContent.trim()) {
-      exitTaskList(taskLi, taskLi.parentElement);
-    } else {
-      newTaskListItem(taskLi, taskLi.parentElement);
-    }
-    return true;
-  }
+
 
   if (/^H[1-6]$/.test(block.tagName)) return false;
   if (block.tagName === "BLOCKQUOTE") return false;
@@ -1045,10 +867,9 @@ async function setupCloseHandler() {
     await appWindow.onCloseRequested(async (event) => {
       if (isClosingApp) return;
 
-      if (isDirty) {
-        // Synchronously prevent immediate close while saving
-        event.preventDefault();
+      event.preventDefault();
 
+      if (isDirty) {
         const content = getCurrentMarkdown();
         try {
           if (currentFilePath) {
@@ -1078,6 +899,7 @@ async function setupCloseHandler() {
         }
       } else {
         isClosingApp = true;
+        await appWindow.destroy();
       }
     });
   } catch (err) {
@@ -1121,15 +943,7 @@ function handleKeydown(e) {
       }
       if (li) {
         e.preventDefault();
-        if (li.classList.contains("task-list-item")) {
-          // Custom DOM-based indent/outdent for task items.
-          // execCommand("indent") uses <blockquote> in GTK WebKit, which
-          // breaks task-item detection on Enter.
-          if (e.shiftKey) outdentTaskListItem(li);
-          else indentTaskListItem(li);
-        } else {
-          document.execCommand(e.shiftKey ? "outdent" : "indent");
-        }
+        document.execCommand(e.shiftKey ? "outdent" : "indent");
         return;
       }
     }
@@ -1241,7 +1055,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   }
   document.getElementById("ul-btn").addEventListener("click",    () => applyUnorderedList());
   document.getElementById("ol-btn").addEventListener("click",    () => applyOrderedList());
-  document.getElementById("cb-btn").addEventListener("click",    () => applyCheckboxList());
+
   document.getElementById("quote-btn").addEventListener("click", () => applyBlockquote());
   document.getElementById("hr-btn").addEventListener("click",    () => applyHorizontalRule());
   document.getElementById("time-btn").addEventListener("click",  () => insertAtCursor(formatTime(new Date())));
@@ -1324,11 +1138,6 @@ window.addEventListener("DOMContentLoaded", async () => {
     "#### Live triggers in Writer Mode\n\n" +
     "> Type `- ` → bullet list · `1. ` → numbered · `> ` → blockquote\n" +
     "> Type `# ` / `## ` / `### ` → headings\n\n" +
-    "##### Task list example\n\n" +
-    "- [x] Fix file dialog freeze\n" +
-    "- [x] Dracula theme\n" +
-    "- [x] Bullet list auto-convert\n" +
-    "- [ ] More features\n\n" +
     "---\n\n";
 
   markdownInputEl.value = defaultMd;
