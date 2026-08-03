@@ -761,22 +761,6 @@ body {
   font-size: 0.9rem;
 }
 
-.pref-select {
-  background: var(--bg-elevated);
-  color: var(--fg);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 0.3rem 0.6rem;
-  font-family: var(--font-sans);
-  font-size: 0.85rem;
-  cursor: pointer;
-  outline: none;
-}
-
-.pref-select:focus {
-  border-color: var(--purple);
-}
-
 .version-text {
   font-size: 0.85rem;
   color: var(--comment);
@@ -799,7 +783,7 @@ body {
    THEME STYLING OVERRIDES & ESSENTIAL DESIGN ELEMENTS
    ───────────────────────────────────────────────────────────────────────────── */
 
-/* ── Selection Styling ─────────────────────────────────────────────────────── */
+/* ── Selection Styling per Theme ───────────────────────────────────────────── */
 ::selection {
   background: var(--selection);
   color: #ffffff;
@@ -810,31 +794,90 @@ body {
 }
 
 [data-theme="dracula"] ::selection,
-:root ::selection {
-  background: #6c56a8;
-  color: #ffffff;
+[data-theme="dracula"] *::selection,
+[data-theme="dracula"] ::-moz-selection,
+[data-theme="dracula"] *::-moz-selection {
+  background: #6c56a8 !important;
+  color: #ffffff !important;
+}
+
+/* Classic Mac Selection — Inverse Text (White on Black) */
+[data-theme="classic-mac"] ::selection,
+[data-theme="classic-mac"] *::selection,
+[data-theme="classic-mac"] ::-moz-selection,
+[data-theme="classic-mac"] *::-moz-selection {
+  background: #000000 !important;
+  color: #ffffff !important;
+}
+
+[data-theme="win98"] ::selection,
+[data-theme="win98"] *::selection,
+[data-theme="win98"] ::-moz-selection,
+[data-theme="win98"] *::-moz-selection {
+  background: #000080 !important;
+  color: #ffffff !important;
+}
+
+[data-theme="irix-cde"] ::selection,
+[data-theme="irix-cde"] *::selection,
+[data-theme="irix-cde"] ::-moz-selection,
+[data-theme="irix-cde"] *::-moz-selection {
+  background: #d48800 !important;
+  color: #111118 !important;
+}
+
+/* ── Base Select Styling ───────────────────────────────────────────────────── */
+.pref-select {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  background-color: var(--bg-sidebar);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.4rem 2.2rem 0.4rem 0.75rem;
+  font-family: var(--font-sans);
+  font-size: 0.85rem;
+  cursor: pointer;
+  outline: none;
+  background-repeat: no-repeat;
+  background-position: right 0.6rem center;
+  background-size: 12px;
+}
+
+.pref-select option {
+  background-color: var(--bg-sidebar) !important;
+  color: var(--fg) !important;
+  padding: 0.5rem;
 }
 
 /* ── Dracula Theme Overrides ───────────────────────────────────────────────── */
-[data-theme="dracula"] .pref-select,
+[data-theme="dracula"] .pref-select {
+  background-color: #21222c !important;
+  color: #f8f8f2 !important;
+  border: 1px solid rgba(98, 114, 164, 0.6) !important;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23bd93f9' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E") !important;
+}
+
 [data-theme="dracula"] .pref-select option {
-  background: #21222c;
-  color: #f8f8f2;
+  background-color: #21222c !important;
+  color: #f8f8f2 !important;
 }
 
 [data-theme="dracula"] .dropdown-menu {
-  background: #21222c;
-  border: 1px solid rgba(98, 114, 164, 0.5);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+  background-color: #21222c !important;
+  border: 1px solid rgba(98, 114, 164, 0.6) !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.8) !important;
 }
 
 [data-theme="dracula"] .menu-item {
-  color: #f8f8f2;
+  color: #f8f8f2 !important;
+  background-color: transparent !important;
 }
 
 [data-theme="dracula"] .menu-item:hover {
-  background: #6c56a8;
-  color: #ffffff;
+  background-color: #6c56a8 !important;
+  color: #ffffff !important;
 }
 
 /* ── Classic Mac Specific Visuals (All Accents Black) ───────────────────────── */
@@ -979,11 +1022,18 @@ body {
   color: #ffffff;
 }
 
-[data-theme="classic-mac"] .pref-select,
+[data-theme="classic-mac"] .pref-select {
+  background-color: #ffffff !important;
+  color: #000000 !important;
+  border: 1px solid #000000 !important;
+  border-radius: 0 !important;
+  box-shadow: 2px 2px 0 #000000 !important;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23000000' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E") !important;
+}
+
 [data-theme="classic-mac"] .pref-select option {
-  background: #ffffff;
-  color: #000000;
-  border: 1px solid #000000;
+  background-color: #ffffff !important;
+  color: #000000 !important;
 }
 
 /* ── Windows 98 Specific Visuals ────────────────────────────────────────────── */
@@ -1167,12 +1217,18 @@ body {
   color: #ffffff;
 }
 
-[data-theme="win98"] .pref-select,
+[data-theme="win98"] .pref-select {
+  background-color: #ffffff !important;
+  color: #000000 !important;
+  border: 2px solid !important;
+  border-color: #404040 #ffffff #ffffff #404040 !important;
+  border-radius: 0 !important;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23000000' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E") !important;
+}
+
 [data-theme="win98"] .pref-select option {
-  background: #ffffff;
-  color: #000000;
-  border: 2px solid;
-  border-color: #404040 #ffffff #ffffff #404040;
+  background-color: #ffffff !important;
+  color: #000000 !important;
 }
 
 /* ── IRIX CDE Specific Visuals ──────────────────────────────────────────────── */
@@ -1316,11 +1372,10 @@ body {
 }
 
 [data-theme="irix-cde"] .dropdown-menu {
-  background: #34374a;
-  border: 2px solid;
-  border-color: #687094 #202230 #202230 #687094;
-  border-radius: 0;
-  box-shadow: 3px 3px 0 #12131c;
+  background-color: #34374a !important;
+  border: 2px solid #687094 !important;
+  border-radius: 0 !important;
+  box-shadow: 4px 4px 0 #12131c !important;
 }
 
 [data-theme="irix-cde"] .menu-item {
