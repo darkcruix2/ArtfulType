@@ -1035,39 +1035,53 @@ async function saveFile(silent = false) {
   }
 }
 
-async function handleCloseRequested(e) {
-  if (!isDirty) return;
-  if (e && typeof e.preventDefault === "function") {
-    e.preventDefault();
-  }
-  const content = getCurrentMarkdown();
+let isClosingApp = false;
+
+async function setupCloseHandler() {
   try {
-    if (currentFilePath) {
-      await invoke("save_file", { path: currentFilePath, content });
-      setDirty(false);
-      const appWindow = window.__TAURI__?.window?.getCurrentWindow();
-      if (appWindow) {
-        await appWindow.destroy();
-      }
-    } else {
-      statusMessageEl.textContent = "Saving before exit…";
-      const savedPath = await invoke("save_file_dialog", { content });
-      if (savedPath) {
-        currentFilePath = savedPath;
-        currentFileDir  = savedPath.replace(/[/\\][^/\\]+$/, "") || null;
-        const filename  = savedPath.split(/[/\\]/).pop();
-        addToRecentFiles(savedPath, filename);
-        setDirty(false);
-        const appWindow = window.__TAURI__?.window?.getCurrentWindow();
-        if (appWindow) {
+    const appWindow = window.__TAURI__?.window?.getCurrentWindow();
+    if (!appWindow) return;
+
+    await appWindow.onCloseRequested(async (event) => {
+      if (isClosingApp) return;
+
+      if (isDirty) {
+        // Synchronously prevent immediate close while saving
+        event.preventDefault();
+
+        const content = getCurrentMarkdown();
+        try {
+          if (currentFilePath) {
+            await invoke("save_file", { path: currentFilePath, content });
+            setDirty(false);
+            isClosingApp = true;
+            await appWindow.destroy();
+          } else {
+            statusMessageEl.textContent = "Saving before exit…";
+            const savedPath = await invoke("save_file_dialog", { content });
+            if (savedPath) {
+              currentFilePath = savedPath;
+              currentFileDir  = savedPath.replace(/[/\\][^/\\]+$/, "") || null;
+              const filename  = savedPath.split(/[/\\]/).pop();
+              addToRecentFiles(savedPath, filename);
+              setDirty(false);
+              isClosingApp = true;
+              await appWindow.destroy();
+            } else {
+              statusMessageEl.textContent = "Save cancelled – keeping window open.";
+            }
+          }
+        } catch (err) {
+          console.error("Error saving on close:", err);
+          isClosingApp = true;
           await appWindow.destroy();
         }
       } else {
-        statusMessageEl.textContent = "Save cancelled – keeping window open.";
+        isClosingApp = true;
       }
-    }
+    });
   } catch (err) {
-    console.error("Error saving file on window close:", err);
+    console.warn("Could not setup close handler:", err);
   }
 }
 
@@ -1273,18 +1287,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   window.addEventListener("keydown", handleKeydown);
 
   // ── Intercept Window Close to Save Unsaved Changes ──
-  try {
-    const appWindow = window.__TAURI__?.window?.getCurrentWindow();
-    if (appWindow) {
-      appWindow.onCloseRequested(async (event) => {
-        if (isDirty) {
-          await handleCloseRequested(event);
-        }
-      });
-    }
-  } catch (err) {
-    console.warn("Could not register onCloseRequested:", err);
-  }
+  setupCloseHandler();
 
   // ── Restore settings ──
   const settings = loadSettings();
