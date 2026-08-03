@@ -857,61 +857,57 @@ async function saveFile(silent = false) {
   }
 }
 
-let isClosingApp = false;
 
 async function setupCloseHandler() {
   try {
     const appWindow = window.__TAURI__?.window?.getCurrentWindow();
     if (!appWindow) return;
 
-    // Helper: reliably close the window on Linux/GTK.
-    // destroy() is the correct call; window.close() acts as a belt-and-
-    // suspenders fallback that always works in a Tauri webview context.
-    async function doClose() {
-      try {
-        await appWindow.destroy();
-      } catch (_) {
-        // destroy() failed (e.g. window already gone) — fall back to the
-        // browser-level close which Tauri always handles.
-        window.close();
-      }
-    }
-
     await appWindow.onCloseRequested(async (event) => {
-      // Always intercept so we can run our logic; we will call doClose()
-      // ourselves when ready.  IMPORTANT: do NOT guard with isClosingApp here
-      // — doing so can permanently lock the window if a previous attempt set
-      // the flag but destroy() never completed (common on Linux/GTK).
+      // On Linux/GTK, the correct pattern is:
+      //   - Call event.preventDefault() ONLY when we want to BLOCK the close
+      //     (i.e. user cancelled the save dialog).
+      //   - Do NOT call event.preventDefault() (or destroy()) when we actually
+      //     want to close — just let the event propagate naturally.
+      // Calling destroy() from inside this handler is unreliable on GTK and
+      // causes the window to appear unresponsive.
+
+      if (!isDirty) {
+        // Nothing unsaved → let the OS close the window normally.
+        return;
+      }
+
+      // There are unsaved changes — intercept and handle.
       event.preventDefault();
 
-      if (isDirty) {
-        const content = getCurrentMarkdown();
-        try {
-          if (currentFilePath) {
-            await invoke("save_file", { path: currentFilePath, content });
+      const content = getCurrentMarkdown();
+      try {
+        if (currentFilePath) {
+          // Known path: save silently then allow the OS to close.
+          await invoke("save_file", { path: currentFilePath, content });
+          setDirty(false);
+          // Emit a fresh close so the OS handler runs without interference.
+          await appWindow.close();
+        } else {
+          // No path: show save dialog.
+          statusMessageEl.textContent = "Saving before exit…";
+          const savedPath = await invoke("save_file_dialog", { content });
+          if (savedPath) {
+            currentFilePath = savedPath;
+            currentFileDir  = savedPath.replace(/[/\\][^/\\]+$/, "") || null;
+            const filename  = savedPath.split(/[/\\]/).pop();
+            addToRecentFiles(savedPath, filename);
             setDirty(false);
-            await doClose();
+            await appWindow.close();
           } else {
-            statusMessageEl.textContent = "Saving before exit…";
-            const savedPath = await invoke("save_file_dialog", { content });
-            if (savedPath) {
-              currentFilePath = savedPath;
-              currentFileDir  = savedPath.replace(/[/\\][^/\\]+$/, "") || null;
-              const filename  = savedPath.split(/[/\\]/).pop();
-              addToRecentFiles(savedPath, filename);
-              setDirty(false);
-              await doClose();
-            } else {
-              // User cancelled the save dialog → keep the window open.
-              statusMessageEl.textContent = "Save cancelled – keeping window open.";
-            }
+            // User cancelled → keep window open.
+            statusMessageEl.textContent = "Save cancelled – keeping window open.";
           }
-        } catch (err) {
-          console.error("Error saving on close:", err);
-          await doClose();
         }
-      } else {
-        await doClose();
+      } catch (err) {
+        console.error("Error saving on close:", err);
+        // Save failed → still close to avoid trapping the user.
+        await appWindow.close();
       }
     });
   } catch (err) {
