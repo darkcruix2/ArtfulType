@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+    "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Bundle identity -->
+    <key>CFBundleName</key>
+    <string>ArtfulType Pro</string>
+
+    <key>CFBundleDisplayName</key>
+    <string>ArtfulType Pro</string>
+
+    <key>CFBundleIdentifier</key>
+    <string>com.actionretro.artfultype-pro</string>
+
+    <key>CFBundleVersion</key>
+    <string>0.25</string>
+
+    <key>CFBundleShortVersionString</key>
+    <string>0.25</string>
+
+    <!-- Executable -->
+    <key>CFBundleExecutable</key>
+    <string>ArtfulTypePro</string>
+
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+
+    <!-- Classic Mac creator/type codes (used by Carbon for file association) -->
+    <key>CFBundleSignature</key>
+    <string>ArtT</string>
+
+    <!-- Minimum OS version -->
+    <key>LSMinimumSystemVersion</key>
+    <string>10.4.0</string>
+
+    <!-- Application is a foreground app (not a background agent) -->
+    <key>LSUIElement</key>
+    <false/>
+
+    <!-- Document types: associate .md and .txt files with this app -->
+    <key>CFBundleDocumentTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>Markdown Document</string>
+            <key>CFBundleTypeExtensions</key>
+            <array>
+                <string>md</string>
+                <string>markdown</string>
+            </array>
+            <key>CFBundleTypeOSTypes</key>
+            <array>
+                <string>TEXT</string>
+            </array>
+            <key>CFBundleTypeRole</key>
+            <string>Editor</string>
+        </dict>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>Plain Text Document</string>
+            <key>CFBundleTypeExtensions</key>
+            <array>
+                <string>txt</string>
+                <string>text</string>
+            </array>
+            <key>CFBundleTypeOSTypes</key>
+            <array>
+                <string>TEXT</string>
+            </array>
+            <key>CFBundleTypeRole</key>
+            <string>Editor</string>
+        </dict>
+    </array>
+
+    <!-- High-resolution display (irrelevant on Tiger but harmless) -->
+    <key>NSHighResolutionCapable</key>
+    <false/>
+
+    <!-- Carbon NIB is not used; we build menus programmatically -->
+    <key>NSMainNibFile</key>
+    <string></string>
+
+    <!-- Localisation -->
+    <key>CFBundleDevelopmentRegion</key>
+    <string>English</string>
+
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+</dict>
+</plist>
