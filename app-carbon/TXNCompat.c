@@ -391,7 +391,8 @@ long WEOffsetToLine(long offset, WEHandle we)
         WERecordFull *f = GetFull(we);
         short baseY = f ? f->viewRect.top : 0;
         long relY = pt.v - baseY;
-        for (ItemCount i = 0; i < lineCount; i++) {
+        ItemCount i;
+        for (i = 0; i < lineCount; i++) {
             Fixed lh = 0, lw = 0;
             TXNGetLineMetrics(txn, i, &lw, &lh);
             long lineH = (long)Fix2Long(lh);
@@ -452,7 +453,8 @@ long WEGetHeight(long startLine, long endLine, WEHandle we)
     if (startLine < 0) startLine = 0;
     if (endLine > (long)totalLines) endLine = (long)totalLines;
     long height = 0;
-    for (long i = startLine; i < endLine; i++) {
+    long i;
+    for (i = startLine; i < endLine; i++) {
         Fixed lh = 0, lw = 0;
         TXNGetLineMetrics(txn, (ItemCount)i, &lw, &lh);
         height += (long)Fix2Long(lh);
