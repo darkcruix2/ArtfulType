@@ -197,25 +197,6 @@ void ClearStyles(void)
 */
 #define OFFSCREEN_COORD (-32000)
 
-void SuppressDrawing(WEHandle te, Rect *saved)
-{
-    LongRect viewRectLong;
-    WEGetViewRect(&viewRectLong, te);
-    saved->left = (short)viewRectLong.left;
-    saved->top = (short)viewRectLong.top;
-    saved->right = (short)viewRectLong.right;
-    saved->bottom = (short)viewRectLong.bottom;
-    
-    Rect hiddenRect;
-    SetRect(&hiddenRect, OFFSCREEN_COORD, OFFSCREEN_COORD,
-            OFFSCREEN_COORD + 100, OFFSCREEN_COORD + 100);
-    WESetRects(&hiddenRect, &hiddenRect, te);
-}
-
-void RestoreDrawing(WEHandle te, Rect *saved)
-{
-    WESetRects(saved, saved, te);
-}
 
 /*
     ParseInlineContent: parse inline markdown formatting (bold, italic, code,
@@ -3901,16 +3882,16 @@ void SyncWindowToBacking(void)
                 if (runEnd <= runStart) { r++; continue; }
 
                 
-                Boolean isBold = (style.stFace & bold) != 0;
-                Boolean isItalic = (style.stFace & italic) != 0;
-                Boolean isUnderline = (style.stFace & underline) != 0;
-                Boolean isHighlight = (style.stFace & outline) != 0;
+                Boolean isBold = (style.tsFace & bold) != 0;
+                Boolean isItalic = (style.tsFace & italic) != 0;
+                Boolean isUnderline = (style.tsFace & underline) != 0;
+                Boolean isHighlight = (style.tsFace & outline) != 0;
                 
                 short headerLevel = 0;
-                if (isBold && style.stSize > CurrentFontSize()) {
+                if (isBold && style.tsSize > CurrentFontSize()) {
                     short lvl;
                     for (lvl = 1; lvl <= 6; lvl++) {
-                        if (style.stSize == CurrentFontSize() + (7 - lvl) * 2) {
+                        if (style.tsSize == CurrentFontSize() + (7 - lvl) * 2) {
                             headerLevel = lvl;
                             break;
                         }
@@ -3919,16 +3900,16 @@ void SyncWindowToBacking(void)
 
                 short monacoFontNum;
                 GetFNum("\pMonaco", &monacoFontNum);
-                Boolean isCode = (style.stFont == monacoFontNum);
+                Boolean isCode = (style.tsFont == monacoFontNum);
                 
-                Boolean isHR = isBold && (style.stColor.blue == 1);
+                Boolean isHR = isBold && (style.tsColor.blue == 1);
                 
-                Boolean isBlockquote = (style.stColor.blue >= 10);
-                short bqDepth = isBlockquote ? (style.stColor.blue - 10) : 0;
+                Boolean isBlockquote = (style.tsColor.blue >= 10);
+                short bqDepth = isBlockquote ? (style.tsColor.blue - 10) : 0;
                 
                 short linkID = 0;
-                if (isUnderline && style.stColor.red > 0) {
-                    linkID = style.stColor.red;
+                if (isUnderline && style.tsColor.red > 0) {
+                    linkID = style.tsColor.red;
                 }
                 
                 long globalStart = gWindowStart + runStart;
@@ -3967,7 +3948,7 @@ void SyncWindowToBacking(void)
                         ops[gWriterOpCount].end = globalEnd;
                         ops[gWriterOpCount].kind = 'U';
                         /* Recover nesting level from stColor.green if set, else from spaces */
-                        short nestingLevel = style.stColor.green;
+                        short nestingLevel = style.tsColor.green;
                         if (nestingLevel == 0 && globalStart > 0) {
                             long sp = globalStart - 1;
                             short spCount = 0;
@@ -4112,9 +4093,9 @@ void SyncWindowToBacking(void)
                         short superSize = (short)(fs * 0.7);
                         short subSize = superSize - 1;
 
-                        Boolean isSuper = (style.stSize == superSize);
-                        Boolean isSub = (style.stSize == subSize);
-                        Boolean isStrike = (style.stColor.green == 1);
+                        Boolean isSuper = (style.tsSize == superSize);
+                        Boolean isSub = (style.tsSize == subSize);
+                        Boolean isStrike = (style.tsColor.green == 1);
 
                         if (isSuper) {
                             if (gWriterOpCount < MAX_STYLE_OPS) {

@@ -247,7 +247,7 @@ Boolean DoSaveAs(void)
 
     if (NavDialogGetReply(dlg, &reply) == noErr && reply.validRecord) {
         AEDesc fileDesc;
-        FSRef  parentRef, fileRef;
+        FSRef  parentRef;
         char   posixPath[1024];
 
         if (AEGetNthDesc(&reply.selection, 1, typeFSRef, NULL, &fileDesc) == noErr) {
@@ -365,7 +365,11 @@ Boolean DoOpenFile(void)
             p->osTypeCount         = 1;
             p->osType[0]           = 'TEXT';
             typeList = (NavTypeListHandle)NewHandle(sizeof(NavTypeList) + sizeof(OSType));
-            if (typeList) { HLock((Handle)typeList); *typeList = *p; HUnlock((Handle)typeList); }
+            if (typeList) {
+                HLock((Handle)typeList);
+                BlockMove(p, *typeList, sizeof(NavTypeList) + sizeof(OSType));
+                HUnlock((Handle)typeList);
+            }
             DisposePtr((Ptr)p);
         }
     }

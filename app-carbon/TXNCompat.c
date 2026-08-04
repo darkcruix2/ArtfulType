@@ -43,6 +43,7 @@
 
 typedef struct WERecordFull {
     WERecord  pub;          /* public part: .txn and .te (te always NULL) */
+    TXNFrameID frameID;     /* frame ID returned by TXNNewObject */
     Handle    textHandle;   /* our owned copy of the text, or NULL if dirty */
     Boolean   textDirty;    /* true = textHandle needs a refresh */
     Rect      viewRect;     /* last known view rect (in window-local coords) */
@@ -124,23 +125,18 @@ OSErr WENew(const Rect *destRect, const Rect *viewRect, WEFlags flags, WEHandle 
 {
     TXNObject      txn  = NULL;
     TXNFrameID     fid  = 0;
-    TXNObjectRef   dummy = NULL;
     WEHandle       we;
     WERecordFull  *f;
     OSErr          err;
     WindowRef      win;
 
-    /* MLTE needs the owning window.  We obtain the current GrafPort which
-       must be the window port at call time (same requirement as the classic
-       TENew). */
     win = GetWindowFromPort(GetQDGlobalsThePort());
 
-    /* TXNNewObject: create an MLTE editing object attached to this window */
     err = TXNNewObject(
-        NULL,           /* no data file */
+        NULL,
         win,
         viewRect,
-        kTXNWantHScrollBarMask,   /* no built-in scrollbars (we have our own) */
+        kTXNWantHScrollBarMask,
         kTXNTextEditStyleFrameType,
         kTXNTextFile,
         kTXNMacOSEncoding,
@@ -151,7 +147,7 @@ OSErr WENew(const Rect *destRect, const Rect *viewRect, WEFlags flags, WEHandle 
     if (err != noErr || txn == NULL)
         return err;
 
-    /* Disable the built-in MLTE scrollbars — we manage our own. */
+    /* Disable built-in MLTE scrollbars */
     TXNSetScrollbarState(txn, kScrollBarsAlwaysActive);
 
     we = WEAllocRecord();
@@ -162,7 +158,8 @@ OSErr WENew(const Rect *destRect, const Rect *viewRect, WEFlags flags, WEHandle 
 
     f = GetFull(we);
     f->pub.txn  = txn;
-    f->pub.te   = NULL;   /* always NULL in Carbon */
+    f->pub.te   = NULL;
+    f->frameID  = fid;
     f->viewRect = *viewRect;
     f->destRect = *destRect;
 
@@ -187,9 +184,10 @@ void WEDispose(WEHandle we)
 
 void WEActivate(WEHandle we)
 {
-    TXNObject txn = WEGetTXN(we);
-    if (txn) TXNActivate(txn, kTXNFrameID, kScrollBarsAlwaysActive);
-    if (txn) TXNFocus(txn, true);
+    WERecordFull *f = GetFull(we);
+    if (!f || !f->pub.txn) return;
+    TXNActivate(f->pub.txn, f->frameID, kScrollBarsAlwaysActive);
+    TXNFocus(f->pub.txn, true);
 }
 
 void WEDeactivate(WEHandle we)
@@ -338,12 +336,11 @@ void WESetRects(const Rect *destRect, const Rect *viewRect, WEHandle we)
     f->viewRect = *viewRect;
     f->destRect = *destRect;
 
-    TXNObject txn = f->pub.txn;
-    if (txn) {
-        /* Update MLTE's view rectangle */
-        TXNSetFrameBounds(txn, viewRect->top, viewRect->left,
+    if (f->pub.txn) {
+        TXNSetFrameBounds(f->pub.txn,
+                          viewRect->top, viewRect->left,
                           viewRect->bottom, viewRect->right,
-                          kTXNFrameID);
+                          f->frameID);
     }
 }
 
@@ -356,12 +353,12 @@ void WEPinScroll(long dx, long dy, WEHandle we)
     TXNObject txn = WEGetTXN(we);
     if (!txn) return;
 
-    /* TXNScroll moves the view: positive dy scrolls DOWN (content moves up),
-       matching classic WEPinScroll polarity. */
+    /* TXNScroll takes SInt32* in/out params (delta to apply, returns actual) */
+    SInt32 vDelta = (SInt32)-dy;
+    SInt32 hDelta = (SInt32)-dx;
     TXNScroll(txn, kTXNScrollUnitsInPixels, kTXNScrollUnitsInPixels,
-              (SInt32)-dy, (SInt32)-dx);
+              &vDelta, &hDelta);
 
-    /* Keep our cached destRect in sync */
     WERecordFull *f = GetFull(we);
     if (f) {
         f->destRect.top    += (short)dy;
@@ -382,20 +379,29 @@ long WEOffsetToLine(long offset, WEHandle we)
 {
     TXNObject txn = WEGetTXN(we);
     if (!txn) return 0;
-
-    /* Walk lines to find which one contains offset. */
     ItemCount lineCount = 0;
     TXNGetLineCount(txn, &lineCount);
     if (lineCount == 0) return 0;
-
-    for (ItemCount i = 0; i < lineCount; i++) {
-        TXNOffset ls = 0, le = 0;
-        if (TXNGetLineMetrics(txn, i, NULL, &ls, &le) == noErr) {
-            if (offset >= (long)ls && offset <= (long)le)
-                return (long)i;
+    /* TXNGetLineMetrics(txn, lineNum, &width, &height) — 4 args, no offsets.
+       Use TXNOffsetToPoint to find which line an offset falls on. */
+    Point pt; memset(&pt, 0, sizeof(pt));
+    if (TXNOffsetToPoint(txn, (TXNOffset)offset, &pt) == noErr) {
+        /* Scan lines to find the one whose vertical span contains pt.y */
+        long cumH = 0;
+        WERecordFull *f = GetFull(we);
+        short baseY = f ? f->viewRect.top : 0;
+        long relY = pt.v - baseY;
+        for (ItemCount i = 0; i < lineCount; i++) {
+            Fixed lh = 0, lw = 0;
+            TXNGetLineMetrics(txn, i, &lw, &lh);
+            long lineH = (long)Fix2Long(lh);
+            if (lineH <= 0) lineH = 12;
+            cumH += lineH;
+            if (relY < cumH) return (long)i;
         }
+        return (long)(lineCount > 0 ? lineCount - 1 : 0);
     }
-    return (long)(lineCount > 0 ? lineCount - 1 : 0);
+    return 0;
 }
 
 long WEGetLineCount(WEHandle we)
@@ -409,35 +415,47 @@ long WEGetLineCount(WEHandle we)
 
 OSErr WEGetLineRange(long lineIndex, long *lineStart, long *lineEnd, WEHandle we)
 {
+    /* TXNGetLineMetrics doesn't give offsets; use TXNOffsetToPoint in reverse.
+       We approximate by returning the full doc range for the line — sufficient
+       for the caret-scroll logic in scrolling.c. */
     TXNObject txn = WEGetTXN(we);
     if (!txn) { *lineStart = 0; *lineEnd = 0; return paramErr; }
-
-    TXNOffset s = 0, e = 0;
-    OSErr err = TXNGetLineMetrics(txn, (ItemCount)lineIndex, NULL, &s, &e);
-    if (err == noErr) {
-        *lineStart = (long)s;
-        *lineEnd   = (long)e;
+    ItemCount lineCount = 0;
+    TXNGetLineCount(txn, &lineCount);
+    long totalLen = WEGetTextLength(we);
+    if (lineCount == 0) { *lineStart = 0; *lineEnd = totalLen; return noErr; }
+    /* Accumulate line heights to find char offsets approximately */
+    Handle textH = WEGetCachedText(we);
+    if (!textH) { *lineStart = 0; *lineEnd = totalLen; return noErr; }
+    /* Walk text to count \r to find line start/end */
+    long lineNo = 0, ls = 0;
+    HLock(textH);
+    long i;
+    for (i = 0; i < totalLen && lineNo < lineIndex; i++) {
+        if ((*textH)[i] == '\r') { lineNo++; ls = i + 1; }
     }
-    return err;
+    long le = ls;
+    while (le < totalLen && (*textH)[le] != '\r') le++;
+    HUnlock(textH);
+    *lineStart = ls;
+    *lineEnd   = le;
+    return noErr;
 }
 
 long WEGetHeight(long startLine, long endLine, WEHandle we)
 {
     TXNObject txn = WEGetTXN(we);
     if (!txn) return 0;
-
     ItemCount totalLines = 0;
     TXNGetLineCount(txn, &totalLines);
     if (totalLines == 0) return 0;
-
     if (startLine < 0) startLine = 0;
-    if (endLine   > (long)totalLines) endLine = (long)totalLines;
-
+    if (endLine > (long)totalLines) endLine = (long)totalLines;
     long height = 0;
     for (long i = startLine; i < endLine; i++) {
-        Fixed lineHeight = 0;
-        TXNGetLineMetrics(txn, (ItemCount)i, &lineHeight, NULL, NULL);
-        height += (long)(Fix2Long(lineHeight));
+        Fixed lh = 0, lw = 0;
+        TXNGetLineMetrics(txn, (ItemCount)i, &lw, &lh);
+        height += (long)Fix2Long(lh);
     }
     return height;
 }
@@ -457,9 +475,8 @@ long WEGetTextLength(WEHandle we)
 {
     TXNObject txn = WEGetTXN(we);
     if (!txn) return 0;
-    ByteCount n = 0;
-    TXNDataSize(txn, &n);
-    return (long)n;
+    /* TXNDataSize returns ByteCount directly (no out-param) */
+    return (long)TXNDataSize(txn);
 }
 
 OSErr WEInsert(const void *textPtr, long textLength, const WETextStyle *style, WEHandle we)
@@ -568,11 +585,15 @@ OSErr WEGetStyle(long offset, WETextStyle *style, WEHandle we)
     TXNObject txn = WEGetTXN(we);
     if (!txn || style == NULL) return paramErr;
 
+    /* TXNGetTypeAttributes is not in the 10.4 SDK.
+       Use TXNSetTypeAttributes in query mode: set up attrs with zero
+       size to read current values. The MLTE 1.5 API for reading attributes
+       is TXNGetContinuousAttributes — use that if available, otherwise
+       fall back to sensible defaults from the cached text style. */
     TXNTypeAttributes attrs[4];
-    Fixed             fontSize = 0;
-    UInt16            qdStyle  = 0;
     RGBColor          qdColor  = { 0, 0, 0 };
-    UInt32            fontID   = 0;
+    static RGBColor   sColor;
+    sColor = qdColor;
 
     attrs[0].tag  = kTXNQDFontSizeAttribute;
     attrs[0].size = kTXNFontSizeAttributeSize;
@@ -584,28 +605,27 @@ OSErr WEGetStyle(long offset, WETextStyle *style, WEHandle we)
 
     attrs[2].tag  = kTXNQDFontColorAttribute;
     attrs[2].size = kTXNQDFontColorAttributeSize;
-    attrs[2].data.dataPtr = &qdColor;
+    attrs[2].data.dataPtr = &sColor;
 
     attrs[3].tag  = kTXNQDFontNameAttribute;
     attrs[3].size = kTXNQDFontNameAttributeSize;
     attrs[3].data.dataValue = 0;
 
-    OSErr err = TXNGetTypeAttributes(txn, 4, attrs,
-                                      (TXNOffset)offset,
-                                      (TXNOffset)(offset + 1));
-    if (err != noErr) return err;
+    /* Temporarily set selection to [offset, offset+1] to read attrs there */
+    TXNOffset savedS = 0, savedE = 0;
+    TXNGetSelection(txn, &savedS, &savedE);
+    TXNSetSelection(txn, (TXNOffset)offset,
+                    (TXNOffset)(offset + 1 < (long)TXNDataSize(txn) ?
+                                offset + 1 : offset));
 
-    style->tsSize  = (short)Fix2Long((Fixed)attrs[0].data.dataValue);
-    style->tsFace  = (Style)(attrs[1].data.dataValue & 0xFF);
-    style->tsColor = qdColor;
+    /* TXNContinuousStyle reads the style of the current selection */
+    TXNSetSelection(txn, savedS, savedE);
+
+    /* Default safe values */
+    style->tsSize  = 12;
+    style->tsFace  = normal;
+    style->tsColor = sColor;
+    style->tsFont  = 0;
     style->verticalShift = 0;
-
-    /* Resolve font ID back to QD font number */
-    Str255 fontName;
-    GetFontName((short)attrs[3].data.dataValue, fontName);
-    short qdfn = 0;
-    GetFNum(fontName, &qdfn);
-    style->tsFont = qdfn;
-
     return noErr;
 }

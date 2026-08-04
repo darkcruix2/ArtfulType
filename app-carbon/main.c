@@ -924,7 +924,8 @@ static void EventLoop(void)
                     UpdateWindowMenu();
                     DoMenuCommand(MenuSelect(event.where));
                 } else if (part == inSysWindow) {
-                    SystemClick(&event, w);
+                    /* No desk accessories in Carbon — inSysWindow never fires */
+                    (void)w;
                 } else if (part == inDrag) {
                     Rect dragRect;
                     BitMap sb;

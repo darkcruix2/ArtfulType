@@ -1,44 +1,54 @@
 ##############################################################################
-# ArtfulType Pro — Carbon / PowerPC OS X 10.4 build
+# ArtfulType Pro — Carbon / OS X 10.4 build
 #
 # TOOLCHAIN OPTIONS
 # ─────────────────
-# A) Cross-compile from Linux/modern macOS (recommended if you don't have a
-#    PPC Mac handy):
-#      export TOOLCHAIN_PREFIX = powerpc-apple-darwin8-
-#      Set SDK below to the extracted MacOSX10.4u.sdk path.
+# A) i386 (Intel Tiger / Rosetta) via osxcross + clang [default]:
+#      make
+#    Produces ArtfulTypePro (Mach-O i386) — runs on Intel Tiger natively,
+#    and on PPC Tiger only via Rosetta (10.4.4+).
 #
-# B) Native on PPC Mac running OS X 10.4–10.5 with Xcode 2.x:
-#      export TOOLCHAIN_PREFIX =   (empty — use system cc/gcc)
-#      Set SDK = /Developer/SDKs/MacOSX10.4u.sdk  (or leave blank)
+# B) powerpc native via GCC cross-compiler [RECOMMENDED for real PPC Macs]:
+#      make ppc
+#    Requires /opt/ppc-darwin/bin/powerpc-apple-darwin8-gcc
+#    Build the toolchain first:
+#      sudo bash /mnt/volume1/MyCode/workspace/build-ppc-darwin-toolchain.sh
 #
-# C) Rosetta on an Intel Mac running OS X 10.5 with Xcode 3.x:
-#      export TOOLCHAIN_PREFIX =
-#      Add -arch ppc to CFLAGS below and set SDK to the 10.4u SDK.
+# C) Native on PPC Mac running OS X 10.4 with Xcode 2.x:
+#      CC= ARCH=ppc make   (empty CC = system gcc)
 ##############################################################################
 
-TOOLCHAIN_PREFIX ?= powerpc-apple-darwin8-
+PPC_PREFIX   ?= /opt/ppc-darwin
+OSXCROSS_BIN ?= /mnt/volume1/MyCode/workspace/osxcross/target/bin
+SDK          ?= /mnt/volume1/MyCode/workspace/osxcross/target/SDK/MacOSX10.4u.sdk
+ARCH         ?= i386
+MINVER       ?= 10.4
 
-CC      = $(TOOLCHAIN_PREFIX)gcc
-STRIP   = $(TOOLCHAIN_PREFIX)strip
-LIPO    = $(TOOLCHAIN_PREFIX)lipo
+# Make sure the osxcross linker (i386-apple-darwin8-ld) is found before /usr/bin/ld
+export PATH := $(OSXCROSS_BIN):$(PPC_PREFIX)/bin:$(PATH)
 
-# Path to the MacOSX10.4 Universal SDK.
-# Override on the command line: make SDK=/path/to/MacOSX10.4u.sdk
-SDK     ?= /Developer/SDKs/MacOSX10.4u.sdk
-
-# Minimum OS X version to support
-MINVER  = 10.4
+# Toolchain selection: i386 uses osxcross/clang; ppc uses GCC cross-compiler
+ifeq ($(ARCH),ppc)
+  PPC_TARGET = powerpc-apple-darwin8
+  CC    = $(PPC_PREFIX)/bin/$(PPC_TARGET)-gcc
+  CXX   = $(PPC_PREFIX)/bin/$(PPC_TARGET)-g++
+  STRIP = $(PPC_PREFIX)/bin/$(PPC_TARGET)-strip
+  AR    = $(PPC_PREFIX)/bin/$(PPC_TARGET)-ar
+else
+  CC    = $(OSXCROSS_BIN)/$(ARCH)-apple-darwin8-clang
+  CXX   = $(OSXCROSS_BIN)/$(ARCH)-apple-darwin8-clang++
+  STRIP = $(OSXCROSS_BIN)/$(ARCH)-apple-darwin8-strip
+  AR    = $(OSXCROSS_BIN)/$(ARCH)-apple-darwin8-ar
+endif
 
 APP_NAME  = ArtfulTypePro
 BUNDLE    = $(APP_NAME).app
 
 SRCS = main.c file.c markdown.c scrolling.c undo.c zoom.c splash.c TXNCompat.c
-
 OBJS = $(SRCS:.c=.o)
 
 CFLAGS = \
-    -arch ppc \
+    -arch $(ARCH) \
     -mmacosx-version-min=$(MINVER) \
     -isysroot $(SDK) \
     -DARTFUL_PRO=1 \
@@ -46,21 +56,46 @@ CFLAGS = \
     -I. \
     -Wall \
     -Wno-deprecated-declarations \
+    -Wno-four-char-constants \
+    -Wno-unused-variable \
+    -Wno-unused-but-set-variable \
     -g
 
+# Clang-only warning suppressions (not needed/supported by GCC)
+ifneq ($(ARCH),ppc)
+CFLAGS += -Wno-pointer-sign -Wno-unknown-escape-sequence
+endif
+
+# GCC for PPC doesn't support -Wl,-dead_strip_dylibs or -Wl,-w
+ifeq ($(ARCH),ppc)
 LDFLAGS = \
-    -arch ppc \
+    -arch $(ARCH) \
     -mmacosx-version-min=$(MINVER) \
     -isysroot $(SDK) \
     -framework Carbon
+else
+LDFLAGS = \
+    -arch $(ARCH) \
+    -mmacosx-version-min=$(MINVER) \
+    -isysroot $(SDK) \
+    -framework Carbon \
+    -Wl,-w \
+    -Wl,-dead_strip_dylibs
+endif
 
 ##############################################################################
 # Build rules
 ##############################################################################
 
-.PHONY: all bundle clean
+.PHONY: all ppc bundle clean
 
 all: $(APP_NAME)
+
+# Convenience target: build native PPC binary
+ppc:
+	$(MAKE) ARCH=ppc APP_NAME=ArtfulTypePro-ppc
+	@echo ""
+	@file ArtfulTypePro-ppc
 
 $(APP_NAME): $(OBJS)
 	$(CC) $(LDFLAGS) -o $@ $^
