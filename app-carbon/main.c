@@ -532,15 +532,16 @@ static Boolean FindTextInHandle(Handle targetH, long targetLen,
                                 long *foundStart, long *foundEnd)
 {
     long targetLenParam = target[0];
+    long i;
     if (targetLenParam == 0) return false;
     HLock(targetH);
-    for (long i = startOffset; i <= targetLen - targetLenParam; i++) {
+    for (i = startOffset; i <= targetLen - targetLenParam; i++) {
         short j; Boolean match = true;
         for (j = 0; j < targetLenParam; j++)
             if (LowerCase((*targetH)[i+j]) != LowerCase(target[1+j])) { match=false; break; }
         if (match) { *foundStart=i; *foundEnd=i+targetLenParam; HUnlock(targetH); return true; }
     }
-    for (long i = 0; i < startOffset && i <= targetLen - targetLenParam; i++) {
+    for (i = 0; i < startOffset && i <= targetLen - targetLenParam; i++) {
         short j; Boolean match = true;
         for (j = 0; j < targetLenParam; j++)
             if (LowerCase((*targetH)[i+j]) != LowerCase(target[1+j])) { match=false; break; }
@@ -849,7 +850,8 @@ static pascal OSErr HandleOpenDocuments(const AppleEvent *ae, AppleEvent *reply,
 
     AECountItems(&docList, &count);
 
-    for (long i = 1; i <= count; i++) {
+    long i;
+    for (i = 1; i <= count; i++) {
         AEKeyword kw;
         DescType  dt;
         FSRef     ref;
@@ -1174,7 +1176,8 @@ static void EventLoop(void)
                                         SetDirty(true);
                                     } else {
                                         Boolean isNumbered = false;
-                                        for (short ii=0; ii < prefixLen; ii++)
+                                        short ii;
+                                        for (ii=0; ii < prefixLen; ii++)
                                             if (prefixBuf[ii]>='0' && prefixBuf[ii]<='9') isNumbered=true;
                                         if (isNumbered) {
                                             long num; char newNumBuf[64];
