@@ -968,7 +968,16 @@ async function closeTab(id) {
   if (idx !== -1) {
     openFiles.splice(idx, 1);
     if (openFiles.length === 0) {
-      newFile();
+      activeFileId = null;
+      markdownInputEl.value = "";
+      writerViewEl.innerHTML = "";
+      document.title = "ArtfulType Pro";
+      statusMessageEl.textContent = "Ready";
+      updateStats("");
+      markdownInputEl.disabled = true;
+      writerViewEl.contentEditable = "false";
+      renderTabBar();
+      renderFileList();
     } else if (activeFileId === id) {
       const nextId = openFiles[Math.min(idx, openFiles.length - 1)].id;
       await switchTab(nextId);
@@ -1003,6 +1012,8 @@ async function applyOpenedFile(fileData) {
   activeFileId = newFile.id;
   
   markdownInputEl.value = fileData.content;
+  markdownInputEl.disabled = false;
+  writerViewEl.contentEditable = "true";
   addToRecentFiles(fileData.path, fileData.name);
   if (isMarkdownMode) {
     updateStats(fileData.content);
@@ -1114,6 +1125,8 @@ function newFile() {
   
   markdownInputEl.value = "";
   writerViewEl.innerHTML = "";
+  markdownInputEl.disabled = false;
+  writerViewEl.contentEditable = "true";
   updateStats("");
   setDirty(false);
   renderTabBar();

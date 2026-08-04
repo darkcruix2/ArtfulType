@@ -17,12 +17,12 @@ def tint_image(src, dest, color):
     
     gray = ImageOps.grayscale(img)
     # Colorize maps black to black, white to the tint color, midtones are blended.
-    # Let's map black to dark purple (#282a36) and white to lavender (#bd93f9).
-    colorized = ImageOps.colorize(gray, "#282a36", color)
+    # Let's map black to #9580FF and white to #FF80BF.
+    colorized = ImageOps.colorize(gray, "#9580FF", "#FF80BF")
     
     # Put original alpha back
     colorized.putalpha(alpha)
     colorized.save(dest)
 
 if __name__ == "__main__":
-    tint_image(sys.argv[1], sys.argv[2], "#bd93f9")
+    tint_image(sys.argv[1], sys.argv[2], "#FF80BF")
