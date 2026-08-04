@@ -210,5 +210,22 @@
       </div>
     </dialog>
 
+    <!-- Rename Modal -->
+    <dialog id="rename-modal" class="modal-dialog glass-panel">
+      <div class="modal-content">
+        <h2>Rename File</h2>
+        <hr class="modal-sep" />
+        <p style="font-size: 0.85rem; color: var(--comment); margin-bottom: 10px; word-break: break-all;" id="rename-file-path"></p>
+        <div class="pref-row" style="flex-direction: column; align-items: flex-start; gap: 8px;">
+          <label for="rename-input">New filename (including extension):</label>
+          <input type="text" id="rename-input" class="pref-select" style="width: 100%; max-width: none;" />
+        </div>
+        <div class="modal-actions">
+          <button id="cancel-rename-btn" class="btn">Cancel</button>
+          <button id="confirm-rename-btn" class="btn primary-btn">Rename</button>
+        </div>
+      </div>
+    </dialog>
+
   </body>
 </html>

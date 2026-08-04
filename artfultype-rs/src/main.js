@@ -179,13 +179,25 @@ function removeFromRecentFiles(path) {
   renderFileList();
 }
 
+let currentRenamePath = null;
+
 async function renameSidebarFile(e, path) {
   e.stopPropagation();
-  const newName = prompt("Enter new filename (including extension):");
+  currentRenamePath = path;
+  document.getElementById("rename-file-path").textContent = path;
+  document.getElementById("rename-input").value = path.split(/[/\\]/).pop();
+  openModal("rename-modal");
+  document.getElementById("rename-input").focus();
+}
+
+async function confirmRename() {
+  if (!currentRenamePath) return;
+  const newName = document.getElementById("rename-input").value.trim();
   if (!newName) return;
+  const path = currentRenamePath;
   const newPath = path.replace(/[/\\][^/\\]+$/, "/" + newName);
   try {
-    await invoke("rename_file", { old_path: path, new_path: newPath });
+    await invoke("rename_file", { oldPath: path, newPath: newPath });
     let recent = loadRecentFiles();
     const idx = recent.findIndex(f => f.path === path);
     if (idx !== -1) {
@@ -194,7 +206,10 @@ async function renameSidebarFile(e, path) {
        saveRecentFiles(recent);
     }
     renderFileList();
-  } catch(err) { alert("Rename failed: " + err); }
+    closeModal("rename-modal");
+  } catch(err) {
+    alert("Rename failed: " + err);
+  }
 }
 
 async function deleteSidebarFile(e, path) {
@@ -1259,6 +1274,10 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   document.getElementById("close-about-btn")?.addEventListener("click", () => closeModal("about-modal"));
   document.getElementById("close-prefs-btn")?.addEventListener("click", () => closeModal("prefs-modal"));
+
+  // Rename modal buttons
+  document.getElementById("cancel-rename-btn")?.addEventListener("click", () => closeModal("rename-modal"));
+  document.getElementById("confirm-rename-btn")?.addEventListener("click", confirmRename);
 
   // Close main menu when clicking outside
   document.addEventListener("click", (e) => {
