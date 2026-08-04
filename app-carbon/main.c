@@ -144,7 +144,8 @@ static void Init(void)
                                    & 0);             /* we pass 0 for defaults    */
 
     /* Initialise memory pool */
-    for (int i = 0; i < MEMORY_POOL_SIZE; i++)
+    int i;
+    for (i = 0; i < MEMORY_POOL_SIZE; i++)
         gMemoryPool[i] = NULL;
     gMemoryPoolCount = 0;
 }
@@ -1271,7 +1272,7 @@ static void EventLoop(void)
    ----------------------------------------------------------------------- */
 short GetDefaultFontNum(void)
 {
-    short fontNum;
+    short fontNum = 0;
     if (gUseSansSerif) GetFNum("\pHelvetica", &fontNum);
     else               GetFNum("\pTimes",     &fontNum);
     return fontNum;

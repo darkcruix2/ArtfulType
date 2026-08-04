@@ -58,7 +58,6 @@ CFLAGS = \
     -Wno-deprecated-declarations \
     -Wno-four-char-constants \
     -Wno-unused-variable \
-    -std=gnu99 \
     -fpascal-strings \
     -g
 
