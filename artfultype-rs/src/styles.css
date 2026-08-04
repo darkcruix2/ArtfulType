@@ -290,7 +290,38 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   user-select: none;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
 }
+
+.file-item-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.file-item-actions {
+  display: none;
+  gap: 4px;
+}
+
+.file-item:hover .file-item-actions {
+  display: flex;
+}
+
+.file-action-btn {
+  background: none;
+  border: none;
+  color: var(--comment);
+  cursor: pointer;
+  padding: 2px;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.file-action-btn:hover { background: var(--selection); color: var(--fg); }
 
 .file-item:hover { background: rgba(98, 114, 164, 0.15); color: var(--fg); }
 
@@ -298,12 +329,11 @@ body {
   background: rgba(189, 147, 249, 0.18);
   color: var(--purple);
   font-weight: 500;
+  border-left: 3px solid var(--purple);
 }
 
 .file-item.active::before {
-  content: "▸ ";
-  color: var(--purple);
-  font-size: 0.7rem;
+  content: none;
 }
 
 /* ── Main Editor ───────────────────────────────────────────────────────────── */
@@ -314,6 +344,65 @@ body {
   position: relative;
   overflow: hidden;
 }
+
+/* ── Tab Bar ───────────────────────────────────────────────────────────────── */
+#tab-bar {
+  display: flex;
+  background: var(--bg-header);
+  border-bottom: 1px solid var(--border);
+  min-height: 36px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+#tab-bar::-webkit-scrollbar { display: none; }
+
+.tab {
+  display: flex;
+  align-items: center;
+  padding: 0 0.8rem;
+  border-right: 1px solid var(--border);
+  color: var(--comment);
+  font-size: 0.82rem;
+  cursor: pointer;
+  user-select: none;
+  min-width: 100px;
+  max-width: 200px;
+  transition: background-color 0.15s, color 0.15s;
+}
+
+.tab:hover { background: rgba(98, 114, 164, 0.15); color: var(--fg); }
+
+.tab.active {
+  background: var(--bg-editor);
+  color: var(--fg);
+  border-bottom: 2px solid var(--purple);
+}
+
+.tab-title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tab-dirty-indicator {
+  margin-left: 4px;
+  color: var(--red);
+  font-weight: bold;
+}
+
+.tab-close {
+  margin-left: 8px;
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  color: var(--comment);
+}
+.tab-close:hover { background: var(--red); color: white; }
 
 /* ── Toolbar ───────────────────────────────────────────────────────────────── */
 #toolbar {

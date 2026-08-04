@@ -131,8 +131,19 @@ fn read_image_base64(path: String) -> Result<String, String> {
     Ok(format!("data:{mime};base64,{b64}"))
 }
 
+#[tauri::command]
+fn rename_file(old_path: String, new_path: String) -> Result<(), String> {
+    fs::rename(old_path, new_path).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn delete_file(path: String) -> Result<(), String> {
+    fs::remove_file(path).map_err(|e| e.to_string())
+}
+
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_window_state::Builder::default().build())
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             parse_markdown,
@@ -141,7 +152,9 @@ fn main() {
             save_file_dialog,
             save_file,
             read_file,
-            read_image_base64
+            read_image_base64,
+            rename_file,
+            delete_file
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
