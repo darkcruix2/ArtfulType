@@ -106,7 +106,7 @@ function updateAutoSaveUI(intervalMinutes) {
 }
 
 // ─── Theme Management ─────────────────────────────────────────────────────────
-const VALID_THEMES = new Set(["dracula", "classic-mac", "win98", "irix-cde", "calm-rs"]);
+const VALID_THEMES = new Set(["dracula", "classic-mac", "win98", "solaris-cde", "beos", "calm-rs"]);
 
 function applyThemeSetting(themeName) {
   const validTheme = VALID_THEMES.has(themeName) ? themeName : "dracula";
