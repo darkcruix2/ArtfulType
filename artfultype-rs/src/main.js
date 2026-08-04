@@ -15,7 +15,7 @@ let untitledCounter = 1;
 
 function getActiveFile() { return openFiles.find(f => f.id === activeFileId); }
 function getActiveFilePath() { const f = getActiveFile(); return f ? f.path : null; }
-function getCurrentFileDir() { const p = getActiveFilePath(); return p ? p.replace(/[\/\\][^\/\\]+$/, "") : null; }
+function getCurrentFileDir() { const p = getActiveFilePath(); return p ? p.replace(/[/\\][^/\\]+$/, "") : null; }
 
 let platform = "linux";
 let autoSaveTimer = null;
@@ -183,7 +183,7 @@ async function renameSidebarFile(e, path) {
   e.stopPropagation();
   const newName = prompt("Enter new filename (including extension):");
   if (!newName) return;
-  const newPath = path.replace(/[\/\][^\/\]+$/, "/" + newName);
+  const newPath = path.replace(/[/\\][^/\\]+$/, "/" + newName);
   try {
     await invoke("rename_file", { old_path: path, new_path: newPath });
     let recent = loadRecentFiles();
@@ -259,7 +259,7 @@ function renderFileList() {
   }
 }
 
-function openRecentFile(item) {
+async function openRecentFile(item) {
   try {
     statusMessageEl.textContent = `Opening ${item.name}…`;
     const fileData = await invoke("read_file", { path: item.path });
@@ -1034,7 +1034,7 @@ async function saveFile(silent = false) {
         f.path = savedPath;
         f.id = savedPath;
         activeFileId = savedPath;
-        f.name = savedPath.split(/[\/\]/).pop();
+        f.name = savedPath.split(/[/\\]/).pop();
         addToRecentFiles(savedPath, f.name);
         f.dirty = false;
         renderTabBar(); renderFileList();
