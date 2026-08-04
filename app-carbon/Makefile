@@ -58,12 +58,11 @@ CFLAGS = \
     -Wno-deprecated-declarations \
     -Wno-four-char-constants \
     -Wno-unused-variable \
-    -Wno-unused-but-set-variable \
     -g
 
-# Clang-only warning suppressions (not needed/supported by GCC)
+# Clang/newer GCC warning suppressions (not supported by GCC 4.0 for PPC)
 ifneq ($(ARCH),ppc)
-CFLAGS += -Wno-pointer-sign -Wno-unknown-escape-sequence
+CFLAGS += -Wno-pointer-sign -Wno-unknown-escape-sequence -Wno-unused-but-set-variable
 endif
 
 # GCC for PPC doesn't support -Wl,-dead_strip_dylibs or -Wl,-w
