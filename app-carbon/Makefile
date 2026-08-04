@@ -59,6 +59,7 @@ CFLAGS = \
     -Wno-four-char-constants \
     -Wno-unused-variable \
     -std=gnu99 \
+    -fpascal-strings \
     -g
 
 # Clang/newer GCC warning suppressions (not supported by GCC 4.0 for PPC)
