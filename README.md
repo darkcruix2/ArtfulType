@@ -92,11 +92,18 @@ Saved files are plain `.md` text, editable in any text editor.
 
 Built with [Retro68](https://github.com/autc04/Retro68), a GCC-based cross-compiler for classic Mac OS. See `app/CMakeLists.txt` for the build configuration, and `deploy.sh` / `build-bluescsi-image.sh` / `package-release.sh` for the build-to-disk-image pipeline.
 
+## Classic Mac (68k) Versions
+
+The classic 68k version of ArtfulType Pro is available in the `releases/` directory:
+
+- **MacBinary**: [releases/ArtfulTypePro.bin](releases/ArtfulTypePro.bin)
+- **Bootable Floppy Image**: [releases/ArtfulTypePro.dsk](releases/ArtfulTypePro.dsk)
+
 ## Modern Versions (artfultype-rs)
 
 Modern companion binaries for macOS, Linux, and Windows are available in the `releases/` directory in this repository:
 
-- **Mac (M1/ARM64)**: [releases/artfultype-rs-mac.zip](releases/artfultype-rs-mac.zip)
+- **Mac (ARM64)**: [releases/artfultype-rs-mac.zip](releases/artfultype-rs-mac.zip)
 - **Windows (x64)**:
   - Installer: [releases/artfultype-rs_0.25.4_x64-setup.exe](releases/artfultype-rs_0.25.4_x64-setup.exe)
   - Portable Executable: [releases/artfultype-rs-windows-x64.exe](releases/artfultype-rs-windows-x64.exe)
