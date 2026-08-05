@@ -957,13 +957,107 @@ async function switchTab(id) {
   renderFileList();
 }
 
+function promptUnsavedChanges(file) {
+  return new Promise((resolve) => {
+    const modal = document.getElementById("unsaved-modal");
+    const msg = document.getElementById("unsaved-modal-msg");
+    const saveBtn = document.getElementById("unsaved-save-btn");
+    const discardBtn = document.getElementById("unsaved-discard-btn");
+    const cancelBtn = document.getElementById("unsaved-cancel-btn");
+
+    msg.textContent = `Do you want to save the changes to "${file.name}"?`;
+
+    function cleanup() {
+      saveBtn.removeEventListener("click", onSave);
+      discardBtn.removeEventListener("click", onDiscard);
+      cancelBtn.removeEventListener("click", onCancel);
+      modal.removeEventListener("cancel", onModalCancel);
+      closeModal("unsaved-modal");
+    }
+
+    function onSave() {
+      cleanup();
+      resolve("save");
+    }
+
+    function onDiscard() {
+      cleanup();
+      resolve("discard");
+    }
+
+    function onCancel() {
+      cleanup();
+      resolve("cancel");
+    }
+
+    function onModalCancel(e) {
+      e.preventDefault();
+      cleanup();
+      resolve("cancel");
+    }
+
+    saveBtn.addEventListener("click", onSave);
+    discardBtn.addEventListener("click", onDiscard);
+    cancelBtn.addEventListener("click", onCancel);
+    modal.addEventListener("cancel", onModalCancel);
+
+    openModal("unsaved-modal");
+    saveBtn.focus();
+  });
+}
+
+async function saveSingleFile(f) {
+  if (!f) return false;
+  if (f.id === activeFileId) {
+    syncActiveFileContent();
+  }
+  try {
+    if (f.path) {
+      await invoke("save_file", { path: f.path, content: f.content });
+      f.dirty = false;
+      renderTabBar(); renderFileList();
+      return true;
+    } else {
+      const savedPath = await invoke("save_file_dialog", { content: f.content });
+      if (savedPath) {
+        const oldId = f.id;
+        f.path = savedPath;
+        f.id = savedPath;
+        if (activeFileId === oldId) {
+          activeFileId = savedPath;
+        }
+        f.name = savedPath.split(/[/\\]/).pop();
+        addToRecentFiles(savedPath, f.name);
+        f.dirty = false;
+        renderTabBar(); renderFileList();
+        return true;
+      }
+      return false;
+    }
+  } catch (e) {
+    console.error("Error saving file:", e);
+    return false;
+  }
+}
+
 async function closeTab(id) {
   const f = openFiles.find(x => x.id === id);
-  if (f && f.dirty) {
-    if (!confirm(`Discard unsaved changes to ${f.name}?`)) {
-       return;
+  if (!f) return;
+
+  if (f.id === activeFileId) {
+    syncActiveFileContent();
+  }
+
+  if (f.dirty) {
+    const action = await promptUnsavedChanges(f);
+    if (action === "cancel") {
+      return;
+    } else if (action === "save") {
+      const saved = await saveSingleFile(f);
+      if (!saved) return;
     }
   }
+
   const idx = openFiles.findIndex(x => x.id === id);
   if (idx !== -1) {
     openFiles.splice(idx, 1);
@@ -988,97 +1082,7 @@ async function closeTab(id) {
   }
 }
 
-
-function getCurrentMarkdown() {
-  return isMarkdownMode ? markdownInputEl.value : htmlToMarkdown(writerViewEl);
-}
-
-
-async function applyOpenedFile(fileData) {
-  const existing = openFiles.find(f => f.path === fileData.path);
-  if (existing) {
-     await switchTab(existing.id);
-     return;
-  }
-  syncActiveFileContent();
-  const newFile = {
-     id: fileData.path,
-     path: fileData.path,
-     name: fileData.name,
-     content: fileData.content,
-     dirty: false
-  };
-  openFiles.push(newFile);
-  activeFileId = newFile.id;
-  
-  markdownInputEl.value = fileData.content;
-  markdownInputEl.disabled = false;
-  writerViewEl.contentEditable = "true";
-  addToRecentFiles(fileData.path, fileData.name);
-  if (isMarkdownMode) {
-    updateStats(fileData.content);
-  } else {
-    await renderMarkdownToWriter(fileData.content);
-    updateStats(fileData.content);
-  }
-  setDirty(false);
-  renderTabBar();
-  renderFileList();
-}
-
-async function openFile() {
-  try {
-    statusMessageEl.textContent = "Opening…";
-    const fileData = await invoke("open_file_dialog");
-    if (fileData) {
-      await applyOpenedFile(fileData);
-      statusMessageEl.textContent = `Opened: ${fileData.name}`;
-    } else {
-      statusMessageEl.textContent = "Ready";
-    }
-  } catch (e) {
-    console.error(e);
-    statusMessageEl.textContent = "Error opening file";
-  }
-}
-
-async function saveFile(silent = false) {
-  syncActiveFileContent();
-  const f = getActiveFile();
-  if (!f) return;
-  const content = f.content;
-  try {
-    if (f.path) {
-      await invoke("save_file", { path: f.path, content });
-      f.dirty = false;
-      renderTabBar(); renderFileList();
-      if (!silent) statusMessageEl.textContent = "Saved.";
-    } else {
-      if (!silent) statusMessageEl.textContent = "Saving…";
-      const savedPath = await invoke("save_file_dialog", { content });
-      if (savedPath) {
-        f.path = savedPath;
-        f.id = savedPath;
-        activeFileId = savedPath;
-        f.name = savedPath.split(/[/\\]/).pop();
-        addToRecentFiles(savedPath, f.name);
-        f.dirty = false;
-        renderTabBar(); renderFileList();
-        if (!silent) statusMessageEl.textContent = `Saved: ${f.name}`;
-      } else {
-        if (!silent) statusMessageEl.textContent = "Save cancelled.";
-      }
-    }
-    const active = getActiveFile();
-    if (active && !active.dirty) {
-      const btn = document.getElementById("save-file-btn");
-      if (btn) { btn.classList.remove("dirty"); btn.title = "Save File (Ctrl+S)"; }
-    }
-  } catch (e) {
-    console.error(e);
-    if (!silent) statusMessageEl.textContent = "Error saving file";
-  }
-}
+let isClosingWindow = false;
 
 async function setupCloseHandler() {
   try {
@@ -1086,23 +1090,28 @@ async function setupCloseHandler() {
     if (!appWindow) return;
 
     await appWindow.onCloseRequested(async (event) => {
+      if (isClosingWindow) return;
+
       syncActiveFileContent();
       const unsaved = openFiles.filter(f => f.dirty);
       if (unsaved.length === 0) return;
-      
+
       event.preventDefault();
-      
+
       for (const f of unsaved) {
-         if (f.path) {
-            await invoke("save_file", { path: f.path, content: f.content });
-         } else {
-            statusMessageEl.textContent = "Saving " + f.name + " before exit…";
-            const savedPath = await invoke("save_file_dialog", { content: f.content });
-            if (savedPath) {
-               f.path = savedPath;
-            }
-         }
+        if (f.id !== activeFileId) {
+          await switchTab(f.id);
+        }
+        const action = await promptUnsavedChanges(f);
+        if (action === "cancel") {
+          return;
+        } else if (action === "save") {
+          const saved = await saveSingleFile(f);
+          if (!saved) return;
+        }
       }
+
+      isClosingWindow = true;
       await appWindow.close();
     });
   } catch (err) {
@@ -1183,6 +1192,7 @@ function handleKeydown(e) {
       case "s": e.preventDefault(); saveFile();          return;
       case "o": e.preventDefault(); openFile();          return;
       case "n": e.preventDefault(); newFile();           return;
+      case "w": e.preventDefault(); if (activeFileId) closeTab(activeFileId); return;
       case "m": e.preventDefault(); toggleMode();        return;
       case "b": e.preventDefault(); applyRichFormat("bold",   "**"); return;
       case "i": e.preventDefault(); applyRichFormat("italic", "*");  return;

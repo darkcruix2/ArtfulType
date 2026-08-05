@@ -276,6 +276,12 @@
   background: #F3C000;
 }
 
+[data-theme="beos"] .danger-btn {
+  background: #CC0000;
+  color: #FFFFFF;
+  font-weight: bold;
+}
+
 [data-theme="beos"] #editor-area {
   background: #FFFFFF;
   border: 2px solid #8C8C8C;
@@ -612,6 +618,14 @@ body {
 
 .primary-btn:hover { background: var(--accent-hover); transform: translateY(-1px); }
 .primary-btn:active { transform: translateY(0); }
+
+.danger-btn {
+  background: var(--red);
+  color: #ffffff;
+}
+
+.danger-btn:hover { opacity: 0.9; transform: translateY(-1px); }
+.danger-btn:active { transform: translateY(0); }
 
 /* ── Editor Area ───────────────────────────────────────────────────────────── */
 #editor-area {

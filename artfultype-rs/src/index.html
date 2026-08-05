@@ -228,5 +228,20 @@
       </div>
     </dialog>
 
+    <!-- Unsaved Changes Modal -->
+    <dialog id="unsaved-modal" class="modal-dialog glass-panel">
+      <div class="modal-content">
+        <h2>Unsaved Changes</h2>
+        <hr class="modal-sep" />
+        <p id="unsaved-modal-msg" style="font-size: 0.9rem; word-break: break-all;"></p>
+        <p style="font-size: 0.8rem; color: var(--comment);">Your changes will be lost if you don't save them.</p>
+        <div class="modal-actions" style="gap: 8px;">
+          <button id="unsaved-cancel-btn" class="btn">Cancel</button>
+          <button id="unsaved-discard-btn" class="btn danger-btn">Discard</button>
+          <button id="unsaved-save-btn" class="btn primary-btn">Save</button>
+        </div>
+      </div>
+    </dialog>
+
   </body>
 </html>
