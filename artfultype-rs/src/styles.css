@@ -951,6 +951,11 @@ body {
 
 /* ── Modals ────────────────────────────────────────────────────────────────── */
 
+dialog:not([open]),
+.modal-dialog:not([open]) {
+  display: none !important;
+}
+
 .modal-dialog {
   margin: auto;
   padding: 0;

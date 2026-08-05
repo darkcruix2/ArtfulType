@@ -207,18 +207,24 @@ async function confirmRename() {
     }
     renderFileList();
     closeModal("rename-modal");
+    statusMessageEl.textContent = "Renamed file.";
   } catch(err) {
-    alert("Rename failed: " + err);
+    statusMessageEl.textContent = "Rename failed: " + err;
   }
 }
 
 async function deleteSidebarFile(e, path) {
   e.stopPropagation();
-  if (!confirm("Are you sure you want to delete this file?")) return;
+  const filename = path.split(/[/\\]/).pop();
+  const confirmed = await promptConfirm("Delete File", `Are you sure you want to delete "${filename}"?`, "Delete", true);
+  if (!confirmed) return;
   try {
     await invoke("delete_file", { path: path });
     removeFromRecentFiles(path);
-  } catch(err) { alert("Delete failed: " + err); }
+    statusMessageEl.textContent = "Deleted file.";
+  } catch(err) {
+    statusMessageEl.textContent = "Delete failed: " + err;
+  }
 }
 
 function renderFileList() {
@@ -1006,6 +1012,51 @@ function promptUnsavedChanges(file) {
   });
 }
 
+function promptConfirm(title, message, confirmText = "Confirm", isDanger = true) {
+  return new Promise((resolve) => {
+    const modal = document.getElementById("confirm-modal");
+    const titleEl = document.getElementById("confirm-modal-title");
+    const msgEl = document.getElementById("confirm-modal-msg");
+    const okBtn = document.getElementById("confirm-modal-ok-btn");
+    const cancelBtn = document.getElementById("confirm-modal-cancel-btn");
+
+    titleEl.textContent = title;
+    msgEl.textContent = message;
+    okBtn.textContent = confirmText;
+    okBtn.className = isDanger ? "btn danger-btn" : "btn primary-btn";
+
+    function cleanup() {
+      okBtn.removeEventListener("click", onOk);
+      cancelBtn.removeEventListener("click", onCancel);
+      modal.removeEventListener("cancel", onModalCancel);
+      closeModal("confirm-modal");
+    }
+
+    function onOk() {
+      cleanup();
+      resolve(true);
+    }
+
+    function onCancel() {
+      cleanup();
+      resolve(false);
+    }
+
+    function onModalCancel(e) {
+      e.preventDefault();
+      cleanup();
+      resolve(false);
+    }
+
+    okBtn.addEventListener("click", onOk);
+    cancelBtn.addEventListener("click", onCancel);
+    modal.addEventListener("cancel", onModalCancel);
+
+    openModal("confirm-modal");
+    okBtn.focus();
+  });
+}
+
 async function saveSingleFile(f) {
   if (!f) return false;
   if (f.id === activeFileId) {
@@ -1082,11 +1133,101 @@ async function closeTab(id) {
   }
 }
 
+function getCurrentMarkdown() {
+  return isMarkdownMode ? markdownInputEl.value : htmlToMarkdown(writerViewEl);
+}
+
+async function applyOpenedFile(fileData) {
+  const existing = openFiles.find(f => f.path === fileData.path);
+  if (existing) {
+     await switchTab(existing.id);
+     return;
+  }
+  syncActiveFileContent();
+  const newFile = {
+     id: fileData.path,
+     path: fileData.path,
+     name: fileData.name,
+     content: fileData.content,
+     dirty: false
+  };
+  openFiles.push(newFile);
+  activeFileId = newFile.id;
+
+  markdownInputEl.value = fileData.content;
+  markdownInputEl.disabled = false;
+  writerViewEl.contentEditable = "true";
+  addToRecentFiles(fileData.path, fileData.name);
+  if (isMarkdownMode) {
+    updateStats(fileData.content);
+  } else {
+    await renderMarkdownToWriter(fileData.content);
+    updateStats(fileData.content);
+  }
+  setDirty(false);
+  renderTabBar();
+  renderFileList();
+}
+
+async function openFile() {
+  try {
+    statusMessageEl.textContent = "Opening…";
+    const fileData = await invoke("open_file_dialog");
+    if (fileData) {
+      await applyOpenedFile(fileData);
+      statusMessageEl.textContent = `Opened: ${fileData.name}`;
+    } else {
+      statusMessageEl.textContent = "Ready";
+    }
+  } catch (e) {
+    console.error(e);
+    statusMessageEl.textContent = "Error opening file";
+  }
+}
+
+async function saveFile(silent = false) {
+  syncActiveFileContent();
+  const f = getActiveFile();
+  if (!f) return;
+  const content = f.content;
+  try {
+    if (f.path) {
+      await invoke("save_file", { path: f.path, content });
+      f.dirty = false;
+      renderTabBar(); renderFileList();
+      if (!silent) statusMessageEl.textContent = "Saved.";
+    } else {
+      if (!silent) statusMessageEl.textContent = "Saving…";
+      const savedPath = await invoke("save_file_dialog", { content });
+      if (savedPath) {
+        f.path = savedPath;
+        f.id = savedPath;
+        activeFileId = savedPath;
+        f.name = savedPath.split(/[/\\]/).pop();
+        addToRecentFiles(savedPath, f.name);
+        f.dirty = false;
+        renderTabBar(); renderFileList();
+        if (!silent) statusMessageEl.textContent = `Saved: ${f.name}`;
+      } else {
+        if (!silent) statusMessageEl.textContent = "Save cancelled.";
+      }
+    }
+    const active = getActiveFile();
+    if (active && !active.dirty) {
+      const btn = document.getElementById("save-file-btn");
+      if (btn) { btn.classList.remove("dirty"); btn.title = "Save File (Ctrl+S)"; }
+    }
+  } catch (e) {
+    console.error(e);
+    if (!silent) statusMessageEl.textContent = "Error saving file";
+  }
+}
+
 let isClosingWindow = false;
 
 async function setupCloseHandler() {
   try {
-    const appWindow = window.__TAURI__?.window?.getCurrentWindow();
+    const appWindow = window.__TAURI__?.window?.getCurrentWindow() || window.__TAURI__?.webviewWindow?.getCurrentWebviewWindow();
     if (!appWindow) return;
 
     await appWindow.onCloseRequested(async (event) => {
@@ -1112,7 +1253,11 @@ async function setupCloseHandler() {
       }
 
       isClosingWindow = true;
-      await appWindow.close();
+      try {
+        await appWindow.destroy();
+      } catch (_) {
+        await appWindow.close();
+      }
     });
   } catch (err) {
     console.warn("Could not setup close handler:", err);
@@ -1265,27 +1410,27 @@ window.addEventListener("DOMContentLoaded", async () => {
   markdownInputEl.addEventListener("input", debouncedStats);
 
   // ── File buttons ──
-  document.getElementById("toggle-mode-btn").addEventListener("click", toggleMode);
-  document.getElementById("open-file-btn").addEventListener("click",   openFile);
-  document.getElementById("save-file-btn").addEventListener("click",   () => saveFile());
-  document.getElementById("new-file-btn").addEventListener("click",    newFile);
+  document.getElementById("toggle-mode-btn")?.addEventListener("click", toggleMode);
+  document.getElementById("open-file-btn")?.addEventListener("click",   openFile);
+  document.getElementById("save-file-btn")?.addEventListener("click",   () => saveFile());
+  document.getElementById("new-file-btn")?.addEventListener("click",    newFile);
 
   // ── Format toolbar ──
-  document.getElementById("bold-btn").addEventListener("click",   () => applyRichFormat("bold",   "**"));
-  document.getElementById("italic-btn").addEventListener("click", () => applyRichFormat("italic", "*"));
-  document.getElementById("code-btn").addEventListener("click",   () => applyCode());
-  document.getElementById("undo-btn").addEventListener("click",   doUndo);
-  document.getElementById("redo-btn").addEventListener("click",   doRedo);
+  document.getElementById("bold-btn")?.addEventListener("click",   () => applyRichFormat("bold",   "**"));
+  document.getElementById("italic-btn")?.addEventListener("click", () => applyRichFormat("italic", "*"));
+  document.getElementById("code-btn")?.addEventListener("click",   () => applyCode());
+  document.getElementById("undo-btn")?.addEventListener("click",   doUndo);
+  document.getElementById("redo-btn")?.addEventListener("click",   doRedo);
   for (let i = 1; i <= 6; i++) {
-    document.getElementById(`h${i}-btn`).addEventListener("click", () => applyHeading(i));
+    document.getElementById(`h${i}-btn`)?.addEventListener("click", () => applyHeading(i));
   }
-  document.getElementById("ul-btn").addEventListener("click",    () => applyUnorderedList());
-  document.getElementById("ol-btn").addEventListener("click",    () => applyOrderedList());
+  document.getElementById("ul-btn")?.addEventListener("click",    () => applyUnorderedList());
+  document.getElementById("ol-btn")?.addEventListener("click",    () => applyOrderedList());
 
-  document.getElementById("quote-btn").addEventListener("click", () => applyBlockquote());
-  document.getElementById("hr-btn").addEventListener("click",    () => applyHorizontalRule());
-  document.getElementById("time-btn").addEventListener("click",  () => insertAtCursor(formatTime(new Date())));
-  document.getElementById("date-btn").addEventListener("click",  () => insertAtCursor(formatDate(new Date())));
+  document.getElementById("quote-btn")?.addEventListener("click", () => applyBlockquote());
+  document.getElementById("hr-btn")?.addEventListener("click",    () => applyHorizontalRule());
+  document.getElementById("time-btn")?.addEventListener("click",  () => insertAtCursor(formatTime(new Date())));
+  document.getElementById("date-btn")?.addEventListener("click",  () => insertAtCursor(formatDate(new Date())));
 
   // ── Main Menu ──
   const mainMenuBtn = document.getElementById("main-menu-btn");
@@ -1331,7 +1476,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   window.addEventListener("keydown", handleKeydown);
 
   // ── Intercept Window Close to Save Unsaved Changes ──
-  setupCloseHandler();
+  try { await setupCloseHandler(); } catch (err) { console.warn(err); }
 
   // ── Restore settings ──
   const settings = loadSettings();
