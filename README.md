@@ -101,6 +101,17 @@ The classic 68k version of ArtfulType Pro is available in the `releases/` direct
 
 ## Modern Versions (artfultype-rs)
 
+### Screenshots
+
+**Mac (ARM64)**
+![ArtfulType on Mac](screenshots/ArtfullType-Mac.png)
+
+**Windows 11**
+![ArtfulType on Windows 11](screenshots/ArtfulType-Windows11.png)
+
+**Linux (Debian/Gnome)**
+![ArtfulType on Debian/Gnome](screenshots/ArtfulType-DebianGnome.png)
+
 Modern companion binaries for macOS, Linux, and Windows are available in the `releases/` directory in this repository:
 
 - **Mac (ARM64)**: [releases/artfultype-rs-mac.zip](releases/artfultype-rs-mac.zip)
