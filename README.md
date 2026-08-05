@@ -101,7 +101,7 @@ The classic 68k version of ArtfulType Pro is available in the `releases/` direct
 
 ## Mac OS X (PowerPC) — Leopard Edition
 
-A native Objective-C / WebKit version of ArtfulType for **Mac OS X 10.5 Leopard on PowerPC** hardware (G3/G4/G5).  
+A native Objective-C / WebKit version of ArtfulType for **Mac OS X 10.5 Leopard on PowerPC** hardware (G4/G5).  
 Compiled with GCC/Cocoa — no Xcode required. Runs on as little as a 1 GHz PowerPC G4 with 1 GB of RAM.
 
 ![ArtfulType running on Mac OS X 10.5.8 PowerPC G4](docs/OSX-PPC-ArtfulType.png)
@@ -154,7 +154,6 @@ Modern companion binaries for macOS, Linux, and Windows are available in the `re
   - Debian Package: [releases/artfultype-rs_0.25.4_amd64.deb](releases/artfultype-rs_0.25.4_amd64.deb)
   - RPM Package: [releases/artfultype-rs-0.25.4-1.x86_64.rpm](releases/artfultype-rs-0.25.4-1.x86_64.rpm)
   - Raw Binary: [releases/artfultype-rs-linux-amd64](releases/artfultype-rs-linux-amd64)
-
 
 ## License
 
