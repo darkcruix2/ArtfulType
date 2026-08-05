@@ -92,6 +92,13 @@ Saved files are plain `.md` text, editable in any text editor.
 
 Built with [Retro68](https://github.com/autc04/Retro68), a GCC-based cross-compiler for classic Mac OS. See `app/CMakeLists.txt` for the build configuration, and `deploy.sh` / `build-bluescsi-image.sh` / `package-release.sh` for the build-to-disk-image pipeline.
 
+## Modern Versions (artfultype-rs)
+
+Modern companion binaries for macOS and Linux are available in the `releases/` directory in this repository:
+
+- Mac (M1/ARM64): [releases/artfultype-rs-mac.zip](releases/artfultype-rs-mac.zip)
+- Linux (AMD64): [releases/artfultype-rs_0.25.4_amd64.deb](releases/artfultype-rs_0.25.4_amd64.deb) and [releases/artfultype-rs-linux-amd64](releases/artfultype-rs-linux-amd64)
+
 ## License
 
 Code: GPLv3 — see [LICENSE](LICENSE).
