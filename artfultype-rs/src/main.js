@@ -335,51 +335,132 @@ async function fixImageSrcs(el) {
 }
 
 // ─── HTML → Markdown Serializer ──────────────────────────────────────────────
-function nodeToMd(node) {
-  if (node.nodeType === Node.TEXT_NODE) return node.textContent.replace(/\u200B/g, "");
+
+// Fix 6: Escape characters that Markdown would misinterpret in plain text nodes.
+// Only applied to raw text nodes, NOT inside inline code or code blocks.
+function escapeMarkdownText(text) {
+  return text
+    .replace(/\\/g, "\\\\")
+    .replace(/\*/g, "\\*")
+    .replace(/_/g, "\\_")
+    .replace(/`/g, "\\`")
+    .replace(/\[/g, "\\[")
+    .replace(/\]/g, "\\]")
+    .replace(/^(#{1,6}) /gm, "\\$1 ")  // prevent accidental headings at line start
+    .replace(/^([-*+]) /gm, "\\$1 ")   // prevent accidental list items at line start
+    .replace(/^(\d+)\. /gm, "$1\\. "); // prevent accidental ordered list items
+}
+
+// Fix 2: Recursively serialise a blockquote, adding one `>` level per nesting depth.
+function blockquoteToMd(node, depth) {
+  const prefix = "> ".repeat(depth);
+  const lines = [];
+  for (const child of node.childNodes) {
+    if (child.nodeType === Node.ELEMENT_NODE && child.tagName.toLowerCase() === "blockquote") {
+      // Nested blockquote — recurse, then trim trailing blank line
+      const nested = blockquoteToMd(child, depth + 1).trimEnd();
+      lines.push(nested);
+    } else {
+      const inner = nodeToMd(child, true /* insideBlock */).trimEnd();
+      if (inner) {
+        inner.split("\n").forEach(l => lines.push(prefix + l));
+      }
+    }
+  }
+  return lines.join("\n") + "\n\n";
+}
+
+function nodeToMd(node, insideBlock = false) {
+  if (node.nodeType === Node.TEXT_NODE) {
+    const raw = node.textContent.replace(/\u200B/g, "");
+    // Fix 6: escape only when outside a <code>/<pre> ancestor
+    if (!insideBlock) {
+      let ancestor = node.parentElement;
+      while (ancestor) {
+        const t = ancestor.tagName?.toLowerCase();
+        if (t === "code" || t === "pre") return raw; // raw inside code
+        ancestor = ancestor.parentElement;
+      }
+    }
+    return insideBlock ? raw : escapeMarkdownText(raw);
+  }
   if (node.nodeType !== Node.ELEMENT_NODE) return "";
   const tag = node.tagName.toLowerCase();
-  const children = () => Array.from(node.childNodes).map(nodeToMd).join("");
+  const children = (ib = insideBlock) => Array.from(node.childNodes).map(n => nodeToMd(n, ib)).join("");
   switch (tag) {
-    case "h1": return `# ${children().trim()}\n\n`;
-    case "h2": return `## ${children().trim()}\n\n`;
-    case "h3": return `### ${children().trim()}\n\n`;
-    case "h4": return `#### ${children().trim()}\n\n`;
-    case "h5": return `##### ${children().trim()}\n\n`;
-    case "h6": return `###### ${children().trim()}\n\n`;
+    case "h1": return `# ${children(true).trim()}\n\n`;
+    case "h2": return `## ${children(true).trim()}\n\n`;
+    case "h3": return `### ${children(true).trim()}\n\n`;
+    case "h4": return `#### ${children(true).trim()}\n\n`;
+    case "h5": return `##### ${children(true).trim()}\n\n`;
+    case "h6": return `###### ${children(true).trim()}\n\n`;
     case "p":  return `${children()}\n\n`;
     case "br": return "  \n";
-    case "strong": case "b": return `**${children()}**`;
-    case "em": case "i": return `*${children()}*`;
-    case "del": case "s": return `~~${children()}~~`;
+    // Fix 1: Bold+Italic — detect <strong><em> or <em><strong> nesting → ***text***
+    case "strong": case "b": {
+      const inner = children(true);
+      // Check if the only child is an <em>/<i> (and vice versa)
+      const soleChild = node.childNodes.length === 1 && node.childNodes[0].nodeType === Node.ELEMENT_NODE
+        ? node.childNodes[0].tagName.toLowerCase() : null;
+      if (soleChild === "em" || soleChild === "i") {
+        return `***${node.childNodes[0].textContent}***`;
+      }
+      return `**${inner}**`;
+    }
+    case "em": case "i": {
+      const inner = children(true);
+      const soleChild = node.childNodes.length === 1 && node.childNodes[0].nodeType === Node.ELEMENT_NODE
+        ? node.childNodes[0].tagName.toLowerCase() : null;
+      if (soleChild === "strong" || soleChild === "b") {
+        return `***${node.childNodes[0].textContent}***`;
+      }
+      return `*${inner}*`;
+    }
+    case "del": case "s": return `~~${children(true)}~~`;
     case "code": {
       if (node.parentElement?.tagName.toLowerCase() === "pre") return node.textContent;
-      return `\`${node.textContent}\``;
+      // If the code content itself contains backticks, use double backticks as delimiter
+      const codeText = node.textContent;
+      const delim = codeText.includes("`") ? "`` " : "`";
+      const suffix = codeText.includes("`") ? " ``" : "`";
+      return `${delim}${codeText}${suffix}`;
     }
     case "pre": {
       const codeEl = node.querySelector("code");
       const lang = codeEl ? codeEl.className.replace(/language-/, "").trim() : "";
       return `\`\`\`${lang}\n${(codeEl || node).textContent}\n\`\`\`\n\n`;
     }
-    case "a": return `[${children()}](${node.getAttribute("href") || ""})`;
+    // Fix 3: Preserve link title attribute
+    case "a": {
+      const href = node.getAttribute("href") || "";
+      const title = node.getAttribute("title");
+      const label = children(true);
+      if (title) return `[${label}](${href} "${title}")`;  
+      return `[${label}](${href})`;
+    }
+    // Fix 4: Preserve image title attribute
     case "img": {
       const src = node.dataset.originalSrc || node.getAttribute("src") || "";
-      return `![${node.getAttribute("alt") || ""}](${src})`;
+      const alt = node.getAttribute("alt") || "";
+      const title = node.getAttribute("title");
+      if (title) return `![${alt}](${src} "${title}")`;
+      return `![${alt}](${src})`;
     }
     case "ul": {
       const items = Array.from(node.children).map((li) => `- ${liToMd(li)}`).join("\n");
       return `${items}\n\n`;
     }
+    // Fix 5: Preserve ordered list start attribute
     case "ol": {
+      const startAttr = parseInt(node.getAttribute("start") || "1", 10);
+      const start = isNaN(startAttr) ? 1 : startAttr;
       const items = Array.from(node.children)
-        .map((li, i) => `${i + 1}. ${liToMd(li)}`).join("\n");
+        .map((li, i) => `${start + i}. ${liToMd(li)}`).join("\n");
       return `${items}\n\n`;
     }
     case "li": return liToMd(node);
-    case "blockquote": {
-      const inner = children().trim().split("\n").map(l => `> ${l}`).join("\n");
-      return `${inner}\n\n`;
-    }
+    // Fix 2: Delegate to blockquoteToMd for proper nesting
+    case "blockquote": return blockquoteToMd(node, 1);
     case "hr": return `---\n\n`;
     case "table": {
       const rows = Array.from(node.querySelectorAll("tr"));
@@ -421,7 +502,7 @@ function liToMd(li) {
 }
 function htmlToMarkdown(el) {
   return Array.from(el.childNodes)
-    .map(nodeToMd).join("")
+    .map(n => nodeToMd(n)).join("")
     .replace(/\n{3,}/g, "\n\n").trim();
 }
 
