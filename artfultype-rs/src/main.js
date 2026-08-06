@@ -428,7 +428,24 @@ function nodeToMd(node, insideBlock = false) {
     case "pre": {
       const codeEl = node.querySelector("code");
       const lang = codeEl ? codeEl.className.replace(/language-/, "").trim() : "";
-      return `\`\`\`${lang}\n${(codeEl || node).textContent}\n\`\`\`\n\n`;
+      // Walk child nodes so <br> → "\n" and text nodes → their text.
+      // .textContent misses <br>-based line breaks (BR contributes "" to textContent).
+      const source = codeEl || node;
+      let codeText = "";
+      source.childNodes.forEach(child => {
+        if (child.nodeType === Node.TEXT_NODE) {
+          codeText += child.textContent;
+        } else if (child.nodeName === "BR") {
+          codeText += "\n";
+        } else if (child.nodeType === Node.ELEMENT_NODE) {
+          // <div> or <p> — line block; <span> (syntax token) — inline text token
+          const isLineBlock = child.nodeName === "DIV" || child.nodeName === "P";
+          codeText += child.textContent + (isLineBlock ? "\n" : "");
+        }
+      });
+      // Strip WebKit-inserted leading/trailing BR artefacts.
+      codeText = codeText.replace(/^\n+/, "").replace(/\n+$/, "");
+      return `\n\n\`\`\`${lang}\n${codeText}\n\`\`\`\n\n`;
     }
     // Fix 3: Preserve link title attribute
     case "a": {
@@ -502,16 +519,39 @@ function liToMd(li) {
 }
 function htmlToMarkdown(el) {
   return Array.from(el.childNodes)
-    .map(n => nodeToMd(n)).join("")
-    .replace(/\n{3,}/g, "\n\n").trim();
+    .map(n => {
+      const md = nodeToMd(n);
+      if (!md) return "";
+      return md.endsWith("\n") ? md : md + "\n\n";
+    })
+    .join("")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
-// ─── Markdown Render ──────────────────────────────────────────────────────────
+// ─── Markdown Render & Syntax Highlighting ───────────────────────────────────
+function applySyntaxHighlighting(container = writerViewEl) {
+  if (typeof highlightCode !== "function") return;
+  try {
+    const blocks = container.querySelectorAll("pre code");
+    blocks.forEach(codeEl => {
+      const lang = codeEl.className.replace(/language-/, "").trim();
+      if (!lang) return;
+      const rawCode = codeEl.textContent;
+      const highlighted = highlightCode(rawCode, lang);
+      codeEl.innerHTML = highlighted;
+    });
+  } catch (err) {
+    console.warn("Syntax highlight warning:", err);
+  }
+}
+
 async function renderMarkdownToWriter(markdownText) {
   try {
     const html = await invoke("parse_markdown", { text: markdownText });
     writerViewEl.innerHTML = html;
     await fixImageSrcs(writerViewEl);
+    applySyntaxHighlighting(writerViewEl);
   } catch (e) {
     writerViewEl.innerHTML = `<p style="color:var(--red)">Render error: ${e}</p>`;
   }
@@ -933,20 +973,337 @@ function handleLiveMarkdown(e) {
   }
 }
 
+// ─── Code Block helpers (Writer Mode) ────────────────────────────────────────
+
+/**
+ * Return the <pre> ancestor of `node` if we are inside a code block,
+ * otherwise null.
+ */
+function getPreAncestor(node) {
+  let el = node.nodeType === Node.TEXT_NODE ? node.parentElement : node;
+  while (el && el !== writerViewEl) {
+    if (el.tagName === "PRE") return el;
+    el = el.parentElement;
+  }
+  return null;
+}
+
+/**
+ * Insert a <pre><code> block in place of (or immediately after) the trigger paragraph.
+ * `lang` is an optional language string (may be empty).
+ * `textBefore` is optional preceding text from the same paragraph that should be preserved.
+ */
+function buildCodeBlock(replaceTarget, lang, textBefore = "") {
+  const pre  = document.createElement("pre");
+  const code = document.createElement("code");
+  if (lang) code.className = `language-${lang}`;
+  const placeholder = document.createTextNode("");
+  code.appendChild(placeholder);
+  pre.appendChild(code);
+
+  if (textBefore) {
+    replaceTarget.textContent = textBefore;
+    if (replaceTarget.nextSibling) {
+      replaceTarget.parentNode.insertBefore(pre, replaceTarget.nextSibling);
+    } else {
+      replaceTarget.parentNode.appendChild(pre);
+    }
+  } else {
+    replaceTarget.parentNode.replaceChild(pre, replaceTarget);
+  }
+
+  writerViewEl.focus();
+  const r = document.createRange();
+  r.setStart(placeholder, 0);
+  r.collapse(true);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(r);
+  _savedRange = r.cloneRange();
+}
+
+/**
+ * Get the text content of the current visual line up to the caret position.
+ */
+function getLineTextBeforeCaret(range, block) {
+  const container = range.startContainer;
+  const offset    = range.startOffset;
+  if (container.nodeType === Node.TEXT_NODE) {
+    const textNodeBefore = container.textContent.slice(0, offset);
+    const lastNL = textNodeBefore.lastIndexOf("\n");
+    if (lastNL !== -1) {
+      return textNodeBefore.slice(lastNL + 1);
+    }
+    let lineText = textNodeBefore;
+    let sib = container.previousSibling;
+    while (sib) {
+      if (sib.nodeName === "BR") break;
+      if (sib.nodeType === Node.TEXT_NODE) {
+        const t = sib.textContent;
+        const nl = t.lastIndexOf("\n");
+        if (nl !== -1) {
+          lineText = t.slice(nl + 1) + lineText;
+          break;
+        }
+        lineText = t + lineText;
+      } else if (sib.nodeType === Node.ELEMENT_NODE) {
+        if (sib.tagName === "BR") break;
+        lineText = sib.textContent + lineText;
+      }
+      sib = sib.previousSibling;
+    }
+    return lineText;
+  } else if (container.nodeType === Node.ELEMENT_NODE) {
+    const childBefore = container.childNodes[offset - 1];
+    if (childBefore && childBefore.nodeType === Node.TEXT_NODE) {
+      const t = childBefore.textContent;
+      const nl = t.lastIndexOf("\n");
+      return nl !== -1 ? t.slice(nl + 1) : t;
+    }
+  }
+  return block.textContent;
+}
+
+/**
+ * Close the current code block and move caret to a new <p> that follows it.
+ * The caller must have already stripped the closing ``` from the DOM.
+ */
+function closeCodeBlock(pre) {
+  hideCodeControls();
+  applySyntaxHighlighting(pre);
+
+  // <p><br></p> is the browser-standard structure for an empty editable paragraph.
+  // An empty text node alone is not reliably focusable in WebKit.
+  const p  = document.createElement("p");
+  const br = document.createElement("br");
+  p.appendChild(br);
+
+  if (pre.nextSibling) {
+    pre.parentNode.insertBefore(p, pre.nextSibling);
+  } else {
+    pre.parentNode.appendChild(p);
+  }
+
+  // Focus the editor BEFORE setting the selection — calling focus() after
+  // would reset the caret back to wherever the browser defaults.
+  writerViewEl.focus();
+
+  const r = document.createRange();
+  r.setStart(p, 0); // place caret at the start of <p>, before the <br>
+  r.collapse(true);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(r);
+  _savedRange = r.cloneRange();
+}
+
+// ─── Floating Code Block Controls (Language Select + Done Button) ─────────────
+const SUPPORTED_LANGUAGES = [
+  { label: "Plain Text", value: "" },
+  { label: "Bash / Shell", value: "bash" },
+  { label: "C", value: "c" },
+  { label: "C++", value: "cpp" },
+  { label: "CMake", value: "cmake" },
+  { label: "CSS", value: "css" },
+  { label: "Go", value: "go" },
+  { label: "HTML", value: "html" },
+  { label: "Java", value: "java" },
+  { label: "JavaScript", value: "js" },
+  { label: "Make", value: "make" },
+  { label: "Markdown", value: "markdown" },
+  { label: "Python", value: "python" },
+  { label: "SQL", value: "sql" },
+  { label: "TeX / LaTeX", value: "tex" },
+  { label: "XML", value: "xml" },
+  { label: "YAML", value: "yaml" }
+];
+
+let _codeControlsBar = null;
+let _codeLangSelect  = null;
+let _codeCloseBtn    = null;
+let _activePre       = null;
+
+function ensureCodeControls() {
+  if (_codeControlsBar) return _codeControlsBar;
+
+  const bar = document.createElement("div");
+  bar.id = "code-controls-bar";
+  bar.classList.add("hidden");
+
+  // Language Dropdown <select>
+  const select = document.createElement("select");
+  select.id = "code-lang-select";
+  select.title = "Select Programming Language";
+
+  SUPPORTED_LANGUAGES.forEach(lang => {
+    const opt = document.createElement("option");
+    opt.value = lang.value;
+    opt.textContent = lang.label;
+    select.appendChild(opt);
+  });
+
+  // Keep caret/selection active when clicking dropdown
+  select.addEventListener("mousedown", (e) => {
+    e.stopPropagation();
+  });
+
+  select.addEventListener("change", () => {
+    if (!_activePre) return;
+    const code = _activePre.querySelector("code") || _activePre;
+    const selectedLang = select.value;
+    if (selectedLang) {
+      code.className = `language-${selectedLang}`;
+    } else {
+      code.className = "";
+    }
+    // Re-apply syntax highlighting with new language selection
+    applySyntaxHighlighting(_activePre);
+  });
+
+  // Floating Done button
+  const btn = document.createElement("button");
+  btn.id = "code-close-btn";
+  btn.title = "Close code block (or type ``` + Enter)";
+  btn.innerHTML = `<svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="1" y1="1" x2="9" y2="9"/><line x1="9" y1="1" x2="1" y2="9"/></svg> Done`;
+
+  btn.addEventListener("mousedown", (e) => {
+    e.preventDefault();
+    if (_activePre) closeCodeBlock(_activePre);
+  });
+
+  bar.appendChild(select);
+  bar.appendChild(btn);
+  document.body.appendChild(bar);
+
+  _codeControlsBar = bar;
+  _codeLangSelect  = select;
+  _codeCloseBtn    = btn;
+  return bar;
+}
+
+function showCodeControls(pre) {
+  _activePre = pre;
+  ensureCodeControls();
+
+  // Sync language select value with current pre's class
+  const code = pre.querySelector("code") || pre;
+  const currentClass = code.className || "";
+  const rawLang = currentClass.replace(/language-/, "").trim();
+  const normalized = typeof normalizeLanguage === "function" ? normalizeLanguage(rawLang) : rawLang;
+  _codeLangSelect.value = normalized || "";
+
+  // Position floating bar ABOVE the pre block so it never obstructs code lines
+  const rect = pre.getBoundingClientRect();
+  const topAppHeaderHeight = 110;
+  let topPos = rect.top - 32;
+
+  // If pre is near the top edge of the editor viewport, place it inside top-right
+  if (topPos < topAppHeaderHeight) {
+    topPos = rect.top + 6;
+  }
+
+  _codeControlsBar.style.top   = topPos + "px";
+  _codeControlsBar.style.right = Math.max(16, window.innerWidth - rect.right + 12) + "px";
+  _codeControlsBar.classList.remove("hidden");
+}
+
+function hideCodeControls() {
+  _activePre = null;
+  if (_codeControlsBar) _codeControlsBar.classList.add("hidden");
+}
+
+/** Called from selectionchange — checks actual caret position via getSelection(). */
+function updateCodeControls() {
+  const sel = window.getSelection();
+  if (!sel || !sel.rangeCount) { hideCodeControls(); return; }
+  const pre = getPreAncestor(sel.getRangeAt(0).startContainer);
+  if (pre) showCodeControls(pre);
+  else hideCodeControls();
+}
+
+/**
+ * Detect whether the current visual line (before the cursor) inside a <pre>
+ * is exactly ```. Handles both \n-based and <br>-based line breaks.
+ * If the closing fence is detected, removes it from the DOM and returns true.
+ */
+function tryCloseCodeFence(range) {
+  const container = range.startContainer;
+  const offset    = range.startOffset;
+
+  let targetNode = null;
+  if (container.nodeType === Node.TEXT_NODE) {
+    targetNode = container;
+  } else if (container.nodeType === Node.ELEMENT_NODE) {
+    targetNode = container.childNodes[offset - 1] || container.lastChild;
+  }
+
+  if (!targetNode) return false;
+
+  const fullText = targetNode.textContent || "";
+  const lastNL   = fullText.lastIndexOf("\n");
+  const lineText = lastNL !== -1 ? fullText.slice(lastNL + 1) : fullText;
+
+  if (lineText.trim() !== "```") return false;
+
+  // Cleanup: remove ONLY the closing ``` fence
+  if (targetNode.nodeType === Node.TEXT_NODE) {
+    if (lastNL !== -1) {
+      targetNode.textContent = fullText.slice(0, lastNL);
+    } else {
+      const parent  = targetNode.parentNode;
+      const prevSib = targetNode.previousSibling;
+      parent.removeChild(targetNode);
+      if (prevSib && prevSib.nodeName === "BR") {
+        parent.removeChild(prevSib);
+      }
+      if (parent && parent !== writerViewEl && parent.tagName !== "PRE" && parent.tagName !== "CODE" && parent.childNodes.length === 0) {
+        parent.parentNode?.removeChild(parent);
+      }
+    }
+  } else if (targetNode.nodeType === Node.ELEMENT_NODE) {
+    targetNode.parentNode?.removeChild(targetNode);
+  }
+
+  return true;
+}
+
 // ─── Enter Key in Writer Mode ─────────────────────────────────────────────────
 function handleWriterEnter(e) {
   const sel = window.getSelection();
   if (!sel || !sel.rangeCount) return false;
   const range = sel.getRangeAt(0);
+
+  // ── Close code block when ``` is typed on its own line inside a <pre> ──
+  const pre = getPreAncestor(range.startContainer);
+  if (pre) {
+    if (tryCloseCodeFence(range)) {
+      e.preventDefault();
+      closeCodeBlock(pre);
+      return true;
+    }
+    // Still inside the code block — let the browser insert a newline normally.
+    return false;
+  }
+
   const block = getBlockAncestor(range.startContainer);
   if (!block) return false;
-
-
 
   if (/^H[1-6]$/.test(block.tagName)) return false;
   if (block.tagName === "BLOCKQUOTE") return false;
 
   const text = block.textContent;
+  const lineText = getLineTextBeforeCaret(range, block);
+
+  // ── Code block trigger: ``` or ```lang ──
+  const cbm = lineText.trim().match(/^```([\w+-]*)$/);
+  if (cbm) {
+    e.preventDefault();
+    const lang = cbm[1];
+    const triggerIdx = text.lastIndexOf("```");
+    const textBefore = triggerIdx > 0 ? text.slice(0, triggerIdx).trimEnd() : "";
+    buildCodeBlock(block, lang, textBefore);
+    return true;
+  }
 
   // ── HR trigger: --- ──
   if (/^(-{3,}|\*{3,}|_{3,})$/.test(text.trim())) {
@@ -1379,6 +1736,56 @@ function handleKeydown(e) {
     if (handleWriterEnter(e)) return;
   }
 
+  // ── ArrowDown at the last line of a code block → jump to next paragraph ──
+  if (!isMarkdownMode && e.key === "ArrowDown" && !mod && !e.altKey && !e.shiftKey) {
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount > 0) {
+      const pre = getPreAncestor(sel.getRangeAt(0).startContainer);
+      if (pre) {
+        const range        = sel.getRangeAt(0);
+        const container    = range.startContainer;
+        const caretOffset  = range.startOffset;
+        const containerText = (container.nodeType === Node.TEXT_NODE ? container.textContent : "") || "";
+        const afterCaret   = containerText.slice(caretOffset);
+
+        // "On the last line" means:
+        //   (a) No \n after the caret in the current text node, AND
+        //   (b) No further sibling text nodes exist after the cursor node
+        //       (handles <br>-based breaks).
+        const noNewlineAfter = !afterCaret.includes("\n");
+        let noFollowingSibling = true;
+        if (container.nodeType === Node.TEXT_NODE) {
+          let sib = container.nextSibling;
+          while (sib) {
+            if (sib.nodeType === Node.TEXT_NODE && sib.textContent.length > 0) {
+              noFollowingSibling = false; break;
+            }
+            sib = sib.nextSibling;
+          }
+        }
+
+        if (noNewlineAfter && noFollowingSibling) {
+          let nextEl = pre.nextElementSibling;
+          if (!nextEl) {
+            const p = document.createElement("p");
+            p.appendChild(document.createTextNode(""));
+            pre.parentNode.appendChild(p);
+            nextEl = p;
+          }
+          e.preventDefault();
+          const firstChild = nextEl.firstChild || nextEl;
+          const r = document.createRange();
+          r.setStart(firstChild, 0);
+          r.collapse(true);
+          sel.removeAllRanges();
+          sel.addRange(r);
+          _savedRange = r.cloneRange();
+          return;
+        }
+      }
+    }
+  }
+
   if (!isMarkdownMode && e.key === " " && !mod && !e.altKey && !e.shiftKey) {
     if (handleSpaceInWriter()) { e.preventDefault(); return; }
   }
@@ -1476,19 +1883,29 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   try { platform = await invoke("get_platform"); } catch (_) { platform = "linux"; }
 
-  // ── Save selection whenever it changes in writer view ──
-  // This ensures toolbar buttons (which steal focus) still operate
-  // on the correct cursor position.
+  // ── Save selection + update Code Controls whenever caret moves in writer view ──
   document.addEventListener("selectionchange", () => {
     if (!isMarkdownMode && document.activeElement === writerViewEl) {
       saveSelection();
+      updateCodeControls();
     }
   });
-  writerViewEl.addEventListener("blur", saveSelection);
+  writerViewEl.addEventListener("blur", () => {
+    saveSelection();
+    setTimeout(() => {
+      if (document.activeElement !== _codeCloseBtn &&
+          document.activeElement !== _codeLangSelect &&
+          !_codeControlsBar?.contains(document.activeElement)) {
+        hideCodeControls();
+      }
+    }, 150);
+  });
 
   // ── Input events ──
   writerViewEl.addEventListener("input", (e) => { handleLiveMarkdown(e); debouncedStats(); });
   markdownInputEl.addEventListener("input", debouncedStats);
+
+
 
   // ── File buttons ──
   document.getElementById("toggle-mode-btn")?.addEventListener("click", toggleMode);

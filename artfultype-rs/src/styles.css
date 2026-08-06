@@ -753,7 +753,73 @@ body {
   padding: 1rem 1.1rem;
   overflow-x: auto;
   margin: 1rem 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+  position: relative;
 }
+
+/* Floating Code Controls (Language Select + Done Button) */
+#code-controls-bar {
+  position: fixed;
+  z-index: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  opacity: 0.95;
+  transition: opacity 0.12s;
+}
+#code-controls-bar.hidden {
+  display: none !important;
+}
+
+#code-lang-select {
+  appearance: none;
+  -webkit-appearance: none;
+  background-color: var(--bg-sidebar);
+  color: var(--purple);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 0.25rem 1.6rem 0.25rem 0.65rem;
+  font-family: var(--font-sans);
+  font-size: 0.75rem;
+  font-weight: 600;
+  outline: none;
+  cursor: pointer;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
+  background-image: url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1L5 5L9 1' stroke='%23bd93f9' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.5rem center;
+  transition: border-color 0.12s, background-color 0.12s;
+}
+#code-lang-select:hover,
+#code-lang-select:focus {
+  border-color: var(--purple);
+  background-color: var(--bg);
+}
+#code-lang-select option {
+  background-color: var(--bg-sidebar);
+  color: var(--fg);
+  font-family: var(--font-sans);
+}
+
+#code-close-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0.28rem 0.7rem;
+  background: var(--purple);
+  color: var(--bg);
+  border: none;
+  border-radius: 5px;
+  font-family: var(--font-sans);
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
+  transition: background-color 0.12s, transform 0.1s, opacity 0.1s;
+}
+#code-close-btn:hover  { background: var(--accent-hover); transform: translateY(-1px); }
+#code-close-btn:active { transform: translateY(0); }
 
 #writer-view pre code {
   background: transparent;
@@ -761,7 +827,23 @@ body {
   padding: 0;
   font-size: 0.9em;
   border-radius: 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+  display: block;
+  min-height: 1.5em;
 }
+
+/* Syntax Highlighting Tokens — Dracula Palette */
+.syn-keyword  { color: var(--pink); font-weight: 500; }
+.syn-string   { color: var(--yellow); }
+.syn-comment  { color: var(--comment); font-style: italic; }
+.syn-function { color: var(--green); }
+.syn-number   { color: var(--purple); }
+.syn-variable { color: var(--cyan); }
+.syn-operator { color: var(--pink); }
+.syn-type     { color: var(--cyan); font-style: italic; }
+.syn-tag      { color: var(--pink); font-weight: 500; }
+.syn-attr     { color: var(--green); }
 
 /* Blockquotes */
 #writer-view blockquote {
