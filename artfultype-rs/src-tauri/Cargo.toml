@@ -1,6 +1,6 @@
 [package]
 name = "artfultype-rs"
-version = "0.25.4"
+version = "0.25.5"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
