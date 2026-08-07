@@ -17,6 +17,14 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
+[[bin]]
+name = "artfultype-rs"
+path = "src/main.rs"
+
+[[bin]]
+name = "artfultype-cli"
+path = "src/cli_main.rs"
+
 [dependencies]
 tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
@@ -27,6 +35,9 @@ pulldown-cmark = "0.13.4"
 rfd = { version = "0.17.2", features = ["xdg-portal"] }
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros"] }
 base64 = "0.22"
+ratatui = "0.29.0"
+crossterm = "0.28.1"
+
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

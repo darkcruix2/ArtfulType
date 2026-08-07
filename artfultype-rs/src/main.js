@@ -1346,27 +1346,61 @@ function insertAdmonition(type = "note", titleText = "", bodyText = "") {
   }
 }
 
-// ─── Mode Toggle ──────────────────────────────────────────────────────────────
-async function toggleMode() {
-  if (isMarkdownMode) {
+// ─── View Modes (Writer, Markdown, Split) ───────────────────────────────────
+let currentViewMode = "writer"; // "writer", "markdown", or "split"
+
+async function setViewMode(mode) {
+  currentViewMode = mode;
+  const editorArea = document.getElementById("editor-area");
+  const writerBtn = document.getElementById("mode-writer-btn");
+  const mdBtn = document.getElementById("mode-markdown-btn");
+  const splitBtn = document.getElementById("mode-split-btn");
+
+  [writerBtn, mdBtn, splitBtn].forEach(b => b?.classList.remove("active"));
+  if (editorArea) {
+    editorArea.classList.remove("writer-active", "markdown-active", "split-active");
+  }
+
+  if (mode === "split") {
     isMarkdownMode = false;
-    markdownInputEl.classList.add("hidden");
-    writerViewEl.classList.remove("hidden");
-    toggleModeBtn.textContent = "Markdown Mode";
-    modeIndicatorEl.textContent = "Writer Mode";
+    splitBtn?.classList.add("active");
+    editorArea?.classList.add("split-active");
+    if (modeIndicatorEl) modeIndicatorEl.textContent = "Split Mode (Antigravity)";
+
+    const content = markdownInputEl.value || htmlToMarkdown(writerViewEl);
+    markdownInputEl.value = content;
+    await renderMarkdownToWriter(content);
+  } else if (mode === "markdown") {
+    isMarkdownMode = true;
+    mdBtn?.classList.add("active");
+    editorArea?.classList.add("markdown-active");
+    if (modeIndicatorEl) modeIndicatorEl.textContent = "Markdown Mode";
+
+    const md = htmlToMarkdown(writerViewEl) || markdownInputEl.value;
+    markdownInputEl.value = md;
+    markdownInputEl.focus();
+  } else {
+    currentViewMode = "writer";
+    isMarkdownMode = false;
+    writerBtn?.classList.add("active");
+    editorArea?.classList.add("writer-active");
+    if (modeIndicatorEl) modeIndicatorEl.textContent = "Writer Mode";
+
     await renderMarkdownToWriter(markdownInputEl.value);
     writerViewEl.focus();
-  } else {
-    isMarkdownMode = true;
-    const md = htmlToMarkdown(writerViewEl);
-    writerViewEl.classList.add("hidden");
-    markdownInputEl.classList.remove("hidden");
-    markdownInputEl.value = md;
-    toggleModeBtn.textContent = "Writer Mode";
-    modeIndicatorEl.textContent = "Markdown Mode";
-    markdownInputEl.focus();
   }
 }
+
+async function toggleMode() {
+  if (currentViewMode === "writer") {
+    await setViewMode("markdown");
+  } else if (currentViewMode === "markdown") {
+    await setViewMode("split");
+  } else {
+    await setViewMode("writer");
+  }
+}
+
 
 // ─── DOM Helpers ──────────────────────────────────────────────────────────────
 const BLOCK_TAGS = new Set([
@@ -3646,6 +3680,95 @@ window.addEventListener("DOMContentLoaded", async () => {
     });
   }
 
+  // ── Mode Segmented Control ──
+  document.getElementById("mode-writer-btn")?.addEventListener("click", () => setViewMode("writer"));
+  document.getElementById("mode-markdown-btn")?.addEventListener("click", () => setViewMode("markdown"));
+  document.getElementById("mode-split-btn")?.addEventListener("click", () => setViewMode("split"));
+
+  // ── TUI Menu Bar Button Handlers ──
+  document.getElementById("tui-menu-file-btn")?.addEventListener("click", (e) => { e.stopPropagation(); toggleTuiMenu("tui-file-menu", "tui-menu-file-btn"); });
+  document.getElementById("tui-menu-edit-btn")?.addEventListener("click", (e) => { e.stopPropagation(); toggleTuiMenu("tui-edit-menu", "tui-menu-edit-btn"); });
+  document.getElementById("tui-menu-format-btn")?.addEventListener("click", (e) => { e.stopPropagation(); toggleTuiMenu("tui-format-menu", "tui-menu-format-btn"); });
+  document.getElementById("tui-menu-view-btn")?.addEventListener("click", (e) => { e.stopPropagation(); toggleTuiMenu("tui-view-menu", "tui-menu-view-btn"); });
+  document.getElementById("tui-menu-theme-btn")?.addEventListener("click", (e) => { e.stopPropagation(); toggleTuiMenu("tui-theme-menu", "tui-menu-theme-btn"); });
+  document.getElementById("tui-menu-help-btn")?.addEventListener("click", (e) => { e.stopPropagation(); toggleTuiMenu("tui-help-menu", "tui-menu-help-btn"); });
+
+  // TUI File Items
+  document.getElementById("tui-file-new-btn")?.addEventListener("click", () => { closeAllTuiMenus(); newFile(); });
+  document.getElementById("tui-file-open-btn")?.addEventListener("click", () => { closeAllTuiMenus(); openFile(); });
+  document.getElementById("tui-file-save-btn")?.addEventListener("click", () => { closeAllTuiMenus(); saveFile(); });
+
+  // TUI Edit Items
+  document.getElementById("tui-edit-undo-btn")?.addEventListener("click", () => { closeAllTuiMenus(); doUndo(); });
+  document.getElementById("tui-edit-redo-btn")?.addEventListener("click", () => { closeAllTuiMenus(); doRedo(); });
+
+  // TUI Format Items
+  document.getElementById("tui-fmt-h1")?.addEventListener("click", () => { closeAllTuiMenus(); applyHeading(1); });
+  document.getElementById("tui-fmt-h2")?.addEventListener("click", () => { closeAllTuiMenus(); applyHeading(2); });
+  document.getElementById("tui-fmt-h3")?.addEventListener("click", () => { closeAllTuiMenus(); applyHeading(3); });
+  document.getElementById("tui-fmt-bold")?.addEventListener("click", () => { closeAllTuiMenus(); applyRichFormat("bold", "**"); });
+  document.getElementById("tui-fmt-italic")?.addEventListener("click", () => { closeAllTuiMenus(); applyRichFormat("italic", "*"); });
+  document.getElementById("tui-fmt-code")?.addEventListener("click", () => { closeAllTuiMenus(); applyCode(); });
+  document.getElementById("tui-fmt-highlight")?.addEventListener("click", () => { closeAllTuiMenus(); applyHighlight(); });
+  document.getElementById("tui-fmt-sub")?.addEventListener("click", () => { closeAllTuiMenus(); applySubscript(); });
+  document.getElementById("tui-fmt-sup")?.addEventListener("click", () => { closeAllTuiMenus(); applySuperscript(); });
+  document.getElementById("tui-fmt-ul")?.addEventListener("click", () => { closeAllTuiMenus(); applyUnorderedList(); });
+  document.getElementById("tui-fmt-ol")?.addEventListener("click", () => { closeAllTuiMenus(); applyOrderedList(); });
+  document.getElementById("tui-fmt-task")?.addEventListener("click", () => { closeAllTuiMenus(); applyTaskList(); });
+  document.getElementById("tui-fmt-quote")?.addEventListener("click", () => { closeAllTuiMenus(); applyBlockquote(); });
+  document.getElementById("tui-fmt-hr")?.addEventListener("click", () => { closeAllTuiMenus(); applyHorizontalRule(); });
+
+  // TUI View Items
+  document.getElementById("tui-view-writer")?.addEventListener("click", () => { closeAllTuiMenus(); setViewMode("writer"); });
+  document.getElementById("tui-view-markdown")?.addEventListener("click", () => { closeAllTuiMenus(); setViewMode("markdown"); });
+  document.getElementById("tui-view-split")?.addEventListener("click", () => { closeAllTuiMenus(); setViewMode("split"); });
+
+  // TUI Theme Items
+  document.querySelectorAll(".theme-option-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      closeAllTuiMenus();
+      const theme = btn.dataset.theme;
+      if (theme) applyThemeSetting(theme);
+    });
+  });
+
+  // TUI Help Items
+  document.getElementById("tui-help-about")?.addEventListener("click", () => { closeAllTuiMenus(); openModal("about-modal"); });
+
+  // Close TUI menus on clicking anywhere outside
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest(".tui-menubar") && !e.target.closest(".tui-dropdown")) {
+      closeAllTuiMenus();
+    }
+  });
+
+  // Synced scroll in Split View mode
+  let isSyncingScroll = false;
+  markdownInputEl.addEventListener("scroll", () => {
+    if (currentViewMode === "split" && !isSyncingScroll) {
+      isSyncingScroll = true;
+      const ratio = markdownInputEl.scrollTop / (markdownInputEl.scrollHeight - markdownInputEl.clientHeight || 1);
+      writerViewEl.scrollTop = ratio * (writerViewEl.scrollHeight - writerViewEl.clientHeight);
+      setTimeout(() => { isSyncingScroll = false; }, 50);
+    }
+  });
+  writerViewEl.addEventListener("scroll", () => {
+    if (currentViewMode === "split" && !isSyncingScroll) {
+      isSyncingScroll = true;
+      const ratio = writerViewEl.scrollTop / (writerViewEl.scrollHeight - writerViewEl.clientHeight || 1);
+      markdownInputEl.scrollTop = ratio * (markdownInputEl.scrollHeight - markdownInputEl.clientHeight);
+      setTimeout(() => { isSyncingScroll = false; }, 50);
+    }
+  });
+
+  // Live update writer view when typing in raw markdown in split mode
+  const debouncedSplitUpdate = debounce(async () => {
+    if (currentViewMode === "split") {
+      await renderMarkdownToWriter(markdownInputEl.value);
+    }
+  }, 100);
+  markdownInputEl.addEventListener("input", debouncedSplitUpdate);
+
   // ── Global keyboard shortcuts ──
   window.addEventListener("keydown", handleKeydown);
 
@@ -3692,13 +3815,62 @@ window.addEventListener("DOMContentLoaded", async () => {
     "---\n\n";
 
   markdownInputEl.value = defaultMd;
-  markdownInputEl.classList.add("hidden");
-  writerViewEl.classList.remove("hidden");
-  isMarkdownMode = false;
-  modeIndicatorEl.textContent = "Writer Mode";
-  toggleModeBtn.textContent = "Markdown Mode";
   await renderMarkdownToWriter(defaultMd);
   updateStats(defaultMd);
   setDirty(false);
-  writerViewEl.focus();
+
+  // ── CLI Launch Payload ──
+  try {
+    const cliArgs = await invoke("get_cli_args");
+    if (cliArgs) {
+      if (cliArgs.theme) {
+        applyThemeSetting(cliArgs.theme);
+      }
+      if (cliArgs.file_path && cliArgs.file_content != null) {
+        await applyOpenedFile({
+          path: cliArgs.file_path,
+          name: cliArgs.file_name || "file.md",
+          content: cliArgs.file_content
+        });
+        statusMessageEl.textContent = `Opened from CLI: ${cliArgs.file_name}`;
+      }
+      if (cliArgs.mode) {
+        const m = cliArgs.mode.toLowerCase();
+        if (m === "split" || m === "markdown" || m === "writer") {
+          await setViewMode(m);
+        }
+      } else {
+        await setViewMode("writer");
+      }
+    } else {
+      await setViewMode("writer");
+    }
+  } catch (err) {
+    console.log("No CLI args or CLI invoke error:", err);
+    await setViewMode("writer");
+  }
 });
+
+// ─── TUI Dropdown Menu Helpers ──────────────────────────────────────────────
+function toggleTuiMenu(menuId, btnId) {
+  const menu = document.getElementById(menuId);
+  const btn = document.getElementById(btnId);
+  if (!menu || !btn) return;
+
+  const isHidden = menu.classList.contains("hidden");
+  closeAllTuiMenus();
+
+  if (isHidden) {
+    const rect = btn.getBoundingClientRect();
+    menu.style.top = (rect.bottom + 4) + "px";
+    menu.style.left = rect.left + "px";
+    menu.classList.remove("hidden");
+    btn.classList.add("active");
+  }
+}
+
+function closeAllTuiMenus() {
+  document.querySelectorAll(".tui-dropdown").forEach(m => m.classList.add("hidden"));
+  document.querySelectorAll(".tui-menu-btn").forEach(b => b.classList.remove("active"));
+}
+

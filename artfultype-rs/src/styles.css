@@ -193,6 +193,214 @@
   --active-file-fg: #000000;
 }
 
+/* ── Dark Antigravity Terminal Theme ────────────────────────────────────────── */
+[data-theme="dark-antigravity"] {
+  --bg:           #0a0e14;
+  --bg-sidebar:   #0d1117;
+  --bg-header:    #0d1117;
+  --bg-elevated:  #161b22;
+  --bg-editor:    #0a0e14;
+  --selection:    #1f293d;
+  --fg:           #00f0ff;
+  --comment:      #5c6e8c;
+  --cyan:         #00f0ff;
+  --green:        #39ff14;
+  --orange:       #ff9e00;
+  --pink:         #ff007f;
+  --purple:       #7000ff;
+  --red:          #ff003c;
+  --yellow:       #ffee00;
+  --border:       #1b2536;
+  --glass-bg:     #0d1117;
+
+  --accent:       #00f0ff;
+  --accent-hover: #33f3ff;
+  --text-main:    #d0e6ff;
+  --text-muted:   #5c6e8c;
+
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Courier New', monospace;
+
+  --active-file-bg: rgba(0, 240, 255, 0.15);
+  --active-file-fg: #00f0ff;
+}
+
+/* ── Retro Green CRT Theme ──────────────────────────────────────────────────── */
+[data-theme="retro-green"] {
+  --bg:           #050e05;
+  --bg-sidebar:   #091409;
+  --bg-header:    #091409;
+  --bg-elevated:  #0f220f;
+  --bg-editor:    #050e05;
+  --selection:    #173817;
+  --fg:           #33ff33;
+  --comment:      #1f801f;
+  --cyan:         #66ff66;
+  --green:        #33ff33;
+  --orange:       #a3ff33;
+  --pink:         #33ff88;
+  --purple:       #33ff66;
+  --red:          #99ff33;
+  --yellow:       #ccff33;
+  --border:       #194019;
+  --glass-bg:     #091409;
+
+  --accent:       #33ff33;
+  --accent-hover: #66ff66;
+  --text-main:    #33ff33;
+  --text-muted:   #1f801f;
+
+  --font-sans: 'Courier New', 'JetBrains Mono', monospace;
+  --font-mono: 'Courier New', 'JetBrains Mono', monospace;
+
+  --active-file-bg: rgba(51, 255, 51, 0.2);
+  --active-file-fg: #33ff33;
+}
+
+/* ── Retro Amber CRT Theme ──────────────────────────────────────────────────── */
+[data-theme="retro-amber"] {
+  --bg:           #0f0b00;
+  --bg-sidebar:   #191200;
+  --bg-header:    #191200;
+  --bg-elevated:  #291e00;
+  --bg-editor:    #0f0b00;
+  --selection:    #3d2d00;
+  --fg:           #ffb000;
+  --comment:      #996a00;
+  --cyan:         #ffd066;
+  --green:        #ffb000;
+  --orange:       #ff8000;
+  --pink:         #ffa033;
+  --purple:       #ffb000;
+  --red:          #ff4500;
+  --yellow:       #ffe066;
+  --border:       #4d3600;
+  --glass-bg:     #191200;
+
+  --accent:       #ffb000;
+  --accent-hover: #ffd066;
+  --text-main:    #ffb000;
+  --text-muted:   #996a00;
+
+  --font-sans: 'Courier New', 'JetBrains Mono', monospace;
+  --font-mono: 'Courier New', 'JetBrains Mono', monospace;
+
+  --active-file-bg: rgba(255, 176, 0, 0.2);
+  --active-file-fg: #ffb000;
+}
+
+/* ── TUI Menu Bar & Badges ─────────────────────────────────────────────────── */
+.tui-menubar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 8px;
+}
+
+.tui-menu-btn {
+  background: transparent;
+  border: none;
+  color: var(--fg);
+  font-family: var(--font-sans);
+  font-size: 0.82rem;
+  font-weight: 500;
+  padding: 3px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.12s;
+}
+
+.tui-menu-btn:hover,
+.tui-menu-btn.active {
+  background: var(--selection);
+  color: var(--cyan);
+}
+
+.cli-badge {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: var(--cyan);
+  background: rgba(0, 240, 255, 0.12);
+  border: 1px solid var(--border);
+  padding: 2px 6px;
+  border-radius: 4px;
+  letter-spacing: 0.05em;
+}
+
+/* ── Mode Segmented Control ─────────────────────────────────────────────────── */
+.mode-segmented-group {
+  display: flex;
+  background: var(--bg-sidebar);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 2px;
+  gap: 2px;
+}
+
+.mode-tab-btn {
+  background: transparent;
+  border: none;
+  color: var(--comment);
+  font-family: var(--font-sans);
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.15s, color 0.15s;
+}
+
+.mode-tab-btn:hover {
+  color: var(--fg);
+}
+
+.mode-tab-btn.active {
+  background: var(--accent);
+  color: var(--bg);
+  font-weight: 700;
+}
+
+/* ── Split View Mode (Antigravity Mode) ────────────────────────────────────── */
+#editor-area.split-active {
+  display: flex;
+  flex-direction: row;
+}
+
+#editor-area.split-active #markdown-input {
+  display: block !important;
+  position: relative !important;
+  width: 50% !important;
+  height: 100% !important;
+  border-right: 1px solid var(--border) !important;
+}
+
+#editor-area.split-active #writer-view {
+  display: block !important;
+  position: relative !important;
+  width: 50% !important;
+  height: 100% !important;
+}
+
+#editor-area.writer-active #markdown-input { display: none !important; }
+#editor-area.writer-active #writer-view { display: block !important; position: absolute; inset: 0; }
+
+#editor-area.markdown-active #writer-view { display: none !important; }
+#editor-area.markdown-active #markdown-input { display: block !important; position: absolute; inset: 0; }
+
+.tui-dropdown {
+  min-width: 220px;
+}
+.menu-header {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--comment);
+  padding: 6px 12px 2px;
+  font-weight: 700;
+}
+
+
 /* ── BeOS Specific Visuals ─────────────────────────────────────────────────── */
 [data-theme="beos"] body {
   background: #336699;

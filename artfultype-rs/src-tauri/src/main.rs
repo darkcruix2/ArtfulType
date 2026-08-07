@@ -131,6 +131,62 @@ fn read_image_base64(path: String) -> Result<String, String> {
     Ok(format!("data:{mime};base64,{b64}"))
 }
 
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct CliPayload {
+    pub file_path: Option<String>,
+    pub file_name: Option<String>,
+    pub file_content: Option<String>,
+    pub mode: Option<String>,
+    pub theme: Option<String>,
+}
+
+#[tauri::command]
+fn get_cli_args() -> CliPayload {
+    let args: Vec<String> = std::env::args().collect();
+    let mut payload = CliPayload::default();
+
+    let mut i = 1;
+    while i < args.len() {
+        let arg = &args[i];
+        if arg == "--mode" && i + 1 < args.len() {
+            payload.mode = Some(args[i + 1].clone());
+            i += 2;
+            continue;
+        } else if arg.starts_with("--mode=") {
+            payload.mode = Some(arg.trim_start_matches("--mode=").to_string());
+            i += 1;
+            continue;
+        } else if arg == "--theme" && i + 1 < args.len() {
+            payload.theme = Some(args[i + 1].clone());
+            i += 2;
+            continue;
+        } else if arg.starts_with("--theme=") {
+            payload.theme = Some(arg.trim_start_matches("--theme=").to_string());
+            i += 1;
+            continue;
+        } else if !arg.starts_with('-') && payload.file_path.is_none() {
+            let path_buf = std::path::PathBuf::from(arg);
+            let abs_path = fs::canonicalize(&path_buf).unwrap_or_else(|_| path_buf.clone());
+            let path_str = abs_path.to_string_lossy().into_owned();
+            let name = abs_path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "untitled.md".into());
+            
+            if let Ok(content) = fs::read_to_string(&abs_path) {
+                payload.file_path = Some(path_str);
+                payload.file_name = Some(name);
+                payload.file_content = Some(content);
+            }
+            i += 1;
+            continue;
+        }
+        i += 1;
+    }
+
+    payload
+}
+
 #[tauri::command]
 fn rename_file(old_path: String, new_path: String) -> Result<(), String> {
     fs::rename(old_path, new_path).map_err(|e| e.to_string())
@@ -142,12 +198,30 @@ fn delete_file(path: String) -> Result<(), String> {
 }
 
 fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    for arg in &args[1..] {
+        if arg == "-h" || arg == "--help" {
+            println!("ArtfulType Terminal / CLI WebKit Executable v0.26.1");
+            println!("Usage: artfultype-rs [OPTIONS] [FILE]\n");
+            println!("Options:");
+            println!("  --mode <MODE>      Set initial view mode (writer | markdown | split)");
+            println!("  --theme <THEME>    Set initial theme (dark-antigravity | retro-green | retro-amber | dracula)");
+            println!("  -h, --help         Print help information");
+            println!("  -v, --version      Print version information");
+            return;
+        } else if arg == "-v" || arg == "--version" {
+            println!("ArtfulType Terminal / CLI WebKit Executable v0.26.1");
+            return;
+        }
+    }
+
     tauri::Builder::default()
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             parse_markdown,
             get_platform,
+            get_cli_args,
             open_file_dialog,
             save_file_dialog,
             save_file,
@@ -158,3 +232,4 @@ fn main() {
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
+
