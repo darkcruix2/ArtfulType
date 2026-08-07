@@ -22,6 +22,29 @@ enum ViewMode {
     Writer,
     Markdown,
     Split,
+    PureText,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum PopupState {
+    None,
+    QuitConfirm,
+    SaveAs {
+        current_dir: String,
+        entries: Vec<(String, bool)>,
+        selected: usize,
+        scroll: usize,
+        input: String,
+        input_focused: bool,
+    },
+    OpenFile {
+        current_dir: String,
+        entries: Vec<(String, bool)>,
+        selected: usize,
+        scroll: usize,
+    },
+    Search { input: String },
+    SearchReplace { search: String, replace: String, step: u8 }, // step 0: search, step 1: replace
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -107,12 +130,41 @@ struct ThemeColors {
     sel_fg: Color,
 }
 
+fn read_dir_entries(dir: &str) -> Vec<(String, bool)> {
+    let mut entries = Vec::new();
+    if let Ok(path) = std::path::PathBuf::from(dir).canonicalize() {
+        if path.parent().is_some() {
+            entries.push(("..".to_string(), true));
+        }
+        if let Ok(read_dir) = std::fs::read_dir(&path) {
+            let mut dirs = Vec::new();
+            let mut files = Vec::new();
+            for entry in read_dir.flatten() {
+                if let Ok(metadata) = entry.metadata() {
+                    let name = entry.file_name().to_string_lossy().to_string();
+                    if metadata.is_dir() {
+                        dirs.push((name, true));
+                    } else {
+                        files.push((name, false));
+                    }
+                }
+            }
+            dirs.sort_by(|a, b| a.0.to_lowercase().cmp(&b.0.to_lowercase()));
+            files.sort_by(|a, b| a.0.to_lowercase().cmp(&b.0.to_lowercase()));
+            entries.extend(dirs);
+            entries.extend(files);
+        }
+    }
+    entries
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum ActiveMenu {
     None,
     File,
     Edit,
     Format,
+    Manipulation,
     View,
     Theme,
     Help,
@@ -120,7 +172,9 @@ enum ActiveMenu {
 
 #[derive(Debug, Clone, Copy)]
 enum MenuAction {
+    OpenFile,
     SaveFile,
+    SaveAs,
     Quit,
     Heading1,
     Heading2,
@@ -133,11 +187,19 @@ enum MenuAction {
     ViewWriter,
     ViewMarkdown,
     ViewSplit,
+    ViewPureText,
     ThemeDarkAntigravity,
     ThemeRetroGreen,
     ThemeRetroAmber,
     ThemeDracula,
     ThemeVT100,
+    Undo,
+    Redo,
+    Search,
+    SearchReplace,
+    ReplaceAll,
+    Indent,
+    Unindent,
     NoOp,
 }
 
@@ -148,17 +210,22 @@ struct App {
     cursor_line: usize,
     cursor_col: usize,
     scroll_top: usize,
+    scroll_left: usize,
     // Selection anchor: set when Shift-movement begins; None = no selection.
     selection_anchor: Option<(usize, usize)>,
     // Internal clipboard for cut/copy/paste.
     clipboard: String,
+    history: Vec<String>,
+    history_index: usize,
     view_mode: ViewMode,
     theme: Theme,
     active_menu: ActiveMenu,
     menu_selected: usize,
+    popup: PopupState,
     dirty: bool,
     status_msg: String,
     should_quit: bool,
+    snapshot_disabled: bool,
 }
 
 impl App {
@@ -197,19 +264,56 @@ impl App {
         App {
             file_path,
             file_name,
-            content,
+            content: content.clone(),
             cursor_line: 0,
             cursor_col: 0,
             scroll_top: 0,
+            scroll_left: 0,
             selection_anchor: None,
             clipboard: String::new(),
+            history: vec![content.clone()],
+            history_index: 0,
             view_mode: initial_mode.unwrap_or(ViewMode::Split),
             theme: initial_theme.unwrap_or(Theme::DarkAntigravity),
             active_menu: ActiveMenu::None,
             menu_selected: 0,
+            popup: PopupState::None,
             dirty: false,
             status_msg: "Ready".to_string(),
             should_quit: false,
+            snapshot_disabled: false,
+        }
+    }
+
+    fn snapshot(&mut self) {
+        if self.snapshot_disabled { return; }
+        // truncate future redo history
+        self.history.truncate(self.history_index + 1);
+        self.history.push(self.content.clone());
+        if self.history.len() > 11 { // Keep up to 10 changes + initial state
+            self.history.remove(0);
+        }
+        self.history_index = self.history.len() - 1;
+        self.dirty = true;
+    }
+
+    fn undo(&mut self) {
+        if self.history_index > 0 {
+            self.history_index -= 1;
+            self.content = self.history[self.history_index].clone();
+            self.dirty = true; // or check if history_index == saved_index, but for simplicity let's set it dirty
+            self.ensure_cursor_valid();
+            self.status_msg = "Undo".to_string();
+        }
+    }
+
+    fn redo(&mut self) {
+        if self.history_index + 1 < self.history.len() {
+            self.history_index += 1;
+            self.content = self.history[self.history_index].clone();
+            self.dirty = true;
+            self.ensure_cursor_valid();
+            self.status_msg = "Redo".to_string();
         }
     }
 
@@ -253,7 +357,19 @@ impl App {
         }
     }
 
+    /// Keep scroll_left so that cursor_col is always visible inside inner_width columns.
+    fn clamp_scroll_x(&mut self, inner_width: usize) {
+        let w = inner_width.max(1);
+        // Add a small margin or just keep it tight
+        if self.cursor_col < self.scroll_left {
+            self.scroll_left = self.cursor_col;
+        } else if self.cursor_col >= self.scroll_left + w {
+            self.scroll_left = self.cursor_col + 1 - w;
+        }
+    }
+
     fn sync_content_from_lines(&mut self, lines: Vec<String>) {
+        self.snapshot();
         self.content = lines.join("\n");
         self.dirty = true;
     }
@@ -543,7 +659,8 @@ impl App {
     fn copy_selection(&mut self) {
         let text = self.selected_text();
         if !text.is_empty() {
-            self.clipboard = text;
+            self.clipboard = text.clone();
+            copy_to_system_clipboard(&text);
             self.status_msg = "Copied".to_string();
         }
     }
@@ -551,7 +668,8 @@ impl App {
     fn cut_selection(&mut self, inner_height: usize) {
         let text = self.selected_text();
         if !text.is_empty() {
-            self.clipboard = text;
+            self.clipboard = text.clone();
+            copy_to_system_clipboard(&text);
             self.delete_selection();
             self.clamp_scroll(inner_height);
             self.status_msg = "Cut".to_string();
@@ -562,6 +680,8 @@ impl App {
         if self.selection_anchor.is_some() {
             self.delete_selection();
         }
+        self.snapshot();
+        self.snapshot_disabled = true;
         let text = self.clipboard.clone();
         for c in text.chars() {
             if c == '\n' {
@@ -570,6 +690,7 @@ impl App {
                 self.insert_char(c);
             }
         }
+        self.snapshot_disabled = false;
         self.status_msg = "Pasted".to_string();
     }
 
@@ -600,21 +721,162 @@ impl App {
 
     fn save_file(&mut self) {
         if let Some(ref path) = self.file_path {
-            if fs::write(path, &self.content).is_ok() {
+            if std::fs::write(path, &self.content).is_ok() {
                 self.dirty = false;
                 self.status_msg = format!("Saved: {}", self.file_name);
             } else {
                 self.status_msg = "Error saving file".to_string();
             }
         } else {
-            self.status_msg = "No file path. Specify path on CLI.".to_string();
+            let dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")).to_string_lossy().to_string();
+            let entries = read_dir_entries(&dir);
+            self.popup = PopupState::SaveAs {
+                current_dir: dir,
+                entries,
+                selected: 0,
+                scroll: 0,
+                input: String::new(),
+                input_focused: false,
+            };
         }
+    }
+
+    fn select_all(&mut self) {
+        self.selection_anchor = Some((0, 0));
+        let (len, last_col) = {
+            let lines = self.get_lines();
+            (lines.len(), lines.last().map_or(0, |l| l.chars().count()))
+        };
+        self.cursor_line = len.saturating_sub(1);
+        self.cursor_col = last_col;
+    }
+
+    fn delete_to_end_of_line(&mut self) {
+        self.snapshot();
+        let mut lines = self.get_lines().iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        if self.cursor_line < lines.len() {
+            let line = &lines[self.cursor_line];
+            let bi = line.char_indices().map(|(i, _)| i).nth(self.cursor_col).unwrap_or(line.len());
+            let deleted = line[bi..].to_string();
+            if !deleted.is_empty() {
+                self.clipboard = deleted.clone();
+                copy_to_system_clipboard(&deleted);
+            }
+            lines[self.cursor_line] = line[..bi].to_string();
+            self.sync_content_from_lines(lines);
+        }
+    }
+
+    fn search_forward(&mut self, query: &str, inner_height: usize) {
+        if query.is_empty() { return; }
+        
+        let target = {
+            let lines = self.get_lines();
+            let mut res = None;
+            for (i, line) in lines.iter().enumerate().skip(self.cursor_line) {
+                let start_col = if i == self.cursor_line { self.cursor_col + 1 } else { 0 };
+                let bi = line.char_indices().map(|(idx, _)| idx).nth(start_col).unwrap_or(line.len());
+                if bi < line.len() {
+                    if let Some(pos) = line[bi..].find(query) {
+                        let prefix = &line[..bi + pos];
+                        res = Some((i, prefix.chars().count()));
+                        break;
+                    }
+                }
+            }
+            res
+        };
+        
+        if let Some((i, col)) = target {
+            self.cursor_line = i;
+            self.cursor_col = col;
+            self.clamp_scroll(inner_height);
+            self.start_selection();
+            self.cursor_col += query.chars().count();
+            self.clamp_scroll(inner_height);
+            self.status_msg = format!("Found '{}'", query);
+        } else {
+            self.status_msg = format!("'{}' not found", query);
+        }
+    }
+
+    fn replace_all(&mut self, search: &str, replace: &str) {
+        if search.is_empty() { return; }
+        self.snapshot();
+        self.content = self.content.replace(search, replace);
+        self.dirty = true;
+        self.ensure_cursor_valid();
+        self.status_msg = format!("Replaced all occurrences of '{}'", search);
+    }
+
+    fn indent_selection(&mut self) {
+        self.snapshot();
+        let mut lines = self.get_lines().iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let (start_line, end_line) = match self.selection_range() {
+            Some(((sl, _), (el, _))) => (sl, el),
+            None => (self.cursor_line, self.cursor_line),
+        };
+        for i in start_line..=end_line {
+            if i < lines.len() {
+                lines[i].insert_str(0, "    ");
+            }
+        }
+        self.sync_content_from_lines(lines);
+        self.cursor_col += 4;
+    }
+
+    fn unindent_selection(&mut self) {
+        self.snapshot();
+        let mut lines = self.get_lines().iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let (start_line, end_line) = match self.selection_range() {
+            Some(((sl, _), (el, _))) => (sl, el),
+            None => (self.cursor_line, self.cursor_line),
+        };
+        for i in start_line..=end_line {
+            if i < lines.len() {
+                if lines[i].starts_with("    ") {
+                    lines[i] = lines[i][4..].to_string();
+                } else if lines[i].starts_with('\t') {
+                    lines[i] = lines[i][1..].to_string();
+                }
+            }
+        }
+        self.sync_content_from_lines(lines);
+        self.cursor_col = self.cursor_col.saturating_sub(4);
     }
 
     fn execute_action(&mut self, action: MenuAction, inner_height: usize) {
         match action {
+            MenuAction::OpenFile => {
+                let dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")).to_string_lossy().to_string();
+                let entries = read_dir_entries(&dir);
+                self.popup = PopupState::OpenFile {
+                    current_dir: dir,
+                    entries,
+                    selected: 0,
+                    scroll: 0,
+                };
+            }
             MenuAction::SaveFile => self.save_file(),
-            MenuAction::Quit => self.should_quit = true,
+            MenuAction::SaveAs => {
+                let dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")).to_string_lossy().to_string();
+                let entries = read_dir_entries(&dir);
+                self.popup = PopupState::SaveAs {
+                    current_dir: dir,
+                    entries,
+                    selected: 0,
+                    scroll: 0,
+                    input: String::new(),
+                    input_focused: false,
+                };
+            }
+            MenuAction::Quit => {
+                if self.dirty {
+                    self.popup = PopupState::QuitConfirm;
+                } else {
+                    self.should_quit = true;
+                }
+            }
             MenuAction::Heading1 => self.insert_str_at_cursor("# "),
             MenuAction::Heading2 => self.insert_str_at_cursor("## "),
             MenuAction::Heading3 => self.insert_str_at_cursor("### "),
@@ -623,49 +885,90 @@ impl App {
             MenuAction::Code => self.wrap_selection_or_insert("`", "`", "`code`"),
             MenuAction::CalloutNote => self.insert_str_at_cursor("> [!NOTE]\n> "),
             MenuAction::TaskCheckbox => self.insert_str_at_cursor("- [ ] "),
-            MenuAction::ViewWriter => self.view_mode = ViewMode::Writer,
-            MenuAction::ViewMarkdown => self.view_mode = ViewMode::Markdown,
-            MenuAction::ViewSplit => self.view_mode = ViewMode::Split,
+            MenuAction::ViewWriter => {
+                self.view_mode = ViewMode::Writer;
+                if self.active_menu == ActiveMenu::Manipulation { self.active_menu = ActiveMenu::Format; }
+            }
+            MenuAction::ViewMarkdown => {
+                self.view_mode = ViewMode::Markdown;
+                if self.active_menu == ActiveMenu::Manipulation { self.active_menu = ActiveMenu::Format; }
+            }
+            MenuAction::ViewSplit => {
+                self.view_mode = ViewMode::Split;
+                if self.active_menu == ActiveMenu::Manipulation { self.active_menu = ActiveMenu::Format; }
+            }
+            MenuAction::ViewPureText => {
+                self.view_mode = ViewMode::PureText;
+                if self.active_menu == ActiveMenu::Format { self.active_menu = ActiveMenu::Manipulation; }
+            }
             MenuAction::ThemeDarkAntigravity => self.theme = Theme::DarkAntigravity,
             MenuAction::ThemeRetroGreen => self.theme = Theme::RetroGreen,
             MenuAction::ThemeRetroAmber => self.theme = Theme::RetroAmber,
             MenuAction::ThemeDracula => self.theme = Theme::Dracula,
             MenuAction::ThemeVT100 => self.theme = Theme::VT100,
+            MenuAction::Undo => self.undo(),
+            MenuAction::Redo => self.redo(),
+            MenuAction::Search => {
+                self.popup = PopupState::Search { input: String::new() };
+            }
+            MenuAction::SearchReplace => {
+                self.popup = PopupState::SearchReplace { search: String::new(), replace: String::new(), step: 0 };
+            }
+            MenuAction::ReplaceAll => {
+                self.popup = PopupState::SearchReplace { search: String::new(), replace: String::new(), step: 0 };
+            }
+            MenuAction::Indent => self.indent_selection(),
+            MenuAction::Unindent => self.unindent_selection(),
             MenuAction::NoOp => {}
         }
         self.clamp_scroll(inner_height);
-        self.active_menu = ActiveMenu::None;
+        // If a popup was opened, don't close active menu until popup is done,
+        // or close it now? Let's close the dropdown.
+        if self.popup == PopupState::None {
+            self.active_menu = ActiveMenu::None;
+        } else {
+            self.active_menu = ActiveMenu::None;
+        }
     }
 }
 
 fn get_menu_items(menu: ActiveMenu) -> Vec<(&'static str, MenuAction)> {
     match menu {
         ActiveMenu::File => vec![
-            ("[S] Save File  (Ctrl+S)", MenuAction::SaveFile),
-            ("[Q] Quit       (Ctrl+Q)", MenuAction::Quit),
+            ("[O] Open File...  (Ctrl+O)", MenuAction::OpenFile),
+            ("[S] Save File     (Ctrl+S)", MenuAction::SaveFile),
+            ("[A] Save As...", MenuAction::SaveAs),
+            ("[Q] Quit          (Ctrl+Q)", MenuAction::Quit),
         ],
         ActiveMenu::Edit => vec![
-            ("Copy          (Ctrl+C)", MenuAction::NoOp),
-            ("Cut           (Ctrl+X)", MenuAction::NoOp),
-            ("Paste         (Ctrl+V)", MenuAction::NoOp),
-            ("Bold          (Ctrl+B)", MenuAction::Bold),
-            ("Italic        (Ctrl+I)", MenuAction::Italic),
-            ("Code          (Ctrl+K)", MenuAction::Code),
+            ("Undo          (Ctrl+Alt+Z)", MenuAction::Undo),
+            ("Redo          (Ctrl+Alt+Y)", MenuAction::Redo),
+            ("Copy          (Ctrl+Alt+C)", MenuAction::NoOp),
+            ("Cut           (Ctrl+Alt+X)", MenuAction::NoOp),
+            ("Paste         (Ctrl+Alt+V)", MenuAction::NoOp),
         ],
         ActiveMenu::Format => vec![
             ("H1 Heading 1  (Ctrl+1)", MenuAction::Heading1),
             ("H2 Heading 2  (Ctrl+2)", MenuAction::Heading2),
             ("H3 Heading 3  (Ctrl+3)", MenuAction::Heading3),
-            ("Bold          (Ctrl+B)", MenuAction::Bold),
-            ("Italic        (Ctrl+I)", MenuAction::Italic),
-            ("Code          (Ctrl+K)", MenuAction::Code),
+            ("Bold      (Ctrl+Alt+B)", MenuAction::Bold),
+            ("Italic    (Ctrl+Alt+I)", MenuAction::Italic),
+            ("Code      (Ctrl+Alt+K)", MenuAction::Code),
             ("Callout Note", MenuAction::CalloutNote),
             ("Task Checkbox", MenuAction::TaskCheckbox),
+        ],
+        ActiveMenu::Manipulation => vec![
+            ("Search", MenuAction::Search),
+            ("Search and Replace", MenuAction::SearchReplace),
+            ("Replace All", MenuAction::ReplaceAll),
+            ("Indent Selection", MenuAction::Indent),
+            ("Unindent Selection", MenuAction::Unindent),
         ],
         ActiveMenu::View => vec![
             ("Writer Mode   (F2)", MenuAction::ViewWriter),
             ("Markdown Mode (F3)", MenuAction::ViewMarkdown),
             ("Split Mode    (F4)", MenuAction::ViewSplit),
+            ("Pure Text Mode (Ctrl+F2)", MenuAction::ViewPureText),
         ],
         ActiveMenu::Theme => vec![
             ("Dark Antigravity", MenuAction::ThemeDarkAntigravity),
@@ -676,7 +979,7 @@ fn get_menu_items(menu: ActiveMenu) -> Vec<(&'static str, MenuAction)> {
         ],
         ActiveMenu::Help => vec![
             ("Shift+Arrows: Select text", MenuAction::NoOp),
-            ("Ctrl+C/X/V: Copy/Cut/Paste", MenuAction::NoOp),
+            ("Ctrl+Alt+C/X/V: Copy/Cut/Paste", MenuAction::NoOp),
             ("Alt+F/E/O/V/T: Open Menus", MenuAction::NoOp),
             ("F2:Writer  F3:MD  F4:Split", MenuAction::NoOp),
             ("Ctrl+S:Save  Ctrl+Q:Quit", MenuAction::NoOp),
@@ -685,26 +988,36 @@ fn get_menu_items(menu: ActiveMenu) -> Vec<(&'static str, MenuAction)> {
     }
 }
 
-fn next_menu(m: ActiveMenu) -> ActiveMenu {
+fn next_menu(m: ActiveMenu, is_pure_text: bool) -> ActiveMenu {
     match m {
         ActiveMenu::File => ActiveMenu::Edit,
-        ActiveMenu::Edit => ActiveMenu::Format,
+        ActiveMenu::Edit => if is_pure_text { ActiveMenu::Manipulation } else { ActiveMenu::Format },
         ActiveMenu::Format => ActiveMenu::View,
+        ActiveMenu::Manipulation => ActiveMenu::View,
         ActiveMenu::View => ActiveMenu::Theme,
         ActiveMenu::Theme => ActiveMenu::Help,
         _ => ActiveMenu::File,
     }
 }
 
-fn prev_menu(m: ActiveMenu) -> ActiveMenu {
+fn prev_menu(m: ActiveMenu, is_pure_text: bool) -> ActiveMenu {
     match m {
         ActiveMenu::Edit => ActiveMenu::File,
         ActiveMenu::Format => ActiveMenu::Edit,
-        ActiveMenu::View => ActiveMenu::Format,
+        ActiveMenu::Manipulation => ActiveMenu::Edit,
+        ActiveMenu::View => if is_pure_text { ActiveMenu::Manipulation } else { ActiveMenu::Format },
         ActiveMenu::Theme => ActiveMenu::View,
         ActiveMenu::Help => ActiveMenu::Theme,
         _ => ActiveMenu::Help,
     }
+}
+
+fn copy_to_system_clipboard(text: &str) {
+    use base64::prelude::*;
+    use std::io::Write;
+    let b64 = BASE64_STANDARD.encode(text);
+    print!("\x1B]52;c;{}\x07", b64);
+    let _ = std::io::stdout().flush();
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -799,17 +1112,254 @@ fn run_app<B: ratatui::backend::Backend>(
                 // Compute inner height: full height minus menubar(1) + statusbar(1) + borders(2).
                 let ts = terminal.size()?;
                 let inner_h = ts.height.saturating_sub(4) as usize;
+                let inner_w = match app.view_mode {
+                    ViewMode::Split => (ts.width / 2).saturating_sub(8) as usize,
+                    ViewMode::Writer => ts.width.saturating_sub(2) as usize,
+                    _ => ts.width.saturating_sub(8) as usize,
+                };
 
                 let shift = key.modifiers.contains(KeyModifiers::SHIFT);
                 let ctrl  = key.modifiers.contains(KeyModifiers::CONTROL);
                 let alt   = key.modifiers.contains(KeyModifiers::ALT);
 
+                // ── Popup handling ───────────────────────────────────────
+                if app.popup != PopupState::None {
+                    match app.popup.clone() {
+                        PopupState::QuitConfirm => {
+                            match key.code {
+                                KeyCode::Char('y') | KeyCode::Char('Y') => {
+                                    app.save_file();
+                                    app.should_quit = true;
+                                    app.popup = PopupState::None;
+                                }
+                                KeyCode::Char('n') | KeyCode::Char('N') => {
+                                    app.should_quit = true;
+                                    app.popup = PopupState::None;
+                                }
+                                KeyCode::Esc => {
+                                    app.popup = PopupState::None;
+                                    app.status_msg = "Quit cancelled".to_string();
+                                }
+                                _ => {}
+                            }
+                        }
+                        PopupState::SaveAs { mut current_dir, mut entries, mut selected, mut scroll, mut input, mut input_focused } => {
+                            match key.code {
+                                KeyCode::Tab => {
+                                    input_focused = !input_focused;
+                                    app.popup = PopupState::SaveAs { current_dir, entries, selected, scroll, input, input_focused };
+                                }
+                                KeyCode::Up => {
+                                    if !input_focused {
+                                        if selected > 0 {
+                                            selected -= 1;
+                                            if selected < scroll {
+                                                scroll = selected;
+                                            }
+                                            if !entries.is_empty() && selected < entries.len() {
+                                                let (name, is_dir) = &entries[selected];
+                                                if !*is_dir {
+                                                    input = name.clone();
+                                                }
+                                            }
+                                        }
+                                    }
+                                    app.popup = PopupState::SaveAs { current_dir, entries, selected, scroll, input, input_focused };
+                                }
+                                KeyCode::Down => {
+                                    if !input_focused {
+                                        if !entries.is_empty() && selected < entries.len() - 1 {
+                                            selected += 1;
+                                            if selected >= scroll + 15 {
+                                                scroll = selected.saturating_sub(14);
+                                            }
+                                            if !entries.is_empty() && selected < entries.len() {
+                                                let (name, is_dir) = &entries[selected];
+                                                if !*is_dir {
+                                                    input = name.clone();
+                                                }
+                                            }
+                                        }
+                                    }
+                                    app.popup = PopupState::SaveAs { current_dir, entries, selected, scroll, input, input_focused };
+                                }
+                                KeyCode::Enter => {
+                                    if !input_focused && input.is_empty() {
+                                        if !entries.is_empty() && selected < entries.len() {
+                                            let (name, is_dir) = &entries[selected];
+                                            if *is_dir {
+                                                let new_path = if name == ".." {
+                                                    std::path::PathBuf::from(&current_dir).parent().unwrap_or_else(|| std::path::Path::new(&current_dir)).to_path_buf()
+                                                } else {
+                                                    std::path::PathBuf::from(&current_dir).join(name)
+                                                };
+                                                if let Ok(canon) = new_path.canonicalize() {
+                                                    current_dir = canon.to_string_lossy().to_string();
+                                                    entries = read_dir_entries(&current_dir);
+                                                    selected = 0;
+                                                    scroll = 0;
+                                                    app.popup = PopupState::SaveAs { current_dir, entries, selected, scroll, input, input_focused };
+                                                }
+                                            }
+                                        }
+                                    } else {
+                                        if !input.is_empty() {
+                                            let file_path = std::path::PathBuf::from(&current_dir).join(&input);
+                                            app.file_path = Some(file_path.to_string_lossy().to_string());
+                                            app.file_name = input.clone();
+                                            app.save_file();
+                                            app.popup = PopupState::None;
+                                        }
+                                    }
+                                }
+                                KeyCode::Esc => app.popup = PopupState::None,
+                                KeyCode::Char(c) => {
+                                    if input_focused {
+                                        input.push(c);
+                                        app.popup = PopupState::SaveAs { current_dir, entries, selected, scroll, input, input_focused };
+                                    }
+                                }
+                                KeyCode::Backspace => {
+                                    if input_focused {
+                                        input.pop();
+                                        app.popup = PopupState::SaveAs { current_dir, entries, selected, scroll, input, input_focused };
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                        PopupState::OpenFile { mut current_dir, mut entries, mut selected, mut scroll } => {
+                            match key.code {
+                                KeyCode::Up => {
+                                    if selected > 0 {
+                                        selected -= 1;
+                                        if selected < scroll {
+                                            scroll = selected;
+                                        }
+                                    }
+                                    app.popup = PopupState::OpenFile { current_dir, entries, selected, scroll };
+                                }
+                                KeyCode::Down => {
+                                    if !entries.is_empty() && selected < entries.len() - 1 {
+                                        selected += 1;
+                                        // Assume height of 15 items in popup
+                                        if selected >= scroll + 15 {
+                                            scroll = selected.saturating_sub(14);
+                                        }
+                                    }
+                                    app.popup = PopupState::OpenFile { current_dir, entries, selected, scroll };
+                                }
+                                KeyCode::Enter => {
+                                    if !entries.is_empty() && selected < entries.len() {
+                                        let (name, is_dir) = &entries[selected];
+                                        if *is_dir {
+                                            let new_path = if name == ".." {
+                                                std::path::PathBuf::from(&current_dir).parent().unwrap_or_else(|| std::path::Path::new(&current_dir)).to_path_buf()
+                                            } else {
+                                                std::path::PathBuf::from(&current_dir).join(name)
+                                            };
+                                            if let Ok(canon) = new_path.canonicalize() {
+                                                current_dir = canon.to_string_lossy().to_string();
+                                                entries = read_dir_entries(&current_dir);
+                                                selected = 0;
+                                                scroll = 0;
+                                                app.popup = PopupState::OpenFile { current_dir, entries, selected, scroll };
+                                            }
+                                        } else {
+                                            let file_path = std::path::PathBuf::from(&current_dir).join(name);
+                                            if let Ok(content) = std::fs::read_to_string(&file_path) {
+                                                app.content = content;
+                                                app.file_path = Some(file_path.to_string_lossy().to_string());
+                                                app.file_name = name.clone();
+                                                app.cursor_line = 0;
+                                                app.cursor_col = 0;
+                                                app.scroll_top = 0;
+                                                app.scroll_left = 0;
+                                                app.dirty = false;
+                                                app.history.clear();
+                                                app.history_index = 0;
+                                                app.snapshot();
+                                                app.clear_selection();
+                                                app.status_msg = format!("Opened file {}", app.file_name);
+                                            } else {
+                                                app.status_msg = format!("Failed to read file: {}", file_path.to_string_lossy());
+                                            }
+                                            app.popup = PopupState::None;
+                                        }
+                                    }
+                                }
+                                KeyCode::Esc => app.popup = PopupState::None,
+                                _ => {}
+                            }
+                        }
+                        PopupState::Search { mut input } => {
+                            match key.code {
+                                KeyCode::Enter => {
+                                    let query = input.clone();
+                                    app.popup = PopupState::None;
+                                    app.search_forward(&query, inner_h);
+                                }
+                                KeyCode::Esc => app.popup = PopupState::None,
+                                KeyCode::Char(c) => {
+                                    input.push(c);
+                                    app.popup = PopupState::Search { input };
+                                }
+                                KeyCode::Backspace => {
+                                    input.pop();
+                                    app.popup = PopupState::Search { input };
+                                }
+                                _ => {}
+                            }
+                        }
+                        PopupState::SearchReplace { mut search, mut replace, step } => {
+                            match key.code {
+                                KeyCode::Enter => {
+                                    if step == 0 {
+                                        app.popup = PopupState::SearchReplace { search, replace, step: 1 };
+                                    } else {
+                                        let s = search.clone();
+                                        let r = replace.clone();
+                                        app.popup = PopupState::None;
+                                        app.replace_all(&s, &r);
+                                    }
+                                }
+                                KeyCode::Esc => app.popup = PopupState::None,
+                                KeyCode::Char(c) => {
+                                    if step == 0 {
+                                        search.push(c);
+                                    } else {
+                                        replace.push(c);
+                                    }
+                                    app.popup = PopupState::SearchReplace { search, replace, step };
+                                }
+                                KeyCode::Backspace => {
+                                    if step == 0 {
+                                        search.pop();
+                                    } else {
+                                        replace.pop();
+                                    }
+                                    app.popup = PopupState::SearchReplace { search, replace, step };
+                                }
+                                _ => {}
+                            }
+                        }
+                        _ => {}
+                    }
+                    continue;
+                }
+
                 // ── Alt key: open menus ──────────────────────────────────
-                if alt {
+                if alt && !ctrl {
                     match key.code {
                         KeyCode::Char('f') | KeyCode::Char('F') => app.open_menu(ActiveMenu::File),
                         KeyCode::Char('e') | KeyCode::Char('E') => app.open_menu(ActiveMenu::Edit),
-                        KeyCode::Char('o') | KeyCode::Char('O') => app.open_menu(ActiveMenu::Format),
+                        KeyCode::Char('o') | KeyCode::Char('O') => {
+                            if app.view_mode == ViewMode::PureText {
+                                app.open_menu(ActiveMenu::Manipulation)
+                            } else {
+                                app.open_menu(ActiveMenu::Format)
+                            }
+                        }
                         KeyCode::Char('v') | KeyCode::Char('V') => app.open_menu(ActiveMenu::View),
                         KeyCode::Char('t') | KeyCode::Char('T') => app.open_menu(ActiveMenu::Theme),
                         KeyCode::Char('h') | KeyCode::Char('H') => app.open_menu(ActiveMenu::Help),
@@ -836,8 +1386,8 @@ fn run_app<B: ratatui::backend::Backend>(
                                     (app.menu_selected + 1).min(items.len() - 1);
                             }
                         }
-                        KeyCode::Left => app.open_menu(prev_menu(app.active_menu)),
-                        KeyCode::Right => app.open_menu(next_menu(app.active_menu)),
+                        KeyCode::Left => app.open_menu(prev_menu(app.active_menu, app.view_mode == ViewMode::PureText)),
+                        KeyCode::Right => app.open_menu(next_menu(app.active_menu, app.view_mode == ViewMode::PureText)),
                         KeyCode::Enter | KeyCode::Char(' ') => {
                             if app.menu_selected < items.len() {
                                 let action = items[app.menu_selected].1;
@@ -853,23 +1403,43 @@ fn run_app<B: ratatui::backend::Backend>(
 
                 // ── Ctrl shortcuts ───────────────────────────────────────
                 if ctrl {
-                    match key.code {
-                        KeyCode::Char('q') => app.should_quit = true,
-                        KeyCode::Char('s') => app.save_file(),
-                        KeyCode::Char('c') => app.copy_selection(),
-                        KeyCode::Char('x') => app.cut_selection(inner_h),
-                        KeyCode::Char('v') => app.paste(),
-                        KeyCode::Char('b') => app.wrap_selection_or_insert("**", "**", "**bold**"),
-                        KeyCode::Char('i') => app.wrap_selection_or_insert("*", "*", "*italic*"),
-                        KeyCode::Char('k') => app.wrap_selection_or_insert("`", "`", "`code`"),
-                        KeyCode::Char('1') => app.insert_str_at_cursor("# "),
-                        KeyCode::Char('2') => app.insert_str_at_cursor("## "),
-                        KeyCode::Char('3') => app.insert_str_at_cursor("### "),
-                        KeyCode::Home | KeyCode::Up => app.move_to_file_start(),
-                        KeyCode::End | KeyCode::Down => app.move_to_file_end(inner_h),
-                        _ => {}
+                    if alt {
+                        match key.code {
+                            KeyCode::Char('z') => app.undo(),
+                            KeyCode::Char('y') => app.redo(),
+                            KeyCode::Char('c') => app.copy_selection(),
+                            KeyCode::Char('x') => app.cut_selection(inner_h),
+                            KeyCode::Char('v') => app.paste(),
+                            KeyCode::Char('b') => app.wrap_selection_or_insert("**", "**", "**bold**"),
+                            KeyCode::Char('i') => app.wrap_selection_or_insert("*", "*", "*italic*"),
+                            KeyCode::Char('k') => app.wrap_selection_or_insert("`", "`", "`code`"),
+                            KeyCode::Char('a') => app.select_all(),
+                            _ => {}
+                        }
+                    } else {
+                        match key.code {
+                            KeyCode::Char('a') => app.select_all(),
+                            KeyCode::Char('k') => app.delete_to_end_of_line(),
+                            KeyCode::Char('q') => {
+                                if app.dirty {
+                                    app.popup = PopupState::QuitConfirm;
+                                } else {
+                                    app.should_quit = true;
+                                }
+                            }
+                            KeyCode::Char('s') => app.save_file(),
+                            KeyCode::Char('o') => app.execute_action(MenuAction::OpenFile, inner_h),
+                            KeyCode::Char('1') => app.insert_str_at_cursor("# "),
+                            KeyCode::Char('2') => app.insert_str_at_cursor("## "),
+                            KeyCode::Char('3') => app.insert_str_at_cursor("### "),
+                            KeyCode::Home | KeyCode::Up => app.move_to_file_start(),
+                            KeyCode::End | KeyCode::Down => app.move_to_file_end(inner_h),
+                            KeyCode::F(2) => app.view_mode = ViewMode::PureText,
+                            _ => {}
+                        }
                     }
                     app.clamp_scroll(inner_h);
+                    app.clamp_scroll_x(inner_w);
                     continue;
                 }
 
@@ -916,6 +1486,7 @@ fn run_app<B: ratatui::backend::Backend>(
                         _ => {}
                     }
                     app.clamp_scroll(inner_h);
+                    app.clamp_scroll_x(inner_w);
                     continue;
                 }
 
@@ -943,6 +1514,7 @@ fn run_app<B: ratatui::backend::Backend>(
                 }
                 // Sync scroll after every keypress
                 app.clamp_scroll(inner_h);
+                app.clamp_scroll_x(inner_w);
             }
         }
 
@@ -984,8 +1556,12 @@ fn ui(f: &mut ratatui::Frame, app: &App) {
             },
         ),
         Span::styled(
-            " [Format] ",
-            if app.active_menu == ActiveMenu::Format {
+            if app.view_mode == ViewMode::PureText {
+                " [Manipulation] "
+            } else {
+                " [Format] "
+            },
+            if app.active_menu == ActiveMenu::Format || app.active_menu == ActiveMenu::Manipulation {
                 Style::default().bg(colors.accent).fg(colors.bg).add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(colors.fg)
@@ -1030,10 +1606,11 @@ fn ui(f: &mut ratatui::Frame, app: &App) {
     let cursor_row_in_view = app.cursor_line.saturating_sub(app.scroll_top);
 
     match app.view_mode {
-        ViewMode::Markdown => {
+        ViewMode::Markdown | ViewMode::PureText => {
             render_markdown_editor(f, editor_rect, app, &colors);
             if app.active_menu == ActiveMenu::None && cursor_row_in_view < inner_h {
-                let cx = inner_x + 6 + app.cursor_col as u16;
+                let col = app.cursor_col.saturating_sub(app.scroll_left) as u16;
+                let cx = inner_x + 6 + col;
                 let cy = inner_y + cursor_row_in_view as u16;
                 f.set_cursor_position((cx, cy));
             }
@@ -1041,7 +1618,8 @@ fn ui(f: &mut ratatui::Frame, app: &App) {
         ViewMode::Writer => {
             render_writer_view(f, editor_rect, app, &colors);
             if app.active_menu == ActiveMenu::None && cursor_row_in_view < inner_h {
-                let cx = inner_x + app.cursor_col as u16;
+                let col = app.cursor_col.saturating_sub(app.scroll_left) as u16;
+                let cx = inner_x + col;
                 let cy = inner_y + cursor_row_in_view as u16;
                 f.set_cursor_position((cx, cy));
             }
@@ -1054,9 +1632,10 @@ fn ui(f: &mut ratatui::Frame, app: &App) {
             render_markdown_editor(f, split[0], app, &colors);
             render_writer_view(f, split[1], app, &colors);
             if app.active_menu == ActiveMenu::None && cursor_row_in_view < inner_h {
+                let col = app.cursor_col.saturating_sub(app.scroll_left) as u16;
                 let left_inner_x = split[0].x + 1;
                 let left_inner_y = split[0].y + 1;
-                let cx = left_inner_x + 6 + app.cursor_col as u16;
+                let cx = left_inner_x + 6 + col;
                 let cy = left_inner_y + cursor_row_in_view as u16;
                 f.set_cursor_position((cx, cy));
             }
@@ -1070,6 +1649,7 @@ fn ui(f: &mut ratatui::Frame, app: &App) {
         ViewMode::Writer => "Writer",
         ViewMode::Markdown => "Markdown",
         ViewMode::Split => "Split",
+        ViewMode::PureText => "PureText",
     };
     let dirty = if app.dirty { " *" } else { "" };
     let theme_tag = if app.theme == Theme::VT100 { " (VT100)" } else { "" };
@@ -1101,6 +1681,122 @@ fn ui(f: &mut ratatui::Frame, app: &App) {
     if app.active_menu != ActiveMenu::None {
         render_dropdown_popup(f, app, &colors);
     }
+
+    // ── Popups ──
+    if app.popup != PopupState::None {
+        render_popup(f, app, &colors);
+    }
+}
+
+fn render_popup(f: &mut ratatui::Frame, app: &App, colors: &ThemeColors) {
+    let size = f.area();
+    let mut height = 5;
+    let mut width = 40;
+    if let PopupState::OpenFile { .. } | PopupState::SaveAs { .. } = &app.popup {
+        height = 20;
+        width = 60;
+    }
+
+    let area = Rect::new(
+        (size.width.saturating_sub(width)) / 2,
+        (size.height.saturating_sub(height)) / 2,
+        width.min(size.width),
+        height.min(size.height),
+    );
+    f.render_widget(Clear, area);
+
+    let (title, content_lines) = match &app.popup {
+        PopupState::QuitConfirm => {
+            (
+                " Quit ",
+                vec![
+                    "File has unsaved changes.".to_string(),
+                    "Save before quitting? [Y/N/Esc]".to_string(),
+                ]
+            )
+        }
+        PopupState::SaveAs { current_dir, entries, selected, scroll, input, input_focused } => {
+            let mut lines = vec![format!("Dir: {}", current_dir), "".to_string()];
+            let display_count = height.saturating_sub(7) as usize; // account for borders (2), headers/footers (5)
+            for (i, (name, is_dir)) in entries.iter().skip(*scroll).take(display_count).enumerate() {
+                let actual_idx = i + scroll;
+                let cursor = if !*input_focused && actual_idx == *selected { ">" } else { " " };
+                let icon = if *is_dir { "📁" } else { "📄" };
+                lines.push(format!("{} {} {}", cursor, icon, name));
+            }
+            if entries.len() > scroll + display_count {
+                lines.push("   ...".to_string());
+            }
+            lines.push("".to_string());
+            let input_cursor = if *input_focused { "_" } else { "" };
+            lines.push(format!("Save as [Tab]: {}{}", input, input_cursor));
+            (
+                " Save As ",
+                lines
+            )
+        }
+        PopupState::OpenFile { current_dir, entries, selected, scroll } => {
+            let mut lines = vec![format!("Dir: {}", current_dir), "".to_string()];
+            let display_count = height.saturating_sub(5) as usize; // account for borders (2), headers/footers (3)
+            for (i, (name, is_dir)) in entries.iter().skip(*scroll).take(display_count).enumerate() {
+                let actual_idx = i + scroll;
+                let cursor = if actual_idx == *selected { ">" } else { " " };
+                let icon = if *is_dir { "📁" } else { "📄" };
+                lines.push(format!("{} {} {}", cursor, icon, name));
+            }
+            if entries.len() > scroll + display_count {
+                lines.push("   ...".to_string());
+            }
+            (
+                " Open File ",
+                lines
+            )
+        }
+        PopupState::Search { input } => {
+            (
+                " Search ",
+                vec![
+                    "Search for:".to_string(),
+                    format!("> {}", input),
+                ]
+            )
+        }
+        PopupState::SearchReplace { search, replace, step } => {
+            if *step == 0 {
+                (
+                    " Search & Replace ",
+                    vec![
+                        "Search for:".to_string(),
+                        format!("> {}", search),
+                    ]
+                )
+            } else {
+                (
+                    " Search & Replace ",
+                    vec![
+                        format!("Replace '{}' with:", search),
+                        format!("> {}", replace),
+                    ]
+                )
+            }
+        }
+        PopupState::None => ("", vec![]),
+    };
+
+    let p = Paragraph::new(
+        content_lines.into_iter()
+            .map(|l| Line::from(Span::styled(l, Style::default().fg(colors.fg))))
+            .collect::<Vec<_>>()
+    )
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(title)
+            .border_style(Style::default().fg(colors.accent))
+    )
+    .style(Style::default().bg(colors.bg));
+
+    f.render_widget(p, area);
 }
 
 /// Styled writer preview — one rendered line per source line, no word-wrap.
@@ -1223,13 +1919,25 @@ fn render_writer_view(f: &mut ratatui::Frame, area: Rect, app: &App, colors: &Th
         })
         .collect();
 
+    let inner_width = area.width.saturating_sub(2) as usize;
+    
+    let right_scrolled = app.get_lines().iter().skip(app.scroll_top).take(area.height as usize).any(|l| l.chars().count() > app.scroll_left + inner_width);
+    
+    let mut block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(colors.accent))
+        .title(ratatui::widgets::block::Title::from(" Writer Preview ").alignment(ratatui::layout::Alignment::Center));
+
+    if app.scroll_left > 0 {
+        block = block.title(ratatui::widgets::block::Title::from(" < ").alignment(ratatui::layout::Alignment::Left));
+    }
+    if right_scrolled {
+        block = block.title(ratatui::widgets::block::Title::from(" > ").alignment(ratatui::layout::Alignment::Right));
+    }
+
     let p = Paragraph::new(Text::from(rendered))
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(" Writer Preview ")
-                .border_style(Style::default().fg(colors.accent)),
-        )
+        .block(block)
+        .scroll((0, app.scroll_left as u16))
         .style(Style::default().bg(colors.bg));
     f.render_widget(p, area);
 }
@@ -1251,38 +1959,54 @@ fn render_markdown_editor(
         .enumerate()
         .skip(app.scroll_top)
         .map(|(idx, line)| {
-            let num_span = Span::styled(
-                format!("{:3} {sep} ", idx + 1),
-                Style::default().fg(colors.muted),
-            );
-
             let chars: Vec<char> = line.chars().collect();
             let len = chars.len();
+
+            let inner_width = area.width.saturating_sub(8) as usize;
+            let mut line_sep = sep.to_string();
+            let mut sep_style = Style::default().fg(colors.muted);
+
+            if app.scroll_left > 0 && len > 0 {
+                line_sep = "<".to_string();
+                sep_style = Style::default().fg(colors.accent).add_modifier(Modifier::BOLD);
+            } else if len > app.scroll_left + inner_width {
+                line_sep = ">".to_string();
+                sep_style = Style::default().fg(colors.accent).add_modifier(Modifier::BOLD);
+            }
+
+            let num_span = Span::styled(
+                format!("{:3} {line_sep} ", idx + 1),
+                sep_style,
+            );
+
+            let display_chars: Vec<char> = chars.into_iter().skip(app.scroll_left).collect();
+            let display_len = display_chars.len();
 
             // Determine selection column range for this specific line.
             let sel_range: Option<(usize, usize)> = sel.and_then(|((sl, sc), (el, ec))| {
                 if idx < sl || idx > el { return None; }
                 let start = if idx == sl { sc.min(len) } else { 0 };
                 let end   = if idx == el { ec.min(len) } else { len };
-                if start == end { None } else { Some((start, end)) }
+                
+                let adj_start = start.saturating_sub(app.scroll_left).min(display_len);
+                let adj_end = end.saturating_sub(app.scroll_left).min(display_len);
+                
+                if adj_start == adj_end { None } else { Some((adj_start, adj_end)) }
             });
 
             match sel_range {
                 None => {
-                    // No selection on this line.
                     Line::from(vec![num_span,
-                        Span::styled(line.to_string(), Style::default().fg(colors.fg))])
+                        Span::styled(display_chars.into_iter().collect::<String>(), Style::default().fg(colors.fg))])
                 }
-                Some((start, end)) if start == 0 && end == len => {
-                    // Entire line selected.
+                Some((start, end)) if start == 0 && end == display_len => {
                     Line::from(vec![num_span,
-                        Span::styled(line.to_string(), Style::default().fg(sel_fg).bg(sel_bg))])
+                        Span::styled(display_chars.into_iter().collect::<String>(), Style::default().fg(sel_fg).bg(sel_bg))])
                 }
                 Some((start, end)) => {
-                    // Partial line selection: split into before / selected / after.
-                    let before:   String = chars[..start].iter().collect();
-                    let selected: String = chars[start..end].iter().collect();
-                    let after:    String = chars[end..].iter().collect();
+                    let before:   String = display_chars[..start].iter().collect();
+                    let selected: String = display_chars[start..end].iter().collect();
+                    let after:    String = display_chars[end..].iter().collect();
                     let mut spans = vec![num_span];
                     if !before.is_empty() {
                         spans.push(Span::styled(before, Style::default().fg(colors.fg)));
@@ -1297,13 +2021,16 @@ fn render_markdown_editor(
         })
         .collect();
 
+    let inner_width = area.width.saturating_sub(8) as usize;
+    
+    let base_title = if app.view_mode == ViewMode::PureText { " Pure Text Editor " } else { " Markdown Editor " };
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(colors.border))
+        .title(ratatui::widgets::block::Title::from(base_title).alignment(ratatui::layout::Alignment::Center));
+
     let p = Paragraph::new(Text::from(lines))
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(" Markdown Editor ")
-                .border_style(Style::default().fg(colors.border)),
-        )
+        .block(block)
         .style(Style::default().bg(colors.bg));
     f.render_widget(p, area);
 }
@@ -1316,6 +2043,7 @@ fn render_dropdown_popup(f: &mut ratatui::Frame, app: &App, colors: &ThemeColors
         ActiveMenu::View => (" View ", 27),
         ActiveMenu::Theme => (" Theme ", 35),
         ActiveMenu::Help => (" Help ", 44),
+        ActiveMenu::Manipulation => (" Manipulation ", 17),
         ActiveMenu::None => return,
     };
 
