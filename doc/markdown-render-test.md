@@ -75,3 +75,12 @@ alert(message);
 ## Inline code
 
 This web site is using `markedjs/marked`.
+
+## Admonitions
+
+!!! note "Important Note"
+    This is an admonition block supporting Markdown Guide syntax.
+
+> [!WARNING] Urgent Attention
+> Please review system requirements before upgrading.
+

@@ -114,6 +114,10 @@
             <button id="quote-btn" class="icon-btn fmt-btn" title="Blockquote (Ctrl+Q)">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M3 21c3 0 7-1 7-8V5c0-1.25-.756-2.017-2-2H4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2 1 0 1 0 1 1v1c0 1-1 2-2 2s-1 .008-1 1.031V20c0 1 0 1 1 1z"/><path d="M15 21c3 0 7-1 7-8V5c0-1.25-.757-2.017-2-2h-4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2h.75c0 2.25.25 4-2.75 4v3c0 1 0 1 1 1z"/></svg>
             </button>
+            <button id="admonition-btn" class="icon-btn fmt-btn admonition-main-btn" title="Insert Admonition Callout (Ctrl+Shift+A)">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="12" y1="9" x2="12.01" y2="9"/></svg>
+              <span class="btn-arrow">▾</span>
+            </button>
             <button id="hr-btn" class="icon-btn fmt-btn" title="Horizontal Rule">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="3" y1="12" x2="21" y2="12"/></svg>
             </button>
@@ -265,6 +269,34 @@
         <button id="menu-table-align-left" class="menu-item flex-item"><span>⯇ Align Left</span></button>
         <button id="menu-table-align-center" class="menu-item flex-item"><span>⯂ Center</span></button>
         <button id="menu-table-align-right" class="menu-item flex-item"><span>⯈ Align Right</span></button>
+      </div>
+    </div>
+
+    <!-- Admonition Popover Dropdown -->
+    <div id="admonition-menu" class="dropdown-menu admonition-dropdown hidden">
+      <div class="table-popover-title">Insert Admonition</div>
+      <div class="admonition-picker-grid">
+        <button class="menu-item admonition-type-btn" data-type="note">
+          <span class="adm-icon">ℹ️</span> <span>Note</span>
+        </button>
+        <button class="menu-item admonition-type-btn" data-type="tip">
+          <span class="adm-icon">💡</span> <span>Tip</span>
+        </button>
+        <button class="menu-item admonition-type-btn" data-type="important">
+          <span class="adm-icon">⚡</span> <span>Important</span>
+        </button>
+        <button class="menu-item admonition-type-btn" data-type="warning">
+          <span class="adm-icon">⚠️</span> <span>Warning</span>
+        </button>
+        <button class="menu-item admonition-type-btn" data-type="caution">
+          <span class="adm-icon">🛑</span> <span>Caution</span>
+        </button>
+        <button class="menu-item admonition-type-btn" data-type="success">
+          <span class="adm-icon">✅</span> <span>Success</span>
+        </button>
+        <button class="menu-item admonition-type-btn" data-type="bug">
+          <span class="adm-icon">🐛</span> <span>Bug</span>
+        </button>
       </div>
     </div>
 

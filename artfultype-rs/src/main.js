@@ -384,6 +384,42 @@ function escapeMarkdownText(text) {
     .replace(/^(\d+)\. /gm, "$1\\. "); // prevent accidental ordered list items
 }
 
+function getAdmonitionIcon(type) {
+  const t = (type || "").toUpperCase();
+  switch (t) {
+    case "NOTE": case "INFO": return "ℹ️";
+    case "TIP": case "HINT": return "💡";
+    case "IMPORTANT": case "QUOTE": return "⚡";
+    case "WARNING": return "⚠️";
+    case "CAUTION": case "DANGER": return "🛑";
+    case "SUCCESS": return "✅";
+    case "BUG": return "🐛";
+    default: return "ℹ️";
+  }
+}
+
+function admonitionToMd(node) {
+  const type = (node.dataset.admonitionType || "NOTE").toUpperCase();
+  const titleEl = node.querySelector(".admonition-title");
+  const customTitle = titleEl ? titleEl.textContent.trim() : "";
+  const defaultTitle = type.charAt(0) + type.slice(1).toLowerCase();
+
+  const titleHeader = (customTitle && customTitle !== defaultTitle && customTitle !== type)
+    ? ` "${customTitle}"`
+    : "";
+
+  const contentEl = node.querySelector(".admonition-content") || node;
+  const inner = nodeToMd(contentEl, true).trim();
+
+  const lines = [`> [!${type}]${titleHeader}`];
+  if (inner) {
+    inner.split("\n").forEach(l => lines.push(`> ${l}`));
+  } else {
+    lines.push(`> `);
+  }
+  return lines.join("\n") + "\n\n";
+}
+
 // Fix 2: Recursively serialise a blockquote, adding one `>` level per nesting depth.
 function blockquoteToMd(node, depth) {
   const prefix = "> ".repeat(depth);
@@ -524,8 +560,10 @@ function nodeToMd(node, insideBlock = false) {
       return `${items}\n\n`;
     }
     case "li": return liToMd(node);
-    // Fix 2: Delegate to blockquoteToMd for proper nesting
-    case "blockquote": return blockquoteToMd(node, 1);
+    case "blockquote": {
+      if (node.classList.contains("admonition")) return admonitionToMd(node);
+      return blockquoteToMd(node, 1);
+    }
     case "hr": return `---\n\n`;
     case "table": {
       const rows = Array.from(node.querySelectorAll("tr"));
@@ -930,6 +968,7 @@ async function renderMarkdownToWriter(markdownText) {
     enhanceWriterTaskLists(writerViewEl);
     enhanceWriterFootnotes();
     enhanceWriterExtendedSyntax(writerViewEl);
+    enhanceWriterAdmonitions(writerViewEl);
   } catch (e) {
     writerViewEl.innerHTML = `<p style="color:var(--red)">Render error: ${e}</p>`;
   }
@@ -1070,6 +1109,240 @@ function enhanceWriterExtendedSyntax(container = writerViewEl) {
       }
       span.parentNode.removeChild(span);
     }
+  }
+}
+
+function enhanceWriterAdmonitions(container = writerViewEl) {
+  if (!container) return;
+
+  // 1. Process paragraphs / divs containing MkDocs admonition syntax: `!!! type "title"`
+  const children = Array.from(container.children);
+  const mkdocsRegex = /^\s*!!!\s*([a-zA-Z0-9_-]+)(?:\s+(?:"([^"]+)"|'([^']+)'|(.*)))?\s*$/;
+
+  for (let i = 0; i < children.length; i++) {
+    const el = children[i];
+    if (el.tagName === "BLOCKQUOTE" || el.classList.contains("admonition")) continue;
+    const text = (el.textContent || "").trim();
+    const match = text.match(mkdocsRegex);
+
+    if (match) {
+      const type = match[1].toUpperCase();
+      const defaultTitle = type.charAt(0) + type.slice(1).toLowerCase();
+      const rawTitle = match[2] || match[3] || match[4] || "";
+      const title = rawTitle.trim() || defaultTitle;
+      const icon = getAdmonitionIcon(type);
+
+      const adm = document.createElement("blockquote");
+      adm.className = `admonition admonition-${type.toLowerCase()}`;
+      adm.dataset.admonitionType = type;
+
+      const headerDiv = document.createElement("div");
+      headerDiv.className = "admonition-header";
+      headerDiv.contentEditable = "false";
+
+      const iconSpan = document.createElement("span");
+      iconSpan.className = "admonition-icon";
+      iconSpan.textContent = icon;
+      headerDiv.appendChild(iconSpan);
+
+      const titleSpan = document.createElement("span");
+      titleSpan.className = "admonition-title";
+      titleSpan.contentEditable = "true";
+      titleSpan.textContent = title;
+      headerDiv.appendChild(titleSpan);
+
+      const contentDiv = document.createElement("div");
+      contentDiv.className = "admonition-content";
+
+      const p = document.createElement("p");
+      p.appendChild(document.createTextNode("\u200B"));
+      contentDiv.appendChild(p);
+
+      adm.appendChild(headerDiv);
+      adm.appendChild(contentDiv);
+
+      container.insertBefore(adm, el);
+      el.remove();
+    }
+  }
+
+  // 2. Process blockquotes for GFM callouts `> [!TYPE]` or `> **Note:** text`
+  const blockquotes = Array.from(container.querySelectorAll("blockquote"));
+  const calloutRegex = /^\s*\[\!(NOTE|TIP|IMPORTANT|WARNING|CAUTION|INFO|SUCCESS|DANGER|BUG|QUOTE|HINT)\](?:\s+(.*))?$/i;
+  const boldHeaderRegex = /^\s*\*\*?(Note|Tip|Important|Warning|Caution|Info|Success|Danger|Bug):\*\*?\s*(.*)$/i;
+
+  for (const bq of blockquotes) {
+    if (bq.classList.contains("admonition")) continue;
+
+    const firstP = bq.querySelector("p") || bq;
+    const text = firstP.textContent || "";
+    const lines = text.split("\n");
+    const match = lines[0].match(calloutRegex);
+    const boldMatch = !match ? lines[0].match(boldHeaderRegex) : null;
+
+    if (match || boldMatch) {
+      const type = (match ? match[1] : boldMatch[1]).toUpperCase();
+      const defaultTitle = type.charAt(0) + type.slice(1).toLowerCase();
+      const icon = getAdmonitionIcon(type);
+
+      let customTitle = defaultTitle;
+
+      if (match) {
+        const restLine1 = (match[2] || "").trim();
+        const hasMoreLines = lines.length > 1 || bq.children.length > 1;
+
+        if (restLine1.startsWith('"') && restLine1.endsWith('"') && restLine1.length > 2) {
+          customTitle = restLine1.slice(1, -1);
+          lines.shift();
+        } else if (hasMoreLines && restLine1) {
+          customTitle = restLine1;
+          lines.shift();
+        } else if (restLine1) {
+          customTitle = defaultTitle;
+          lines[0] = restLine1;
+        } else {
+          customTitle = defaultTitle;
+          lines.shift();
+        }
+      } else if (boldMatch) {
+        const restLine1 = boldMatch[2].trim();
+        customTitle = defaultTitle;
+        if (restLine1) {
+          lines[0] = restLine1;
+        } else {
+          lines.shift();
+        }
+      }
+
+      bq.className = `admonition admonition-${type.toLowerCase()}`;
+      bq.dataset.admonitionType = type;
+
+      const remText = lines.join("\n").trim();
+      if (firstP.tagName === "P") {
+        if (remText) {
+          firstP.textContent = remText;
+        } else {
+          firstP.remove();
+        }
+      }
+
+      const contentDiv = document.createElement("div");
+      contentDiv.className = "admonition-content";
+      while (bq.firstChild) {
+        contentDiv.appendChild(bq.firstChild);
+      }
+      if (!contentDiv.firstElementChild && !contentDiv.textContent.trim()) {
+        const p = document.createElement("p");
+        p.appendChild(document.createTextNode("\u200B"));
+        contentDiv.appendChild(p);
+      }
+
+      const headerDiv = document.createElement("div");
+      headerDiv.className = "admonition-header";
+      headerDiv.contentEditable = "false";
+
+      const iconSpan = document.createElement("span");
+      iconSpan.className = "admonition-icon";
+      iconSpan.textContent = icon;
+      headerDiv.appendChild(iconSpan);
+
+      const titleSpan = document.createElement("span");
+      titleSpan.className = "admonition-title";
+      titleSpan.contentEditable = "true";
+      titleSpan.textContent = customTitle;
+      headerDiv.appendChild(titleSpan);
+
+      bq.appendChild(headerDiv);
+      bq.appendChild(contentDiv);
+    }
+  }
+
+  // Ensure there is always a trailing paragraph after the last element if it's an admonition
+  const lastChild = container.lastElementChild;
+  if (lastChild && (lastChild.tagName === "BLOCKQUOTE" || lastChild.classList.contains("admonition"))) {
+    const emptyP = document.createElement("p");
+    emptyP.appendChild(document.createElement("br"));
+    container.appendChild(emptyP);
+  }
+}
+
+function getAdmonitionAncestor(node) {
+  let el = node.nodeType === Node.TEXT_NODE ? node.parentElement : node;
+  while (el && el !== writerViewEl) {
+    if (el.tagName === "BLOCKQUOTE" && el.classList.contains("admonition")) return el;
+    el = el.parentElement;
+  }
+  return null;
+}
+
+function insertAdmonition(type = "note", titleText = "", bodyText = "") {
+  if (isMarkdownMode) {
+    const rawType = (type || "note").toUpperCase();
+    const defaultTitle = rawType.charAt(0) + rawType.slice(1).toLowerCase();
+    const title = titleText || defaultTitle;
+    const titlePart = title !== defaultTitle ? ` "${title}"` : "";
+    const content = bodyText || "Admonition content here...";
+    const mdSnippet = `> [!${rawType}]${titlePart}\n> ${content}\n\n`;
+    insertAtCursor(mdSnippet);
+  } else {
+    restoreSelection();
+    const rawType = (type || "note").toUpperCase();
+    const icon = getAdmonitionIcon(rawType);
+    const defaultTitle = rawType.charAt(0) + rawType.slice(1).toLowerCase();
+    const title = titleText || defaultTitle;
+    const content = bodyText || "Admonition content here...";
+
+    const bq = document.createElement("blockquote");
+    bq.className = `admonition admonition-${rawType.toLowerCase()}`;
+    bq.dataset.admonitionType = rawType;
+
+    const headerDiv = document.createElement("div");
+    headerDiv.className = "admonition-header";
+    headerDiv.contentEditable = "false";
+
+    const iconSpan = document.createElement("span");
+    iconSpan.className = "admonition-icon";
+    iconSpan.textContent = icon;
+    headerDiv.appendChild(iconSpan);
+
+    const titleSpan = document.createElement("span");
+    titleSpan.className = "admonition-title";
+    titleSpan.contentEditable = "true";
+    titleSpan.textContent = title;
+    headerDiv.appendChild(titleSpan);
+
+    const contentDiv = document.createElement("div");
+    contentDiv.className = "admonition-content";
+    const p = document.createElement("p");
+    p.textContent = content;
+    contentDiv.appendChild(p);
+
+    bq.appendChild(headerDiv);
+    bq.appendChild(contentDiv);
+
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount > 0) {
+      const range = sel.getRangeAt(0);
+      range.deleteContents();
+      range.insertNode(bq);
+
+      const emptyP = document.createElement("p");
+      emptyP.appendChild(document.createTextNode("\u200B"));
+      if (bq.nextSibling) {
+        bq.parentNode.insertBefore(emptyP, bq.nextSibling);
+      } else {
+        bq.parentNode.appendChild(emptyP);
+      }
+
+      const newRange = document.createRange();
+      newRange.selectNodeContents(p);
+      newRange.collapse(false);
+      sel.removeAllRanges();
+      sel.addRange(newRange);
+    } else {
+      writerViewEl.appendChild(bq);
+    }
+    debouncedStats();
   }
 }
 
@@ -1988,6 +2261,34 @@ function closeTableMenu() {
   if (menu) menu.classList.add("hidden");
 }
 
+function toggleAdmonitionMenu(e) {
+  if (e) e.stopPropagation();
+  saveSelection();
+  const menu = document.getElementById("admonition-menu");
+  if (!menu) return;
+  const isHidden = menu.classList.contains("hidden");
+  document.getElementById("main-menu")?.classList.add("hidden");
+  document.getElementById("table-menu")?.classList.add("hidden");
+
+  if (isHidden) {
+    const btn = document.getElementById("admonition-btn");
+    if (btn) {
+      const rect = btn.getBoundingClientRect();
+      menu.style.position = "fixed";
+      menu.style.top = `${rect.bottom + 4}px`;
+      menu.style.left = `${Math.min(rect.left, window.innerWidth - 240)}px`;
+    }
+    menu.classList.remove("hidden");
+  } else {
+    menu.classList.add("hidden");
+  }
+}
+
+function closeAdmonitionMenu() {
+  const menu = document.getElementById("admonition-menu");
+  if (menu) menu.classList.add("hidden");
+}
+
 // ─── Live Markdown Syntax ─────────────────────────────────────────────────────
 function tryApplyHeading() {
   const sel = window.getSelection();
@@ -2434,6 +2735,37 @@ function handleWriterEnter(e) {
     }
     // Still inside the code block — let the browser insert a newline normally.
     return false;
+  }
+
+  // ── Escape Admonition block on Enter when on empty paragraph ──
+  const adm = getAdmonitionAncestor(range.startContainer);
+  if (adm) {
+    const p = range.startContainer.nodeType === Node.TEXT_NODE
+      ? range.startContainer.parentElement
+      : range.startContainer;
+    const text = p ? p.textContent.replace(/\u200B/g, "").trim() : "";
+
+    if (p && p.tagName === "P" && text === "") {
+      e.preventDefault();
+      const contentDiv = adm.querySelector(".admonition-content");
+      if (contentDiv && contentDiv.children.length > 1) {
+        p.remove();
+      }
+      let nextP = adm.nextElementSibling;
+      if (!nextP) {
+        nextP = document.createElement("p");
+        nextP.appendChild(document.createElement("br"));
+        if (adm.nextSibling) {
+          adm.parentNode.insertBefore(nextP, adm.nextSibling);
+        } else {
+          adm.parentNode.appendChild(nextP);
+        }
+      }
+      placeCaret(nextP, 0);
+      writerViewEl.focus();
+      debouncedStats();
+      return true;
+    }
   }
 
   const block = getBlockAncestor(range.startContainer);
@@ -2936,6 +3268,24 @@ function handleKeydown(e) {
   if (!isMarkdownMode && e.key === "ArrowDown" && !mod && !e.altKey && !e.shiftKey) {
     const sel = window.getSelection();
     if (sel && sel.rangeCount > 0) {
+      const adm = getAdmonitionAncestor(sel.getRangeAt(0).startContainer);
+      if (adm) {
+        let nextEl = adm.nextElementSibling;
+        if (!nextEl) {
+          nextEl = document.createElement("p");
+          nextEl.appendChild(document.createElement("br"));
+          if (adm.nextSibling) {
+            adm.parentNode.insertBefore(nextEl, adm.nextSibling);
+          } else {
+            adm.parentNode.appendChild(nextEl);
+          }
+        }
+        e.preventDefault();
+        placeCaret(nextEl, 0);
+        writerViewEl.focus();
+        return;
+      }
+
       const pre = getPreAncestor(sel.getRangeAt(0).startContainer);
       if (pre) {
         const range        = sel.getRangeAt(0);
@@ -3082,6 +3432,11 @@ function handleKeydown(e) {
     if (k === "l") {
       e.preventDefault();
       applyTaskList();
+      return;
+    }
+    if (k === "a") {
+      e.preventDefault();
+      insertAdmonition("note");
       return;
     }
   }
@@ -3245,6 +3600,17 @@ window.addEventListener("DOMContentLoaded", async () => {
   document.getElementById("cancel-rename-btn")?.addEventListener("click", () => closeModal("rename-modal"));
   document.getElementById("confirm-rename-btn")?.addEventListener("click", confirmRename);
 
+  // ── Admonition Controls ──
+  document.getElementById("admonition-btn")?.addEventListener("click", toggleAdmonitionMenu);
+  document.querySelectorAll(".admonition-type-btn").forEach(btn => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const type = btn.dataset.type || "note";
+      insertAdmonition(type);
+      closeAdmonitionMenu();
+    });
+  });
+
   // Close menus when clicking outside
   document.addEventListener("click", (e) => {
     const menu = document.getElementById("main-menu");
@@ -3256,6 +3622,11 @@ window.addEventListener("DOMContentLoaded", async () => {
     const tableBtn = document.getElementById("table-btn");
     if (tableMenu && tableBtn && !tableMenu.contains(e.target) && !tableBtn.contains(e.target)) {
       tableMenu.classList.add("hidden");
+    }
+    const admMenu = document.getElementById("admonition-menu");
+    const admBtn = document.getElementById("admonition-btn");
+    if (admMenu && admBtn && !admMenu.contains(e.target) && !admBtn.contains(e.target)) {
+      admMenu.classList.add("hidden");
     }
   });
 

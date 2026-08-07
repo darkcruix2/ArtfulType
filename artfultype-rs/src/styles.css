@@ -2247,3 +2247,161 @@ dialog:not([open]),
   text-decoration-color: var(--comment);
 }
 
+/* ─── Admonitions & Callouts ─────────────────────────────────────────────────── */
+.admonition-dropdown {
+  position: absolute;
+  top: 75px;
+  left: 280px;
+  z-index: 210;
+  width: 240px;
+  padding: 8px;
+}
+
+.admonition-picker-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.admonition-type-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--fg);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.admonition-type-btn:hover {
+  background: var(--purple);
+  color: var(--bg);
+}
+
+.adm-icon {
+  font-size: 0.95rem;
+  line-height: 1;
+}
+
+#writer-view blockquote.admonition {
+  margin: 1.2rem 0;
+  padding: 12px 16px;
+  border-radius: 8px;
+  border-left: 4px solid var(--cyan, #8be9fd);
+  background: rgba(139, 233, 253, 0.08);
+  font-size: 0.95rem;
+}
+
+#writer-view blockquote.admonition .admonition-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  font-size: 0.9rem;
+  letter-spacing: 0.3px;
+  margin-bottom: 8px;
+  user-select: none;
+}
+
+#writer-view blockquote.admonition .admonition-icon {
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
+#writer-view blockquote.admonition .admonition-title {
+  color: inherit;
+  font-weight: 700;
+  outline: none;
+}
+
+#writer-view blockquote.admonition .admonition-content {
+  margin-top: 4px;
+  line-height: 1.6;
+}
+
+#writer-view blockquote.admonition .admonition-content > p:first-child {
+  margin-top: 0;
+}
+
+#writer-view blockquote.admonition .admonition-content > p:last-child {
+  margin-bottom: 0;
+}
+
+/* Admonition Variants */
+#writer-view blockquote.admonition-note,
+#writer-view blockquote.admonition-info {
+  border-left-color: var(--cyan, #8be9fd);
+  background: rgba(139, 233, 253, 0.08);
+  color: var(--fg);
+}
+#writer-view blockquote.admonition-note .admonition-title,
+#writer-view blockquote.admonition-info .admonition-title {
+  color: var(--cyan, #8be9fd);
+}
+
+#writer-view blockquote.admonition-tip,
+#writer-view blockquote.admonition-hint {
+  border-left-color: var(--green, #50fa7b);
+  background: rgba(80, 250, 123, 0.08);
+  color: var(--fg);
+}
+#writer-view blockquote.admonition-tip .admonition-title,
+#writer-view blockquote.admonition-hint .admonition-title {
+  color: var(--green, #50fa7b);
+}
+
+#writer-view blockquote.admonition-important,
+#writer-view blockquote.admonition-quote {
+  border-left-color: var(--purple, #bd93f9);
+  background: rgba(189, 147, 249, 0.08);
+  color: var(--fg);
+}
+#writer-view blockquote.admonition-important .admonition-title,
+#writer-view blockquote.admonition-quote .admonition-title {
+  color: var(--purple, #bd93f9);
+}
+
+#writer-view blockquote.admonition-warning {
+  border-left-color: var(--orange, #ffb86c);
+  background: rgba(255, 184, 108, 0.08);
+  color: var(--fg);
+}
+#writer-view blockquote.admonition-warning .admonition-title {
+  color: var(--orange, #ffb86c);
+}
+
+#writer-view blockquote.admonition-caution,
+#writer-view blockquote.admonition-danger {
+  border-left-color: var(--red, #ff5555);
+  background: rgba(255, 85, 85, 0.08);
+  color: var(--fg);
+}
+#writer-view blockquote.admonition-caution .admonition-title,
+#writer-view blockquote.admonition-danger .admonition-title {
+  color: var(--red, #ff5555);
+}
+
+#writer-view blockquote.admonition-success {
+  border-left-color: var(--green, #50fa7b);
+  background: rgba(80, 250, 123, 0.08);
+  color: var(--fg);
+}
+#writer-view blockquote.admonition-success .admonition-title {
+  color: var(--green, #50fa7b);
+}
+
+#writer-view blockquote.admonition-bug {
+  border-left-color: var(--pink, #ff79c6);
+  background: rgba(255, 121, 198, 0.08);
+  color: var(--fg);
+}
+#writer-view blockquote.admonition-bug .admonition-title {
+  color: var(--pink, #ff79c6);
+}
+
