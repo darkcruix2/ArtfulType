@@ -108,7 +108,7 @@ Compiled with GCC/Cocoa — no Xcode required. Runs on as little as a 1 GHz Powe
 
 ![ArtfulType running on Mac OS X 10.5.8 PowerPC G4](docs/OSX-PPC-ArtfulType.png)
 
-### Features
+### Leopard Edition Features
 
 - Native Aqua toolbar with icon buttons (Bold, Italic, Code, Lists, Blockquote, Horizontal Rule)
 - Writer mode (rich-text live preview) and Markdown mode toggled via the ✏ / M↓ segmented control
