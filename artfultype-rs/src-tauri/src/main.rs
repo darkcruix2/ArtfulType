@@ -154,7 +154,6 @@ fn main() {
             read_file,
             read_image_base64,
             rename_file,
-            delete_file
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

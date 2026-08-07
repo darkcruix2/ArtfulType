@@ -24,6 +24,9 @@ const invoke = window.__TAURI__?.core?.invoke || (async (cmd, args) => {
       .replace(/^# (.*$)/gim, '<h1>$1</h1>')
       .replace(/^\> (.*$)/gim, '<blockquote>$1</blockquote>')
       .replace(/==([^=\n]+)==/gim, '<mark>$1</mark>')
+      .replace(/~~([^~\n]+)~~/gim, '<del>$1</del>')
+      .replace(/(?<!~)~([^~\n]+)~(?!~)/gim, '<sub>$1</sub>')
+      .replace(/(?<!\^)\^([^\^\n]+)\^(?!\^)/gim, '<sup>$1</sup>')
       .replace(/\*\*(.*)\*\*/gim, '<strong>$1</strong>')
       .replace(/\*(.*)\*/gim, '<em>$1</em>')
       .replace(/\n\n/g, '</p><p>');
@@ -376,8 +379,6 @@ function escapeMarkdownText(text) {
     .replace(/\*/g, "\\*")
     .replace(/_/g, "\\_")
     .replace(/`/g, "\\`")
-    .replace(/\[/g, "\\[")
-    .replace(/\]/g, "\\]")
     .replace(/^(#{1,6}) /gm, "\\$1 ")  // prevent accidental headings at line start
     .replace(/^([-*+]) /gm, "\\$1 ")   // prevent accidental list items at line start
     .replace(/^(\d+)\. /gm, "$1\\. "); // prevent accidental ordered list items
@@ -402,7 +403,21 @@ function blockquoteToMd(node, depth) {
   return lines.join("\n") + "\n\n";
 }
 
+function isInsideFootnotes(node) {
+  let el = node.nodeType === Node.TEXT_NODE ? node.parentElement : node;
+  while (el && el !== writerViewEl) {
+    if (el.classList?.contains("footnote-definition") ||
+        ((el.tagName === "SECTION" || el.tagName === "DIV" || el.tagName === "FOOTER" || el.tagName === "OL") &&
+         (el.classList?.contains("footnotes") || el.classList?.contains("footnote-definition")))) {
+      return true;
+    }
+    el = el.parentElement;
+  }
+  return false;
+}
+
 function nodeToMd(node, insideBlock = false) {
+  if (isInsideFootnotes(node)) return "";
   if (node.nodeType === Node.TEXT_NODE) {
     const raw = node.textContent.replace(/\u200B/g, "");
     // Fix 6: escape only when outside a <code>/<pre> ancestor
@@ -601,12 +616,21 @@ function nodeToMd(node, insideBlock = false) {
 
       return [headerLine, delimiterLine, ...bodyLines].join("\n") + "\n\n";
     }
+    case "sub": return `~${children(true)}~`;
     case "sup": {
-      if (node.classList.contains("footnote-reference") || node.classList.contains("footnote-ref") || node.dataset.footnoteId) {
-        const fnId = node.dataset.footnoteId || node.textContent.trim().replace(/^\[?|\$?\]?$/g, "");
-        return `[^${fnId}]`;
+      if (isInsideFootnotes(node)) return "";
+      const isFnRef = node.classList.contains("footnote-reference") ||
+                      node.classList.contains("footnote-ref") ||
+                      node.dataset.footnoteId != null ||
+                      node.querySelector("a[href]") != null;
+      if (isFnRef) {
+        const rawId = node.dataset.footnoteId ||
+                      node.querySelector("a")?.getAttribute("href") ||
+                      node.textContent;
+        const cleanId = String(rawId).replace(/^[#\[\^]*fn-?|^#/gi, "").replace(/[\]\$]*$/g, "").trim();
+        return `[^${cleanId}]`;
       }
-      return `<sup>${children(true)}</sup>`;
+      return `^${children(true)}^`;
     }
     case "input": return "";
     case "div": case "section": case "article": {
@@ -670,13 +694,20 @@ function htmlToMarkdown(el) {
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 
+  const seenIds = new Set();
+  const uniqueFnLines = [];
   if (docFootnotes && docFootnotes.length > 0) {
-    const fnLines = docFootnotes
-      .filter(f => f.id && f.text.trim())
-      .map(f => `[^${f.id}]: ${f.text.trim()}`);
-    if (fnLines.length > 0) {
-      md += "\n\n" + fnLines.join("\n");
+    for (const f of docFootnotes) {
+      const cleanId = (f.id || "").replace(/^#?fn-?/gi, "").trim();
+      if (cleanId && f.text.trim() && !seenIds.has(cleanId)) {
+        seenIds.add(cleanId);
+        uniqueFnLines.push(`[^${cleanId}]: ${f.text.trim()}`);
+      }
     }
+  }
+
+  if (uniqueFnLines.length > 0) {
+    md += "\n\n" + uniqueFnLines.join("\n");
   }
   return md;
 }
@@ -855,12 +886,8 @@ function applyFootnote() {
     sup.className = "footnote-reference";
     sup.dataset.footnoteId = newId;
     sup.contentEditable = "false";
+    sup.textContent = newId;
     sup.title = `Footnote [^${newId}]`;
-
-    const a = document.createElement("a");
-    a.setAttribute("href", `#fn-${newId}`);
-    a.textContent = newId;
-    sup.appendChild(a);
 
     if (sel && sel.rangeCount > 0) {
       const range = sel.getRangeAt(0);
@@ -902,6 +929,7 @@ async function renderMarkdownToWriter(markdownText) {
     applySyntaxHighlighting(writerViewEl);
     enhanceWriterTaskLists(writerViewEl);
     enhanceWriterFootnotes();
+    enhanceWriterExtendedSyntax(writerViewEl);
   } catch (e) {
     writerViewEl.innerHTML = `<p style="color:var(--red)">Render error: ${e}</p>`;
   }
@@ -956,37 +984,93 @@ function enhanceWriterTaskLists(container = writerViewEl) {
 }
 
 function enhanceWriterFootnotes() {
-  const sups = writerViewEl.querySelectorAll("sup.footnote-reference");
-  sups.forEach(sup => {
+  // First, extract any footnote text from footnote-definition before removing them
+  const fnDefs = writerViewEl.querySelectorAll(".footnote-definition, section.footnotes li, div.footnotes li");
+  fnDefs.forEach(def => {
+    const rawId = def.id || def.querySelector("[id]")?.id || "";
+    const cleanId = rawId.replace(/^fn-?|^#fn-?/gi, "").trim();
+    const textEl = def.querySelector("p") || def;
+    const clone = textEl.cloneNode(true);
+    clone.querySelectorAll(".footnote-backref, .footnote-definition-label, a[href^='#']").forEach(el => el.remove());
+    const text = clone.textContent.trim();
+    if (cleanId && text && !docFootnotes.some(f => f.id === cleanId)) {
+      docFootnotes.push({ id: cleanId, text });
+    }
+  });
+
+  // Remove footnote definitions container from writerViewEl DOM
+  writerViewEl.querySelectorAll(".footnote-definition, section.footnotes, div.footnotes, footer.footnotes").forEach(el => el.remove());
+
+  // Format footnote references in body text as pill buttons
+  const sups = writerViewEl.querySelectorAll("sup.footnote-reference, sup.footnote-ref, .footnote-ref, a[href^='#']");
+  sups.forEach(target => {
+    if (!target || !target.parentNode) return;
+    let sup = target.tagName?.toLowerCase() === "sup" ? target : target.closest("sup");
+    if (!sup) {
+      if (!target.parentNode) return;
+      sup = document.createElement("sup");
+      target.parentNode.insertBefore(sup, target);
+      sup.appendChild(target);
+    }
+    sup.className = "footnote-reference";
     sup.contentEditable = "false";
+
     const a = sup.querySelector("a");
-    const id = a ? a.textContent.trim() : sup.textContent.trim();
-    sup.dataset.footnoteId = id;
+    const rawId = sup.dataset.footnoteId || (a ? (a.getAttribute("href") || a.textContent) : sup.textContent);
+    const cleanId = (rawId || "").replace(/^[#\[\^]*fn-?|^#/gi, "").replace(/[\]\$]*$/g, "").trim();
+    sup.dataset.footnoteId = cleanId;
+    sup.textContent = cleanId || "1";
 
-    const fn = docFootnotes.find(f => f.id === id);
+    const fn = docFootnotes.find(f => f.id === cleanId);
     if (fn && fn.text) {
-      sup.title = `[^${id}]: ${fn.text}`;
+      sup.title = `[^${cleanId}]: ${fn.text}`;
     } else {
-      sup.title = `Footnote [^${id}]`;
+      sup.title = `Footnote [^${cleanId}]`;
     }
   });
-
-  const fnItems = writerViewEl.querySelectorAll("section.footnotes li");
-  fnItems.forEach(li => {
-    const id = li.id || "";
-    if (id && !docFootnotes.some(f => f.id === id)) {
-      const clone = li.cloneNode(true);
-      clone.querySelectorAll(".footnote-backref, a[href^='#fnref']").forEach(el => el.remove());
-      docFootnotes.push({ id, text: clone.textContent.trim() });
-    }
-  });
-
-  const fnSection = writerViewEl.querySelector("section.footnotes");
-  if (fnSection) {
-    fnSection.style.display = "none";
-  }
 
   renderFootnoteDrawer();
+}
+
+function enhanceWriterExtendedSyntax(container = writerViewEl) {
+  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      let p = node.parentElement;
+      while (p && p !== container) {
+        const t = p.tagName.toLowerCase();
+        if (t === "code" || t === "pre" || t === "script" || t === "style" || t === "sup" || t === "sub" || t === "mark" || p.classList?.contains("footnote-reference") || p.classList?.contains("footnote-ref") || p.classList?.contains("footnote-definition") || p.classList?.contains("footnotes")) {
+          return NodeFilter.FILTER_REJECT;
+        }
+        p = p.parentElement;
+      }
+      return NodeFilter.FILTER_ACCEPT;
+    }
+  });
+
+  const nodes = [];
+  while (walker.nextNode()) nodes.push(walker.currentNode);
+
+  for (const node of nodes) {
+    const text = node.textContent;
+    if (!text) continue;
+    if (!text.includes("==") && !text.includes("~") && !text.includes("^")) continue;
+
+    let html = text
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      .replace(/==([^=\n]+)==/g, '<mark>$1</mark>')
+      .replace(/(?<!~)~([^~\n]+)~(?!~)/g, '<sub>$1</sub>')
+      .replace(/(?<!\^)\^([^\^\n]+)\^(?!\^)/g, '<sup>$1</sup>');
+
+    if (html !== text) {
+      const span = document.createElement("span");
+      span.innerHTML = html;
+      node.parentNode.replaceChild(span, node);
+      while (span.firstChild) {
+        span.parentNode.insertBefore(span.firstChild, span);
+      }
+      span.parentNode.removeChild(span);
+    }
+  }
 }
 
 // ─── Mode Toggle ──────────────────────────────────────────────────────────────
@@ -1299,6 +1383,90 @@ function applyHighlight() {
     debouncedStats();
   } else {
     wrapMarkdownSelection("==", "==");
+  }
+}
+
+function applySubscript() {
+  if (!isMarkdownMode) {
+    restoreSelection();
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount) return;
+    const range = sel.getRangeAt(0);
+
+    let parentSub = null;
+    let node = range.commonAncestorContainer;
+    while (node && node !== writerViewEl) {
+      if (node.nodeType === Node.ELEMENT_NODE && node.tagName.toLowerCase() === "sub") {
+        parentSub = node;
+        break;
+      }
+      node = node.parentNode;
+    }
+
+    if (parentSub) {
+      const parent = parentSub.parentNode;
+      while (parentSub.firstChild) {
+        parent.insertBefore(parentSub.firstChild, parentSub);
+      }
+      parent.removeChild(parentSub);
+    } else {
+      const selected = range.toString();
+      if (!selected) return;
+      range.deleteContents();
+      const sub = document.createElement("sub");
+      sub.textContent = selected;
+      range.insertNode(sub);
+      range.setStartAfter(sub);
+      range.setEndAfter(sub);
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
+    writerViewEl.focus();
+    debouncedStats();
+  } else {
+    wrapMarkdownSelection("~", "~");
+  }
+}
+
+function applySuperscript() {
+  if (!isMarkdownMode) {
+    restoreSelection();
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount) return;
+    const range = sel.getRangeAt(0);
+
+    let parentSup = null;
+    let node = range.commonAncestorContainer;
+    while (node && node !== writerViewEl) {
+      if (node.nodeType === Node.ELEMENT_NODE && node.tagName.toLowerCase() === "sup" && !node.classList.contains("footnote-reference") && !node.classList.contains("footnote-ref") && !node.dataset.footnoteId) {
+        parentSup = node;
+        break;
+      }
+      node = node.parentNode;
+    }
+
+    if (parentSup) {
+      const parent = parentSup.parentNode;
+      while (parentSup.firstChild) {
+        parent.insertBefore(parentSup.firstChild, parentSup);
+      }
+      parent.removeChild(parentSup);
+    } else {
+      const selected = range.toString();
+      if (!selected) return;
+      range.deleteContents();
+      const sup = document.createElement("sup");
+      sup.textContent = selected;
+      range.insertNode(sup);
+      range.setStartAfter(sup);
+      range.setEndAfter(sup);
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
+    writerViewEl.focus();
+    debouncedStats();
+  } else {
+    wrapMarkdownSelection("^", "^");
   }
 }
 
@@ -1894,6 +2062,12 @@ function tryApplyInlineFormats(range) {
   if (tryInlinePattern(node, offset, /~~([^~\n]+)~~/g, c => {
     const el = document.createElement("del"); el.textContent = c; return el;
   })) return;
+  if (tryInlinePattern(node, offset, /(?<!~)~([^~\n]+)~(?!~)/g, c => {
+    const el = document.createElement("sub"); el.textContent = c; return el;
+  })) return;
+  if (tryInlinePattern(node, offset, /(?<!\^)\^([^\^\n]+)\^(?!\^)/g, c => {
+    const el = document.createElement("sup"); el.textContent = c; return el;
+  })) return;
   if (tryInlinePattern(node, offset, /==([^=\n]+)==/g, c => {
     const el = document.createElement("mark"); el.textContent = c; return el;
   })) return;
@@ -1941,7 +2115,7 @@ function handleLiveMarkdown(e) {
     return;
   }
   const trigger = e.data;
-  if (trigger === "*" || trigger === "`" || trigger === "~" || trigger === "=") {
+  if (trigger === "*" || trigger === "`" || trigger === "~" || trigger === "=" || trigger === "^") {
     tryApplyInlineFormats(range);
   }
   if (trigger === ")") {
@@ -2894,7 +3068,18 @@ function handleKeydown(e) {
     if (e.key === "d" || e.key === "D") { e.preventDefault(); insertAtCursor(formatDate(new Date())); return; }
   }
   if (mod && e.shiftKey && !e.altKey) {
-    if (e.key.toLowerCase() === "l") {
+    const k = e.key.toLowerCase();
+    if (k === "b") {
+      e.preventDefault();
+      applySubscript();
+      return;
+    }
+    if (k === "p") {
+      e.preventDefault();
+      applySuperscript();
+      return;
+    }
+    if (k === "l") {
       e.preventDefault();
       applyTaskList();
       return;
@@ -2975,6 +3160,8 @@ window.addEventListener("DOMContentLoaded", async () => {
   document.getElementById("bold-btn")?.addEventListener("click",   () => applyRichFormat("bold",   "**"));
   document.getElementById("italic-btn")?.addEventListener("click", () => applyRichFormat("italic", "*"));
   document.getElementById("highlight-btn")?.addEventListener("click", () => applyHighlight());
+  document.getElementById("sub-btn")?.addEventListener("click",       () => applySubscript());
+  document.getElementById("sup-btn")?.addEventListener("click",       () => applySuperscript());
   document.getElementById("code-btn")?.addEventListener("click",   () => applyCode());
   document.getElementById("undo-btn")?.addEventListener("click",   doUndo);
   document.getElementById("redo-btn")?.addEventListener("click",   doRedo);

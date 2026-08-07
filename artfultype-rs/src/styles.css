@@ -756,6 +756,18 @@ mark {
   font-weight: 500;
 }
 
+sub {
+  font-size: 0.75em;
+  vertical-align: sub;
+  line-height: 0;
+}
+
+sup {
+  font-size: 0.75em;
+  vertical-align: super;
+  line-height: 0;
+}
+
 [data-theme="dracula"] mark {
   background-color: #ffe066;
   color: #282a36;
@@ -1957,16 +1969,18 @@ dialog:not([open]),
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  margin: 0 2px;
+  margin: 0 3px;
   padding: 1px 6px;
-  font-size: 0.72em;
-  font-weight: 600;
+  font-size: 0.75em;
+  font-weight: 700;
   line-height: 1;
-  vertical-align: super;
+  vertical-align: baseline;
+  position: relative;
+  top: -0.35em;
   border-radius: 10px;
-  background: rgba(189, 147, 249, 0.2);
+  background: rgba(189, 147, 249, 0.25);
   color: var(--purple);
-  border: 1px solid rgba(189, 147, 249, 0.4);
+  border: 1px solid var(--purple);
   cursor: pointer;
   user-select: none;
   transition: all 0.15s ease;

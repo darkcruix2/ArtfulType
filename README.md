@@ -84,6 +84,7 @@ Saved files are plain `.md` text, editable in any text editor.
 | Undo / Redo | ⌘Z / ⇧⌘Z |
 | Cut / Copy / Paste | ⌘X / ⌘C / ⌘V |
 | Bold / Italic / Code / Highlight | ⌘B / ⌘I / ⌘K / ⌘H |
+| Subscript / Superscript | ⇧⌘B / ⇧⌘P |
 | Heading 1 / 2 / 3 | ⌘1 / ⌘2 / ⌘3 |
 | Link | ⌘L |
 | Zoom In / Out / Default | ⌘= / ⌘- / ⌘0 |
@@ -151,7 +152,7 @@ Modern companion binaries for macOS, Linux, and Windows are available in the `re
   - Portable Executable: [releases/artfultype-rs-windows-x64.exe](releases/artfultype-rs-windows-x64.exe)
 - **Linux (AMD64)**:
   - AppImage: [releases/artfultype-rs_0.25.9_amd64.AppImage](releases/artfultype-rs_0.25.9_amd64.AppImage)
-  - Debian Package: [releases/artfultype-rs_0.25.9_amd64.deb](releases/artfultype-rs_0.25.9_amd64.deb)
+  - Debian Package: [releases/artfultype-rs_0.26.0_amd64.deb](releases/artfultype-rs_0.26.0_amd64.deb)
   - RPM Package: [releases/artfultype-rs-0.25.9-1.x86_64.rpm](releases/artfultype-rs-0.25.9-1.x86_64.rpm)
   - Raw Binary: [releases/artfultype-rs-linux-amd64](releases/artfultype-rs-linux-amd64)
 
