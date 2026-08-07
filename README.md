@@ -83,7 +83,7 @@ Saved files are plain `.md` text, editable in any text editor.
 | Quit | ⌘Q |
 | Undo / Redo | ⌘Z / ⇧⌘Z |
 | Cut / Copy / Paste | ⌘X / ⌘C / ⌘V |
-| Bold / Italic / Code | ⌘B / ⌘I / ⌘K |
+| Bold / Italic / Code / Highlight | ⌘B / ⌘I / ⌘K / ⌘H |
 | Heading 1 / 2 / 3 | ⌘1 / ⌘2 / ⌘3 |
 | Link | ⌘L |
 | Zoom In / Out / Default | ⌘= / ⌘- / ⌘0 |

@@ -31,6 +31,13 @@ code {
     font-family: var(--font-mono, Monaco, Menlo, Courier, monospace);
 }
 
+mark {
+    background-color: #ffe066;
+    color: #282a36;
+    padding: 0.1em 0.35em;
+    border-radius: 3px;
+}
+
 pre {
     padding: 16px;
     overflow: auto;

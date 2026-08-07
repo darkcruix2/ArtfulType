@@ -745,6 +745,47 @@ body {
   font-size: 0.88em;
 }
 
+/* Highlight (<mark>) element */
+#writer-view mark,
+.markdown-body mark,
+mark {
+  background-color: var(--yellow, #ffe066);
+  color: var(--bg-dark, #282a36);
+  padding: 0.1em 0.35em;
+  border-radius: 3px;
+  font-weight: 500;
+}
+
+[data-theme="dracula"] mark {
+  background-color: #ffe066;
+  color: #282a36;
+}
+
+[data-theme="classic-mac"] mark {
+  background-color: #ffff99;
+  color: #000000;
+}
+
+[data-theme="win98"] mark {
+  background-color: #ffff00;
+  color: #000000;
+}
+
+[data-theme="solaris-cde"] mark {
+  background-color: #f0d080;
+  color: #000000;
+}
+
+[data-theme="beos"] mark {
+  background-color: #ffea00;
+  color: #000000;
+}
+
+[data-theme="calm-rs"] mark {
+  background-color: #fef08a;
+  color: #1e293b;
+}
+
 /* Code blocks */
 #writer-view pre {
   background: var(--bg-sidebar);

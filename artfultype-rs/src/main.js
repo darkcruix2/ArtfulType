@@ -23,6 +23,7 @@ const invoke = window.__TAURI__?.core?.invoke || (async (cmd, args) => {
       .replace(/^## (.*$)/gim, '<h2>$1</h2>')
       .replace(/^# (.*$)/gim, '<h1>$1</h1>')
       .replace(/^\> (.*$)/gim, '<blockquote>$1</blockquote>')
+      .replace(/==([^=\n]+)==/gim, '<mark>$1</mark>')
       .replace(/\*\*(.*)\*\*/gim, '<strong>$1</strong>')
       .replace(/\*(.*)\*/gim, '<em>$1</em>')
       .replace(/\n\n/g, '</p><p>');
@@ -448,6 +449,7 @@ function nodeToMd(node, insideBlock = false) {
       return `*${inner}*`;
     }
     case "del": case "s": return `~~${children(true)}~~`;
+    case "mark": return `==${children(true)}==`;
     case "code": {
       if (node.parentElement?.tagName.toLowerCase() === "pre") return node.textContent;
       // If the code content itself contains backticks, use double backticks as delimiter
@@ -1258,6 +1260,48 @@ function applyCode() {
   } else { wrapMarkdownSelection("`", "`"); }
 }
 
+function applyHighlight() {
+  if (!isMarkdownMode) {
+    restoreSelection();
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount) return;
+    const range = sel.getRangeAt(0);
+
+    let parentMark = null;
+    let node = range.commonAncestorContainer;
+    while (node && node !== writerViewEl) {
+      if (node.nodeType === Node.ELEMENT_NODE && node.tagName.toLowerCase() === "mark") {
+        parentMark = node;
+        break;
+      }
+      node = node.parentNode;
+    }
+
+    if (parentMark) {
+      const parent = parentMark.parentNode;
+      while (parentMark.firstChild) {
+        parent.insertBefore(parentMark.firstChild, parentMark);
+      }
+      parent.removeChild(parentMark);
+    } else {
+      const selected = range.toString();
+      if (!selected) return;
+      range.deleteContents();
+      const mark = document.createElement("mark");
+      mark.textContent = selected;
+      range.insertNode(mark);
+      range.setStartAfter(mark);
+      range.setEndAfter(mark);
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
+    writerViewEl.focus();
+    debouncedStats();
+  } else {
+    wrapMarkdownSelection("==", "==");
+  }
+}
+
 function applyBlockquote() {
   if (!isMarkdownMode) {
     restoreSelection();
@@ -1850,6 +1894,9 @@ function tryApplyInlineFormats(range) {
   if (tryInlinePattern(node, offset, /~~([^~\n]+)~~/g, c => {
     const el = document.createElement("del"); el.textContent = c; return el;
   })) return;
+  if (tryInlinePattern(node, offset, /==([^=\n]+)==/g, c => {
+    const el = document.createElement("mark"); el.textContent = c; return el;
+  })) return;
 }
 
 async function tryApplyImageSyntax(range) {
@@ -1894,7 +1941,7 @@ function handleLiveMarkdown(e) {
     return;
   }
   const trigger = e.data;
-  if (trigger === "*" || trigger === "`" || trigger === "~") {
+  if (trigger === "*" || trigger === "`" || trigger === "~" || trigger === "=") {
     tryApplyInlineFormats(range);
   }
   if (trigger === ")") {
@@ -2830,6 +2877,7 @@ function handleKeydown(e) {
       case "m": e.preventDefault(); toggleMode();        return;
       case "b": e.preventDefault(); applyRichFormat("bold",   "**"); return;
       case "i": e.preventDefault(); applyRichFormat("italic", "*");  return;
+      case "h": e.preventDefault(); applyHighlight();    return;
       case "k": e.preventDefault(); applyCode();         return;
       case "q": e.preventDefault(); applyBlockquote();   return;
       case "1": e.preventDefault(); applyHeading(1);     return;
@@ -2926,6 +2974,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   // ── Format toolbar ──
   document.getElementById("bold-btn")?.addEventListener("click",   () => applyRichFormat("bold",   "**"));
   document.getElementById("italic-btn")?.addEventListener("click", () => applyRichFormat("italic", "*"));
+  document.getElementById("highlight-btn")?.addEventListener("click", () => applyHighlight());
   document.getElementById("code-btn")?.addEventListener("click",   () => applyCode());
   document.getElementById("undo-btn")?.addEventListener("click",   doUndo);
   document.getElementById("redo-btn")?.addEventListener("click",   doRedo);
