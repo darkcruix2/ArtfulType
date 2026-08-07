@@ -3,7 +3,22 @@ const invoke = window.__TAURI__?.core?.invoke || (async (cmd, args) => {
   if (cmd === "parse_markdown") {
     // Basic fallback HTML converter for standalone browser preview
     if (!args || !args.text) return "";
-    let html = args.text
+    let lines = args.text.split("\n");
+    let inList = false;
+    let htmlLines = [];
+    for (let line of lines) {
+      const taskMatch = line.match(/^(\s*)[\-\*\+]\s+\[([ xX])\]\s+(.*)$/);
+      if (taskMatch) {
+        if (!inList) { htmlLines.push('<ul class="contains-task-list">'); inList = true; }
+        const checked = taskMatch[2].toLowerCase() === "x" ? 'checked=""' : '';
+        htmlLines.push(`<li class="task-list-item"><input type="checkbox" ${checked}/> ${taskMatch[3]}</li>`);
+      } else {
+        if (inList) { htmlLines.push('</ul>'); inList = false; }
+        htmlLines.push(line);
+      }
+    }
+    if (inList) htmlLines.push('</ul>');
+    let html = htmlLines.join("\n")
       .replace(/^### (.*$)/gim, '<h3>$1</h3>')
       .replace(/^## (.*$)/gim, '<h2>$1</h2>')
       .replace(/^# (.*$)/gim, '<h1>$1</h1>')
@@ -603,23 +618,44 @@ function nodeToMd(node, insideBlock = false) {
   }
 }
 function liToMd(li) {
-  let text = "";
+  let inlineText = "";
+  let checkboxPrefix = "";
+  const checkbox = li.querySelector(":scope > input[type='checkbox'], :scope > label > input[type='checkbox']");
+  if (checkbox) {
+    checkboxPrefix = checkbox.checked ? "[x] " : "[ ] ";
+  }
+
+  const nestedLists = [];
+
   for (const child of li.childNodes) {
     if (child.nodeType === Node.TEXT_NODE) {
-      // Strip the ZWS (U+200B) we insert as a cursor anchor after checkboxes
-      text += child.textContent.replace(/\u200B/g, "");
+      inlineText += child.textContent.replace(/\u200B/g, "");
     } else if (child.nodeType === Node.ELEMENT_NODE) {
       const t = child.tagName.toLowerCase();
       if (t === "input") continue;
       if (t === "ul" || t === "ol") {
-        const nested = nodeToMd(child).trimEnd();
-        text += "\n" + nested.split("\n").map(l => `  ${l}`).join("\n");
+        nestedLists.push(child);
+      } else if (t === "br") {
+        inlineText += "  \n";
       } else {
-        text += nodeToMd(child);
+        inlineText += nodeToMd(child);
       }
     }
   }
-  return text.trim();
+
+  let result = (checkboxPrefix + inlineText.trim()).trim();
+
+  if (nestedLists.length > 0) {
+    for (const nestedList of nestedLists) {
+      const nestedMd = nodeToMd(nestedList).trimEnd();
+      if (nestedMd) {
+        const indented = nestedMd.split("\n").map(line => line ? `  ${line}` : "").join("\n");
+        result += "\n" + indented;
+      }
+    }
+  }
+
+  return result;
 }
 function htmlToMarkdown(el) {
   let md = Array.from(el.childNodes)
@@ -862,10 +898,59 @@ async function renderMarkdownToWriter(markdownText) {
     writerViewEl.innerHTML = html;
     await fixImageSrcs(writerViewEl);
     applySyntaxHighlighting(writerViewEl);
+    enhanceWriterTaskLists(writerViewEl);
     enhanceWriterFootnotes();
   } catch (e) {
     writerViewEl.innerHTML = `<p style="color:var(--red)">Render error: ${e}</p>`;
   }
+}
+
+function ensureTaskTextSpan(li) {
+  let span = li.querySelector(":scope > span.task-text");
+  if (!span) {
+    span = document.createElement("span");
+    span.className = "task-text";
+    const nodesToMove = [];
+    let pastInput = false;
+    for (const child of Array.from(li.childNodes)) {
+      if (child.nodeType === Node.ELEMENT_NODE && child.tagName === "INPUT") {
+        pastInput = true;
+        continue;
+      }
+      if (pastInput) {
+        if (child.nodeType === Node.ELEMENT_NODE && (child.tagName === "UL" || child.tagName === "OL")) {
+          break;
+        }
+        nodesToMove.push(child);
+      }
+    }
+    if (nodesToMove.length > 0) {
+      const refNode = nodesToMove[0];
+      li.insertBefore(span, refNode);
+      nodesToMove.forEach(n => span.appendChild(n));
+    } else {
+      const tn = document.createTextNode("\u200B ");
+      span.appendChild(tn);
+      li.appendChild(span);
+    }
+  }
+}
+
+function enhanceWriterTaskLists(container = writerViewEl) {
+  const checkboxes = container.querySelectorAll("input[type='checkbox']");
+  checkboxes.forEach(cb => {
+    cb.removeAttribute("disabled");
+    cb.contentEditable = "false";
+    const li = cb.closest("li");
+    if (li) {
+      li.classList.add("task-list-item");
+      const list = li.parentElement;
+      if (list && (list.tagName === "UL" || list.tagName === "OL")) {
+        list.classList.add("contains-task-list");
+      }
+      ensureTaskTextSpan(li);
+    }
+  });
 }
 
 function enhanceWriterFootnotes() {
@@ -997,6 +1082,102 @@ function buildBlockquote(replaceTarget, remainingText) {
 
 
 
+function indentListItem(li) {
+  const prevLi = li.previousElementSibling;
+  if (!prevLi || prevLi.tagName !== "LI") return false;
+
+  let nestedList = prevLi.querySelector(":scope > ul, :scope > ol");
+  if (!nestedList) {
+    const isOrdered = li.parentElement?.tagName === "OL";
+    nestedList = document.createElement(isOrdered ? "ol" : "ul");
+    if (li.classList.contains("task-list-item") || li.querySelector("input[type='checkbox']")) {
+      nestedList.classList.add("contains-task-list");
+    }
+    prevLi.appendChild(nestedList);
+  }
+
+  nestedList.appendChild(li);
+
+  const targetText = Array.from(li.childNodes).find(n => n.nodeType === Node.TEXT_NODE) || li;
+  placeCaret(targetText, targetText.textContent ? targetText.textContent.length : 0);
+  writerViewEl.focus();
+  debouncedStats();
+  return true;
+}
+
+function outdentListItem(li) {
+  const parentList = li.parentElement;
+  if (!parentList || (parentList.tagName !== "UL" && parentList.tagName !== "OL")) return false;
+
+  const parentLi = parentList.closest("li");
+  if (parentLi) {
+    const grandParentList = parentLi.parentElement;
+    if (parentLi.nextSibling) {
+      grandParentList.insertBefore(li, parentLi.nextSibling);
+    } else {
+      grandParentList.appendChild(li);
+    }
+    if (parentList.children.length === 0) {
+      parentList.remove();
+    }
+  } else {
+    const p = document.createElement("p");
+    const nodes = Array.from(li.childNodes).filter(n => n.nodeName !== "INPUT");
+    if (nodes.length === 0) p.appendChild(document.createElement("br"));
+    else nodes.forEach(n => p.appendChild(n));
+
+    if (parentList.nextSibling) {
+      parentList.parentNode.insertBefore(p, parentList.nextSibling);
+    } else {
+      parentList.parentNode.appendChild(p);
+    }
+    li.remove();
+    if (parentList.children.length === 0) {
+      parentList.remove();
+    }
+    placeCaret(p, 0);
+  }
+
+  writerViewEl.focus();
+  debouncedStats();
+  return true;
+}
+
+function buildTaskList(replaceTarget, remainingText, isChecked = false) {
+  const isLi = replaceTarget.tagName === "LI";
+  let ul, li;
+  if (isLi) {
+    li = replaceTarget;
+    li.innerHTML = "";
+    li.classList.add("task-list-item");
+    if (li.parentElement) li.parentElement.classList.add("contains-task-list");
+  } else {
+    ul = document.createElement("ul");
+    ul.className = "contains-task-list";
+    li = document.createElement("li");
+    li.className = "task-list-item";
+    ul.appendChild(li);
+    replaceTarget.parentNode.replaceChild(ul, replaceTarget);
+  }
+
+  const cb = document.createElement("input");
+  cb.type = "checkbox";
+  cb.contentEditable = "false";
+  if (isChecked) cb.checked = true;
+
+  const span = document.createElement("span");
+  span.className = "task-text";
+  const textVal = remainingText ? " " + remainingText : "\u200B ";
+  const tn = document.createTextNode(textVal);
+  span.appendChild(tn);
+
+  li.appendChild(cb);
+  li.appendChild(span);
+
+  placeCaret(tn, 1);
+  debouncedStats();
+}
+
 // ─── Space Key: Block Syntax Trigger ─────────────────────────────────────────
 function handleSpaceInWriter() {
   const sel = window.getSelection();
@@ -1009,12 +1190,22 @@ function handleSpaceInWriter() {
   const textAfter  = container.textContent.slice(range.startOffset);
   const block = getBlockAncestor(container);
   if (block) {
-    if (/^H[1-6]|LI|BLOCKQUOTE|PRE/.test(block.tagName)) return false;
+    if (/^H[1-6]|BLOCKQUOTE|PRE/.test(block.tagName)) return false;
+    if (block.tagName === "LI" && block.querySelector("input[type='checkbox']")) return false;
     if (block.textContent !== textBefore) return false;
   } else {
     if (container.parentNode !== writerViewEl) return false;
   }
   const target = block || container;
+
+  const taskMatch = textBefore.match(/^([-*+]|\d+\.)\s*\[([ xX]?)\]$/) || textBefore.match(/^\[([ xX]?)\]$/);
+  if (taskMatch) {
+    const checkChar = taskMatch[2] || taskMatch[1];
+    const isChecked = typeof checkChar === "string" && checkChar.toLowerCase() === "x";
+    buildTaskList(target, textAfter, isChecked);
+    return true;
+  }
+
   switch (textBefore) {
     case "-":
     case "*": buildUL(target, textAfter); return true;
@@ -1105,6 +1296,65 @@ function applyOrderedList() {
     ta.value = ta.value.slice(0, start) + ins + ta.value.slice(start);
     ta.selectionStart = ta.selectionEnd = ta.selectionStart + ins.length;
     ta.focus();
+  }
+}
+
+function applyTaskList() {
+  if (!isMarkdownMode) {
+    restoreSelection();
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount) return;
+    const block = getBlockAncestor(sel.getRangeAt(0).startContainer);
+    if (!block) return;
+
+    if (block.tagName === "LI") {
+      const cb = block.querySelector("input[type='checkbox']");
+      if (cb) {
+        cb.remove();
+        block.classList.remove("task-list-item");
+      } else {
+        block.classList.add("task-list-item");
+        if (block.parentElement) block.parentElement.classList.add("contains-task-list");
+        const newCb = document.createElement("input");
+        newCb.type = "checkbox";
+        newCb.contentEditable = "false";
+        block.insertBefore(newCb, block.firstChild);
+        block.insertBefore(document.createTextNode(" "), newCb.nextSibling);
+      }
+    } else {
+      const text = block.textContent;
+      buildTaskList(block, text, false);
+    }
+    writerViewEl.focus();
+    debouncedStats();
+  } else {
+    const ta = markdownInputEl;
+    const s = ta.selectionStart;
+    const e = ta.selectionEnd;
+    const lineStart = ta.value.lastIndexOf("\n", s - 1) + 1;
+    let lineEnd = ta.value.indexOf("\n", e);
+    if (lineEnd === -1) lineEnd = ta.value.length;
+
+    const lines = ta.value.slice(lineStart, lineEnd).split("\n");
+    const toggled = lines.map(line => {
+      if (/^(\s*[-*+]\s+)\[[ xX]\]\s*/.test(line)) {
+        return line.replace(/^(\s*[-*+]\s+)\[[ xX]\]\s*/, "$1");
+      } else if (/^(\s*[-*+]\s+)/.test(line)) {
+        return line.replace(/^(\s*[-*+]\s+)/, "$1[ ] ");
+      } else if (/^\s*$/.test(line)) {
+        return line;
+      } else {
+        const indent = line.match(/^\s*/)[0];
+        return `${indent}- [ ] ${line.trimStart()}`;
+      }
+    });
+
+    const newText = toggled.join("\n");
+    ta.value = ta.value.slice(0, lineStart) + newText + ta.value.slice(lineEnd);
+    ta.selectionStart = lineStart;
+    ta.selectionEnd = lineStart + newText.length;
+    ta.focus();
+    debouncedStats();
   }
 }
 
@@ -1971,6 +2221,51 @@ function handleWriterEnter(e) {
   if (/^H[1-6]$/.test(block.tagName)) return false;
   if (block.tagName === "BLOCKQUOTE") return false;
 
+  // ── Task list item Enter trigger ──
+  if (block.tagName === "LI" && (block.classList.contains("task-list-item") || block.querySelector("input[type='checkbox']"))) {
+    const itemText = Array.from(block.childNodes)
+      .filter(n => n.nodeType === Node.TEXT_NODE || (n.nodeType === Node.ELEMENT_NODE && n.tagName !== "INPUT"))
+      .map(n => n.textContent.replace(/\u200B/g, ""))
+      .join("").trim();
+    if (itemText === "") {
+      e.preventDefault();
+      const parentList = block.parentElement;
+      block.remove();
+      if (parentList && parentList.children.length === 0) {
+        parentList.remove();
+      }
+      const p = document.createElement("p");
+      p.appendChild(document.createElement("br"));
+      writerViewEl.appendChild(p);
+      placeCaret(p, 0);
+      writerViewEl.focus();
+      debouncedStats();
+      return true;
+    } else {
+      e.preventDefault();
+      const newLi = document.createElement("li");
+      newLi.className = "task-list-item";
+      const newCb = document.createElement("input");
+      newCb.type = "checkbox";
+      newCb.contentEditable = "false";
+      const span = document.createElement("span");
+      span.className = "task-text";
+      const tn = document.createTextNode("\u200B ");
+      span.appendChild(tn);
+      newLi.appendChild(newCb);
+      newLi.appendChild(span);
+      if (block.nextSibling) {
+        block.parentNode.insertBefore(newLi, block.nextSibling);
+      } else {
+        block.parentNode.appendChild(newLi);
+      }
+      placeCaret(tn, 1);
+      writerViewEl.focus();
+      debouncedStats();
+      return true;
+    }
+  }
+
   const text = block.textContent;
   const lineText = getLineTextBeforeCaret(range, block);
 
@@ -2503,7 +2798,11 @@ function handleKeydown(e) {
       }
       if (li) {
         e.preventDefault();
-        document.execCommand(e.shiftKey ? "outdent" : "indent");
+        if (e.shiftKey) {
+          outdentListItem(li);
+        } else {
+          indentListItem(li);
+        }
         return;
       }
     }
@@ -2545,6 +2844,13 @@ function handleKeydown(e) {
     if (e.key === "f" || e.key === "F") { e.preventDefault(); applyFootnote(); return; }
     if (e.key === "t" || e.key === "T") { e.preventDefault(); insertAtCursor(formatTime(new Date())); return; }
     if (e.key === "d" || e.key === "D") { e.preventDefault(); insertAtCursor(formatDate(new Date())); return; }
+  }
+  if (mod && e.shiftKey && !e.altKey) {
+    if (e.key.toLowerCase() === "l") {
+      e.preventDefault();
+      applyTaskList();
+      return;
+    }
   }
   if (e.key === "Escape") {
     closeFootnoteDrawer();
@@ -2628,6 +2934,13 @@ window.addEventListener("DOMContentLoaded", async () => {
   }
   document.getElementById("ul-btn")?.addEventListener("click",    () => applyUnorderedList());
   document.getElementById("ol-btn")?.addEventListener("click",    () => applyOrderedList());
+  document.getElementById("tasklist-btn")?.addEventListener("click",() => applyTaskList());
+
+  writerViewEl.addEventListener("change", (e) => {
+    if (e.target && e.target.matches("input[type='checkbox']")) {
+      debouncedStats();
+    }
+  });
 
   document.getElementById("quote-btn")?.addEventListener("click", () => applyBlockquote());
   document.getElementById("hr-btn")?.addEventListener("click",    () => applyHorizontalRule());
@@ -2749,23 +3062,25 @@ window.addEventListener("DOMContentLoaded", async () => {
     "# Welcome to ArtfulType Pro\n\n" +
     "Start writing your next masterpiece.\n\n" +
     "## Features\n\n" +
-    "- **Writer mode** — live Markdown editing\n" +
-    "- **Dracula theme** — beautiful dark palette\n" +
-    "- Native file I/O with recent files\n" +
-    "- Auto-save support\n\n" +
+    "- [x] **Writer mode** — live Markdown editing\n" +
+    "- [x] **Dracula theme** — beautiful dark palette\n" +
+    "- [x] Extended syntax: tables, footnotes & code blocks\n" +
+    "- [ ] Task lists with interactive checkboxes\n" +
+    "- [ ] Native file I/O with auto-save\n\n" +
     "### Keyboard Shortcuts\n\n" +
     "| Action | Key |\n" +
     "| --- | --- |\n" +
     "| Bold | Ctrl+B |\n" +
     "| Italic | Ctrl+I |\n" +
     "| Code | Ctrl+K |\n" +
+    "| Task List | Ctrl+Shift+L |\n" +
     "| H1–H6 | Ctrl+1–6 |\n" +
     "| Blockquote | Ctrl+Q |\n" +
     "| Undo | Ctrl+Z |\n" +
     "| Redo | Ctrl+Y |\n" +
     "| Toggle Mode | Ctrl+M |\n\n" +
     "#### Live triggers in Writer Mode\n\n" +
-    "> Type `- ` → bullet list · `1. ` → numbered · `> ` → blockquote\n" +
+    "> Type `- [ ] ` → task list item · `- ` → bullet list · `1. ` → numbered · `> ` → blockquote\n" +
     "> Type `# ` / `## ` / `### ` → headings\n\n" +
     "---\n\n";
 

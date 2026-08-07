@@ -12,7 +12,7 @@
 
 # ─── Metadata ────────────────────────────────────────────────────────────────
 APP_NAME    := artfultype-rs
-APP_VERSION := 0.25.8
+APP_VERSION := 0.25.9
 APP_DESC    := "ArtfulType Pro — Dracula-themed Markdown / Writer editor"
 
 # ─── Paths ───────────────────────────────────────────────────────────────────

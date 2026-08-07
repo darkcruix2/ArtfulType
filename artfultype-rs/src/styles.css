@@ -2115,3 +2115,80 @@ dialog:not([open]),
   color: #fff;
 }
 
+/* ── Task Lists ───────────────────────────────────────────────────────────── */
+#writer-view ul.contains-task-list,
+#writer-view ol.contains-task-list {
+  list-style: none !important;
+  padding-left: 0.2rem;
+}
+
+#writer-view ul.contains-task-list ul,
+#writer-view ul.contains-task-list ol,
+#writer-view ol.contains-task-list ul,
+#writer-view ol.contains-task-list ol {
+  padding-left: 1.4rem;
+  margin-top: 0.25rem;
+  margin-bottom: 0.25rem;
+}
+
+#writer-view li.task-list-item {
+  list-style: none !important;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 0.55rem;
+  margin-bottom: 0.35rem;
+  line-height: 1.5;
+}
+
+#writer-view li.task-list-item > ul,
+#writer-view li.task-list-item > ol {
+  flex-basis: 100%;
+  width: 100%;
+}
+
+#writer-view li.task-list-item input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 17px;
+  height: 17px;
+  border: 1.5px solid var(--comment);
+  border-radius: 4px;
+  background-color: var(--bg-sidebar);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  flex-shrink: 0;
+  position: relative;
+  top: 3px;
+  transition: background-color 0.15s, border-color 0.15s, transform 0.1s;
+}
+
+#writer-view li.task-list-item input[type="checkbox"]:hover {
+  border-color: var(--purple);
+  background-color: var(--bg-elevated);
+}
+
+#writer-view li.task-list-item input[type="checkbox"]:checked {
+  background-color: var(--purple);
+  border-color: var(--purple);
+}
+
+#writer-view li.task-list-item input[type="checkbox"]:checked::after {
+  content: "";
+  width: 4px;
+  height: 8px;
+  border: solid var(--bg);
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+  margin-bottom: 2px;
+}
+
+#writer-view li.task-list-item > input[type="checkbox"]:checked ~ .task-text {
+  color: var(--comment);
+  text-decoration: line-through;
+  text-decoration-color: var(--comment);
+}
+
