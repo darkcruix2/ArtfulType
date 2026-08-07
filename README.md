@@ -157,6 +157,56 @@ Modern companion binaries for macOS, Linux, and Windows are available in the `re
   - RPM Package: [releases/artfultype-rs-0.26.1-1.x86_64.rpm](releases/artfultype-rs-0.26.1-1.x86_64.rpm)
   - Raw Binary: [releases/artfultype-rs-linux-amd64](releases/artfultype-rs-linux-amd64)
 
+---
+
+## ArtfulType CLI — Terminal TUI (Linux)
+
+A distraction-free Markdown editor that runs entirely in the terminal — no GUI required.  
+Supports **Writer**, **Markdown**, and **Split** view modes with live Markdown preview, multi-theme support, shift-selection, cut/copy/paste, bold/italic/code wrapping, and VT100/ASCII mode for legacy terminals.
+
+![ArtfulType CLI — Split view showing Markdown editor and Writer preview side by side](screenshots/artfultype-cli-split.png)
+
+### CLI Features
+
+- **Three view modes**: Writer (styled preview), Markdown (raw editor), Split (side-by-side)
+- **Selection mode**: hold `Shift` + arrow keys to select text in any direction
+- **Formatting shortcuts**: `Ctrl+B` / `Ctrl+I` / `Ctrl+K` wrap selected text in `**` / `*` / `` ` ``
+- **Clipboard**: `Ctrl+C` / `Ctrl+X` / `Ctrl+V`
+- **Multiple themes**: Dark Antigravity, Dracula, Retro Green, Retro Amber, VT100
+- **VT100 / ASCII mode** (`--vt100`): pure ASCII borders for legacy or restricted terminals
+- **Menu bar**: `Alt+F/E/O/V/T/H` or arrow keys to navigate menus
+
+### CLI Keyboard Shortcuts
+
+| Action | Shortcut |
+| --- | --- |
+| Save | `Ctrl+S` |
+| Quit | `Ctrl+Q` |
+| Bold / Italic / Code | `Ctrl+B` / `Ctrl+I` / `Ctrl+K` |
+| Heading 1 / 2 / 3 | `Ctrl+1` / `Ctrl+2` / `Ctrl+3` |
+| Copy / Cut / Paste | `Ctrl+C` / `Ctrl+X` / `Ctrl+V` |
+| Select (extend) | `Shift+Arrow` |
+| Clear selection | `Esc` |
+| Open menu bar | `Alt+F` / `Alt+E` / `Alt+O` / `Alt+V` / `Alt+T` / `Alt+H` |
+
+### CLI Downloads (Linux AMD64, v0.26.1)
+
+- **Debian/Ubuntu `.deb`**: [releases/artfultype-cli_0.26.1_amd64.deb](releases/artfultype-cli_0.26.1_amd64.deb)
+- **RPM (Fedora/RHEL/openSUSE)**: [releases/artfultype-cli-0.26.1-1.x86_64.rpm](releases/artfultype-cli-0.26.1-1.x86_64.rpm)
+- **AppImage** (run anywhere): [releases/artfultype-cli_0.26.1_amd64.AppImage](releases/artfultype-cli_0.26.1_amd64.AppImage)
+
+```bash
+# Install .deb
+sudo dpkg -i artfultype-cli_0.26.1_amd64.deb
+
+# Install .rpm
+sudo rpm -i artfultype-cli-0.26.1-1.x86_64.rpm
+
+# Run AppImage (no install needed)
+chmod +x artfultype-cli_0.26.1_amd64.AppImage
+./artfultype-cli_0.26.1_amd64.AppImage myfile.md
+```
+
 ## License
 
 Code: GPLv3 — see [LICENSE](LICENSE).
