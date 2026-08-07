@@ -21,7 +21,7 @@
           </button>
         </div>
         <div class="header-center">
-          <span class="app-title">ArtfulType Pro <span class="app-version">v0.25.6</span></span>
+          <span class="app-title">ArtfulType Pro <span class="app-version">v0.25.7</span></span>
         </div>
         <div class="header-right"></div>
       </header>
@@ -125,6 +125,54 @@
             </button>
           </div>
 
+          <div class="toolbar-sep"></div>
+
+          <!-- Table Group -->
+          <div class="toolbar-group" id="table-group">
+            <!-- Main Table Dropdown Button -->
+            <button id="table-btn" class="icon-btn fmt-btn table-main-btn" title="Insert or Edit Table">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3h18v18H3z"/><path d="M3 9h18"/><path d="M3 15h18"/><path d="M9 3v18"/><path d="M15 3v18"/></svg>
+              <span class="btn-arrow">▾</span>
+            </button>
+
+            <!-- Column Manipulation Buttons -->
+            <button id="table-col-before-btn" class="icon-btn fmt-btn" title="Add Column to Front (Left)">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="10" rx="1"/><line x1="12" y1="4" x2="12" y2="8"/><line x1="10" y1="6" x2="14" y2="6"/></svg>
+            </button>
+            <button id="table-col-after-btn" class="icon-btn fmt-btn" title="Add Column After (Right)">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="10" rx="1"/><line x1="12" y1="16" x2="12" y2="20"/><line x1="10" y1="18" x2="14" y2="18"/></svg>
+            </button>
+            <button id="table-col-del-btn" class="icon-btn fmt-btn danger-hover" title="Remove Current Column">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="7" width="16" height="10" rx="1"/><line x1="12" y1="3" x2="12" y2="21"/></svg>
+            </button>
+
+            <div class="toolbar-subsep"></div>
+
+            <!-- Row Manipulation Buttons -->
+            <button id="table-row-before-btn" class="icon-btn fmt-btn" title="Add Row Before (Above)">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="10" y="4" width="10" height="16" rx="1"/><line x1="4" y1="12" x2="8" y2="12"/><line x1="6" y1="10" x2="6" y2="14"/></svg>
+            </button>
+            <button id="table-row-after-btn" class="icon-btn fmt-btn" title="Add Row After (Below)">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="10" height="16" rx="1"/><line x1="16" y1="12" x2="20" y2="12"/><line x1="18" y1="10" x2="18" y2="14"/></svg>
+            </button>
+            <button id="table-row-del-btn" class="icon-btn fmt-btn danger-hover" title="Remove Current Row">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="4" width="10" height="16" rx="1"/><line x1="3" y1="12" x2="21" y2="12"/></svg>
+            </button>
+
+            <div class="toolbar-subsep"></div>
+
+            <!-- Column Alignment Buttons -->
+            <button id="table-align-left-btn" class="icon-btn fmt-btn" title="Align Column Left">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="15" y2="12"/><line x1="3" y1="18" x2="18" y2="18"/></svg>
+            </button>
+            <button id="table-align-center-btn" class="icon-btn fmt-btn" title="Align Column Center">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="6" y1="12" x2="18" y2="12"/><line x1="4" y1="18" x2="20" y2="18"/></svg>
+            </button>
+            <button id="table-align-right-btn" class="icon-btn fmt-btn" title="Align Column Right">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="9" y1="12" x2="21" y2="12"/><line x1="6" y1="18" x2="21" y2="18"/></svg>
+            </button>
+          </div>
+
           <div class="toolbar-spacer"></div>
 
           <div class="toolbar-group">
@@ -160,11 +208,42 @@
       <button id="menu-prefs-btn" class="menu-item">Preferences</button>
     </div>
 
+    <!-- Table Popover Dropdown -->
+    <div id="table-menu" class="dropdown-menu table-dropdown hidden">
+      <div class="table-popover-title">Insert Table</div>
+      <div id="table-grid-picker" class="table-grid-picker"></div>
+      <div id="table-grid-label" class="table-grid-label">3 × 3 Table</div>
+      <div class="table-custom-row">
+        <div class="table-input-group">
+          <label for="table-rows-input">Rows:</label>
+          <input type="number" id="table-rows-input" min="1" max="50" value="3" class="table-num-input" />
+        </div>
+        <div class="table-input-group">
+          <label for="table-cols-input">Cols:</label>
+          <input type="number" id="table-cols-input" min="1" max="50" value="3" class="table-num-input" />
+        </div>
+        <button id="table-insert-custom-btn" class="btn primary-btn btn-sm">Insert</button>
+      </div>
+      <hr class="modal-sep" style="margin: 0.5rem 0;" />
+      <div class="table-popover-title">Table Controls</div>
+      <div class="table-action-grid">
+        <button id="menu-table-col-before" class="menu-item flex-item"><span>➕ Col Left</span></button>
+        <button id="menu-table-col-after" class="menu-item flex-item"><span>➕ Col Right</span></button>
+        <button id="menu-table-col-del" class="menu-item flex-item danger-item"><span>🗑 Del Col</span></button>
+        <button id="menu-table-row-before" class="menu-item flex-item"><span>➕ Row Above</span></button>
+        <button id="menu-table-row-after" class="menu-item flex-item"><span>➕ Row Below</span></button>
+        <button id="menu-table-row-del" class="menu-item flex-item danger-item"><span>🗑 Del Row</span></button>
+        <button id="menu-table-align-left" class="menu-item flex-item"><span>⯇ Align Left</span></button>
+        <button id="menu-table-align-center" class="menu-item flex-item"><span>⯂ Center</span></button>
+        <button id="menu-table-align-right" class="menu-item flex-item"><span>⯈ Align Right</span></button>
+      </div>
+    </div>
+
     <!-- About Modal -->
     <dialog id="about-modal" class="modal-dialog glass-panel">
       <div class="modal-content">
         <h2>About ArtfulType Pro</h2>
-        <p class="version-text">Version 0.25.6</p>
+        <p class="version-text">Version 0.25.7</p>
         <hr class="modal-sep" />
         <p><strong>License:</strong> GPLv3</p>
         <p><strong>Maintainer:</strong> Roland Huber</p>

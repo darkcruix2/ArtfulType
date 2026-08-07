@@ -542,13 +542,14 @@ body {
 /* ── Toolbar ───────────────────────────────────────────────────────────────── */
 #toolbar {
   min-height: 46px;
+  height: auto;
   display: flex;
   align-items: center;
-  padding: 0 0.6rem;
+  flex-wrap: wrap;
+  padding: 0.35rem 0.6rem;
   border-bottom: 1px solid var(--border);
   gap: 0.3rem;
-  overflow-x: auto;
-  scrollbar-width: none;
+  row-gap: 0.35rem;
   flex-shrink: 0;
 }
 
@@ -900,6 +901,138 @@ body {
 
 
 
+/* Sub-separator for fine-grained toolbar grouping */
+.toolbar-subsep {
+  width: 1px;
+  height: 12px;
+  background: var(--border);
+  margin: 0 0.15rem;
+  opacity: 0.5;
+  flex-shrink: 0;
+}
+
+.table-main-btn {
+  gap: 2px;
+  width: auto !important;
+  padding: 0 6px !important;
+}
+.btn-arrow {
+  font-size: 0.7rem;
+  opacity: 0.7;
+}
+.danger-hover:hover {
+  background: rgba(255, 85, 85, 0.2) !important;
+  color: var(--red) !important;
+}
+
+/* ── Table Popover Dropdown ─────────────────────────────────────────────────── */
+.table-dropdown {
+  width: 260px;
+  padding: 0.75rem !important;
+  position: fixed !important;
+  z-index: 9999 !important;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.7) !important;
+}
+
+.table-popover-title {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--purple);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.5rem;
+}
+
+.table-grid-picker {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 4px;
+  margin-bottom: 0.4rem;
+  background: rgba(0, 0, 0, 0.2);
+  padding: 6px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+}
+
+.grid-square {
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--bg-sidebar);
+  cursor: pointer;
+  transition: background-color 0.08s, border-color 0.08s;
+}
+
+.grid-square.active {
+  background: var(--purple);
+  border-color: var(--purple);
+  box-shadow: 0 0 6px rgba(189, 147, 249, 0.4);
+}
+
+.table-grid-label {
+  font-size: 0.75rem;
+  color: var(--comment);
+  text-align: center;
+  margin-bottom: 0.6rem;
+  font-weight: 500;
+}
+
+.table-custom-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  justify-content: space-between;
+}
+
+.table-input-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.75rem;
+  color: var(--fg);
+}
+
+.table-num-input {
+  width: 42px;
+  background: var(--bg-sidebar);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--fg);
+  padding: 2px 4px;
+  font-size: 0.75rem;
+  text-align: center;
+  outline: none;
+}
+.table-num-input:focus {
+  border-color: var(--purple);
+}
+
+.btn-sm {
+  padding: 0.2rem 0.5rem !important;
+  font-size: 0.75rem !important;
+}
+
+.table-action-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+}
+
+.table-action-grid .menu-item {
+  font-size: 0.72rem;
+  padding: 0.35rem 0.4rem;
+  text-align: center;
+  justify-content: center;
+  display: flex;
+  white-space: nowrap;
+}
+
+.danger-item:hover {
+  background: rgba(255, 85, 85, 0.25) !important;
+  color: var(--red) !important;
+}
+
 /* Bold & italic */
 #writer-view strong { color: var(--orange); font-weight: 700; }
 #writer-view em { color: var(--yellow); font-style: italic; }
@@ -909,22 +1042,37 @@ body {
 #writer-view table {
   border-collapse: collapse;
   width: 100%;
-  margin: 1rem 0;
+  margin: 1.2rem 0;
   font-size: 0.95rem;
+  border-radius: 6px;
+  overflow: hidden;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
 }
 
 #writer-view th {
-  background: rgba(189, 147, 249, 0.12);
+  background: rgba(189, 147, 249, 0.15);
   color: var(--purple);
   font-weight: 600;
   text-align: left;
-  padding: 0.5rem 0.75rem;
+  padding: 0.55rem 0.8rem;
   border: 1px solid var(--border);
+  transition: background-color 0.15s;
 }
 
 #writer-view td {
-  padding: 0.45rem 0.75rem;
+  padding: 0.5rem 0.8rem;
   border: 1px solid var(--border);
+  transition: background-color 0.15s;
+}
+
+#writer-view th[align="left"], #writer-view td[align="left"] { text-align: left; }
+#writer-view th[align="center"], #writer-view td[align="center"] { text-align: center; }
+#writer-view th[align="right"], #writer-view td[align="right"] { text-align: right; }
+
+#writer-view td:focus, #writer-view th:focus {
+  outline: 2px solid var(--purple);
+  outline-offset: -2px;
+  background: rgba(189, 147, 249, 0.08) !important;
 }
 
 #writer-view tr:nth-child(even) td { background: rgba(255, 255, 255, 0.02); }

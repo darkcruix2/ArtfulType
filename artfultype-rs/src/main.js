@@ -1,4 +1,20 @@
-const { invoke } = window.__TAURI__.core;
+const invoke = window.__TAURI__?.core?.invoke || (async (cmd, args) => {
+  if (cmd === "get_platform") return "linux";
+  if (cmd === "parse_markdown") {
+    // Basic fallback HTML converter for standalone browser preview
+    if (!args || !args.text) return "";
+    let html = args.text
+      .replace(/^### (.*$)/gim, '<h3>$1</h3>')
+      .replace(/^## (.*$)/gim, '<h2>$1</h2>')
+      .replace(/^# (.*$)/gim, '<h1>$1</h1>')
+      .replace(/^\> (.*$)/gim, '<blockquote>$1</blockquote>')
+      .replace(/\*\*(.*)\*\*/gim, '<strong>$1</strong>')
+      .replace(/\*(.*)\*/gim, '<em>$1</em>')
+      .replace(/\n\n/g, '</p><p>');
+    return '<p>' + html + '</p>';
+  }
+  return null;
+});
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let markdownInputEl;
@@ -482,11 +498,91 @@ function nodeToMd(node, insideBlock = false) {
     case "table": {
       const rows = Array.from(node.querySelectorAll("tr"));
       if (!rows.length) return children();
-      const headers = Array.from(rows[0].querySelectorAll("th,td")).map(c => c.textContent.trim());
-      const body = rows.slice(1).map(r =>
-        Array.from(r.querySelectorAll("td,th")).map(c => c.textContent.trim()).join(" | ")
-      ).filter(Boolean);
-      return [headers.join(" | "), headers.map(() => "---").join(" | "), ...body].join("\n") + "\n\n";
+
+      // Extract all grid cells as string matrix
+      const matrix = rows.map(r => {
+        return Array.from(r.querySelectorAll("th, td")).map(c => {
+          // Convert cell children to markdown text without line breaks, escaping pipe symbols
+          const text = nodeToMd(c, true).replace(/\n+/g, " ").replace(/\|/g, "\\|").trim();
+          return text;
+        });
+      });
+
+      if (!matrix.length || !matrix[0].length) return "";
+
+      const colCount = Math.max(...matrix.map(r => r.length));
+
+      // Determine alignment per column
+      const alignments = [];
+      for (let j = 0; j < colCount; j++) {
+        let align = "left";
+        for (const r of rows) {
+          const cells = Array.from(r.querySelectorAll("th, td"));
+          const cell = cells[j];
+          if (cell) {
+            const a = (cell.getAttribute("align") || cell.style.textAlign || "").toLowerCase();
+            if (a === "center" || a === "right" || a === "left") {
+              align = a;
+              break;
+            }
+          }
+        }
+        alignments.push(align);
+      }
+
+      // Calculate max width for each column j
+      const colWidths = new Array(colCount).fill(3);
+      for (let i = 0; i < matrix.length; i++) {
+        for (let j = 0; j < colCount; j++) {
+          const val = matrix[i][j] || "";
+          if (val.length > colWidths[j]) {
+            colWidths[j] = val.length;
+          }
+        }
+      }
+      for (let j = 0; j < colCount; j++) {
+        const minW = alignments[j] === "center" ? 5 : (alignments[j] === "right" || alignments[j] === "left" ? 4 : 3);
+        if (colWidths[j] < minW) colWidths[j] = minW;
+      }
+
+      // Helper to pad cell string based on alignment
+      const padCell = (text, width, align) => {
+        const totalPad = Math.max(0, width - text.length);
+        if (align === "right") {
+          return " ".repeat(totalPad) + text;
+        } else if (align === "center") {
+          const leftPad = Math.floor(totalPad / 2);
+          const rightPad = totalPad - leftPad;
+          return " ".repeat(leftPad) + text + " ".repeat(rightPad);
+        } else {
+          return text + " ".repeat(totalPad);
+        }
+      };
+
+      // Header row
+      const headerRow = matrix[0];
+      const headerLine = "| " + colWidths.map((w, j) => padCell(headerRow[j] || "", w, alignments[j])).join(" | ") + " |";
+
+      // Delimiter row
+      const delimiterLine = "| " + colWidths.map((w, j) => {
+        const align = alignments[j];
+        if (align === "center") {
+          return ":" + "-".repeat(Math.max(1, w - 2)) + ":";
+        } else if (align === "right") {
+          return "-".repeat(Math.max(2, w - 1)) + ":";
+        } else if (align === "left") {
+          return ":" + "-".repeat(Math.max(2, w - 1));
+        } else {
+          return "-".repeat(w);
+        }
+      }).join(" | ") + " |";
+
+      // Body rows
+      const bodyLines = matrix.slice(1).map(row => {
+        return "| " + colWidths.map((w, j) => padCell(row[j] || "", w, alignments[j])).join(" | ") + " |";
+      });
+
+      return [headerLine, delimiterLine, ...bodyLines].join("\n") + "\n\n";
     }
     case "input": return "";
     case "div": case "section": case "article": {
@@ -844,6 +940,341 @@ function insertAtCursor(text) {
     ta.selectionStart = ta.selectionEnd = s + text.length;
     ta.focus(); debouncedStats();
   }
+}
+
+// ─── Table Context & Writer Manipulation Helpers ──────────────────────────────
+function getTableContext() {
+  restoreSelection();
+  const sel = window.getSelection();
+  if (!sel || !sel.rangeCount) return null;
+  let node = sel.getRangeAt(0).startContainer;
+  let cell = null;
+  while (node && node !== writerViewEl) {
+    if (node.nodeType === Node.ELEMENT_NODE && (node.tagName === "TD" || node.tagName === "TH")) {
+      cell = node;
+      break;
+    }
+    node = node.parentNode;
+  }
+  if (!cell) return null;
+
+  const tr = cell.closest("tr");
+  const table = cell.closest("table");
+  if (!tr || !table) return null;
+
+  const rowCells = Array.from(tr.children);
+  const colIndex = rowCells.indexOf(cell);
+  const rows = Array.from(table.querySelectorAll("tr"));
+  const rowIndex = rows.indexOf(tr);
+
+  return {
+    table,
+    tr,
+    cell,
+    isHeader: cell.tagName === "TH" || tr.parentElement?.tagName === "THEAD",
+    colIndex,
+    rowIndex,
+    rowCount: rows.length,
+    colCount: rowCells.length
+  };
+}
+
+function createTableHTML(rows = 3, cols = 3) {
+  let html = "<table>\n  <thead>\n    <tr>\n";
+  for (let j = 1; j <= cols; j++) {
+    html += `      <th>Header ${j}</th>\n`;
+  }
+  html += "    </tr>\n  </thead>\n  <tbody>\n";
+  for (let i = 1; i <= Math.max(1, rows - 1); i++) {
+    html += "    <tr>\n";
+    for (let j = 1; j <= cols; j++) {
+      html += `      <td>Cell ${i}.${j}</td>\n`;
+    }
+    html += "    </tr>\n";
+  }
+  html += "  </tbody>\n</table>\n<p><br></p>";
+  return html;
+}
+
+function createTableMarkdown(rows = 3, cols = 3) {
+  const headers = [];
+  const delims = [];
+  for (let j = 1; j <= cols; j++) {
+    headers.push(`Header ${j}`);
+    delims.push("---");
+  }
+  const lines = [
+    "| " + headers.join(" | ") + " |",
+    "| " + delims.join(" | ") + " |"
+  ];
+  for (let i = 1; i <= Math.max(1, rows - 1); i++) {
+    const row = [];
+    for (let j = 1; j <= cols; j++) {
+      row.push(`Cell ${i}.${j}`);
+    }
+    lines.push("| " + row.join(" | ") + " |");
+  }
+  return "\n" + lines.join("\n") + "\n\n";
+}
+
+function insertTable(rows = 3, cols = 3) {
+  if (isMarkdownMode) {
+    const md = createTableMarkdown(rows, cols);
+    insertAtCursor(md);
+  } else {
+    restoreSelection();
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount) {
+      writerViewEl.insertAdjacentHTML("beforeend", createTableHTML(rows, cols));
+    } else {
+      const range = sel.getRangeAt(0);
+      const temp = document.createElement("div");
+      temp.innerHTML = createTableHTML(rows, cols);
+      const frag = document.createDocumentFragment();
+      let firstCell = null;
+      while (temp.firstChild) {
+        const child = temp.firstChild;
+        if (!firstCell && child.nodeType === Node.ELEMENT_NODE) {
+          firstCell = child.querySelector("th, td");
+        }
+        frag.appendChild(child);
+      }
+      range.deleteContents();
+      range.insertNode(frag);
+
+      if (firstCell) {
+        placeCaret(firstCell, 0);
+      }
+    }
+    writerViewEl.focus();
+    debouncedStats();
+  }
+}
+
+function tableAddColumnBefore() {
+  if (isMarkdownMode) return;
+  const ctx = getTableContext();
+  if (!ctx) {
+    statusMessageEl.textContent = "Place cursor inside a table cell first";
+    return;
+  }
+  const { table, colIndex } = ctx;
+  const rows = table.querySelectorAll("tr");
+  rows.forEach(r => {
+    const cells = Array.from(r.children);
+    const target = cells[colIndex] || cells[cells.length - 1];
+    const isHeader = r.parentElement?.tagName === "THEAD" || target?.tagName === "TH";
+    const newCell = document.createElement(isHeader ? "th" : "td");
+    newCell.textContent = isHeader ? "Header" : "Cell";
+    if (target) {
+      r.insertBefore(newCell, target);
+    } else {
+      r.appendChild(newCell);
+    }
+  });
+  statusMessageEl.textContent = "Added column to front";
+  debouncedStats();
+}
+
+function tableAddColumnAfter() {
+  if (isMarkdownMode) return;
+  const ctx = getTableContext();
+  if (!ctx) {
+    statusMessageEl.textContent = "Place cursor inside a table cell first";
+    return;
+  }
+  const { table, colIndex } = ctx;
+  const rows = table.querySelectorAll("tr");
+  rows.forEach(r => {
+    const cells = Array.from(r.children);
+    const target = cells[colIndex];
+    const isHeader = r.parentElement?.tagName === "THEAD" || (target && target.tagName === "TH");
+    const newCell = document.createElement(isHeader ? "th" : "td");
+    newCell.textContent = isHeader ? "Header" : "Cell";
+    if (target && target.nextSibling) {
+      r.insertBefore(newCell, target.nextSibling);
+    } else {
+      r.appendChild(newCell);
+    }
+  });
+  statusMessageEl.textContent = "Added column after";
+  debouncedStats();
+}
+
+function tableRemoveColumn() {
+  if (isMarkdownMode) return;
+  const ctx = getTableContext();
+  if (!ctx) {
+    statusMessageEl.textContent = "Place cursor inside a table cell first";
+    return;
+  }
+  const { table, colIndex, colCount } = ctx;
+  if (colCount <= 1) {
+    table.remove();
+    statusMessageEl.textContent = "Removed table";
+    debouncedStats();
+    return;
+  }
+  const rows = table.querySelectorAll("tr");
+  rows.forEach(r => {
+    const cells = Array.from(r.children);
+    if (cells[colIndex]) {
+      r.removeChild(cells[colIndex]);
+    }
+  });
+  statusMessageEl.textContent = "Removed column";
+  debouncedStats();
+}
+
+function tableAddRowBefore() {
+  if (isMarkdownMode) return;
+  const ctx = getTableContext();
+  if (!ctx) {
+    statusMessageEl.textContent = "Place cursor inside a table cell first";
+    return;
+  }
+  const { tr, colCount } = ctx;
+  const newTr = document.createElement("tr");
+  for (let j = 0; j < colCount; j++) {
+    const td = document.createElement("td");
+    td.textContent = "Cell";
+    newTr.appendChild(td);
+  }
+  tr.parentNode.insertBefore(newTr, tr);
+  statusMessageEl.textContent = "Added row before";
+  debouncedStats();
+}
+
+function tableAddRowAfter() {
+  if (isMarkdownMode) return;
+  const ctx = getTableContext();
+  if (!ctx) {
+    statusMessageEl.textContent = "Place cursor inside a table cell first";
+    return;
+  }
+  const { tr, colCount } = ctx;
+  const newTr = document.createElement("tr");
+  for (let j = 0; j < colCount; j++) {
+    const td = document.createElement("td");
+    td.textContent = "Cell";
+    newTr.appendChild(td);
+  }
+  if (tr.nextSibling) {
+    tr.parentNode.insertBefore(newTr, tr.nextSibling);
+  } else {
+    tr.parentNode.appendChild(newTr);
+  }
+  statusMessageEl.textContent = "Added row after";
+  debouncedStats();
+}
+
+function tableRemoveRow() {
+  if (isMarkdownMode) return;
+  const ctx = getTableContext();
+  if (!ctx) {
+    statusMessageEl.textContent = "Place cursor inside a table cell first";
+    return;
+  }
+  const { table, tr, rowCount } = ctx;
+  if (rowCount <= 1) {
+    table.remove();
+    statusMessageEl.textContent = "Removed table";
+    debouncedStats();
+    return;
+  }
+  tr.remove();
+  statusMessageEl.textContent = "Removed row";
+  debouncedStats();
+}
+
+function tableSetColumnAlignment(align) {
+  if (isMarkdownMode) return;
+  const ctx = getTableContext();
+  if (!ctx) {
+    statusMessageEl.textContent = "Place cursor inside a table cell first";
+    return;
+  }
+  const { table, colIndex } = ctx;
+  const rows = table.querySelectorAll("tr");
+  rows.forEach(r => {
+    const cells = Array.from(r.children);
+    if (cells[colIndex]) {
+      cells[colIndex].setAttribute("align", align);
+      cells[colIndex].style.textAlign = align;
+    }
+  });
+  statusMessageEl.textContent = `Column aligned ${align}`;
+  debouncedStats();
+}
+
+function initTableGridPicker() {
+  const picker = document.getElementById("table-grid-picker");
+  if (!picker) return;
+  picker.innerHTML = "";
+  const maxRows = 6;
+  const maxCols = 6;
+
+  for (let r = 1; r <= maxRows; r++) {
+    for (let c = 1; c <= maxCols; c++) {
+      const sq = document.createElement("div");
+      sq.className = "grid-square";
+      sq.dataset.row = r;
+      sq.dataset.col = c;
+
+      sq.addEventListener("mouseenter", () => {
+        highlightTableGrid(r, c);
+      });
+
+      sq.addEventListener("click", (e) => {
+        e.stopPropagation();
+        insertTable(r, c);
+        closeTableMenu();
+      });
+
+      picker.appendChild(sq);
+    }
+  }
+
+  picker.addEventListener("mouseleave", () => {
+    highlightTableGrid(3, 3);
+  });
+  highlightTableGrid(3, 3);
+}
+
+function highlightTableGrid(rows, cols) {
+  const squares = document.querySelectorAll("#table-grid-picker .grid-square");
+  squares.forEach(sq => {
+    const r = parseInt(sq.dataset.row, 10);
+    const c = parseInt(sq.dataset.col, 10);
+    if (r <= rows && c <= cols) {
+      sq.classList.add("active");
+    } else {
+      sq.classList.remove("active");
+    }
+  });
+  const label = document.getElementById("table-grid-label");
+  if (label) label.textContent = `${rows} × ${cols} Table`;
+}
+
+function toggleTableMenu(e) {
+  e.stopPropagation();
+  const menu = document.getElementById("table-menu");
+  if (!menu) return;
+  menu.classList.toggle("hidden");
+  if (!menu.classList.contains("hidden")) {
+    initTableGridPicker();
+    const btn = document.getElementById("table-btn");
+    if (btn) {
+      const rect = btn.getBoundingClientRect();
+      menu.style.top = (rect.bottom + 4) + "px";
+      menu.style.left = Math.min(rect.left, window.innerWidth - 260) + "px";
+    }
+  }
+}
+
+function closeTableMenu() {
+  const menu = document.getElementById("table-menu");
+  if (menu) menu.classList.add("hidden");
 }
 
 // ─── Live Markdown Syntax ─────────────────────────────────────────────────────
@@ -1748,10 +2179,6 @@ function handleKeydown(e) {
         const containerText = (container.nodeType === Node.TEXT_NODE ? container.textContent : "") || "";
         const afterCaret   = containerText.slice(caretOffset);
 
-        // "On the last line" means:
-        //   (a) No \n after the caret in the current text node, AND
-        //   (b) No further sibling text nodes exist after the cursor node
-        //       (handles <br>-based breaks).
         const noNewlineAfter = !afterCaret.includes("\n");
         let noFollowingSibling = true;
         if (container.nodeType === Node.TEXT_NODE) {
@@ -1791,6 +2218,32 @@ function handleKeydown(e) {
   }
 
   if (!isMarkdownMode && e.key === "Tab" && !mod) {
+    const ctx = getTableContext();
+    if (ctx) {
+      e.preventDefault();
+      const { table, cell } = ctx;
+      const allCells = Array.from(table.querySelectorAll("th, td"));
+      const currIdx = allCells.indexOf(cell);
+      if (e.shiftKey) {
+        if (currIdx > 0) {
+          placeCaret(allCells[currIdx - 1], 0);
+          allCells[currIdx - 1].focus();
+        }
+      } else {
+        if (currIdx < allCells.length - 1) {
+          placeCaret(allCells[currIdx + 1], 0);
+          allCells[currIdx + 1].focus();
+        } else {
+          tableAddRowAfter();
+          const updatedCells = Array.from(table.querySelectorAll("th, td"));
+          if (updatedCells[currIdx + 1]) {
+            placeCaret(updatedCells[currIdx + 1], 0);
+            updatedCells[currIdx + 1].focus();
+          }
+        }
+      }
+      return;
+    }
     const sel = window.getSelection();
     if (sel && sel.rangeCount > 0) {
       let node = sel.getRangeAt(0).startContainer;
@@ -1905,8 +2358,6 @@ window.addEventListener("DOMContentLoaded", async () => {
   writerViewEl.addEventListener("input", (e) => { handleLiveMarkdown(e); debouncedStats(); });
   markdownInputEl.addEventListener("input", debouncedStats);
 
-
-
   // ── File buttons ──
   document.getElementById("toggle-mode-btn")?.addEventListener("click", toggleMode);
   document.getElementById("open-file-btn")?.addEventListener("click",   openFile);
@@ -1930,6 +2381,38 @@ window.addEventListener("DOMContentLoaded", async () => {
   document.getElementById("time-btn")?.addEventListener("click",  () => insertAtCursor(formatTime(new Date())));
   document.getElementById("date-btn")?.addEventListener("click",  () => insertAtCursor(formatDate(new Date())));
 
+  // ── Table Controls ──
+  document.getElementById("table-btn")?.addEventListener("click", toggleTableMenu);
+  document.getElementById("table-insert-custom-btn")?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const rows = parseInt(document.getElementById("table-rows-input")?.value || "3", 10);
+    const cols = parseInt(document.getElementById("table-cols-input")?.value || "3", 10);
+    insertTable(rows, cols);
+    closeTableMenu();
+  });
+
+  // Toolbar Quick Table Actions
+  document.getElementById("table-col-before-btn")?.addEventListener("click", tableAddColumnBefore);
+  document.getElementById("table-col-after-btn")?.addEventListener("click", tableAddColumnAfter);
+  document.getElementById("table-col-del-btn")?.addEventListener("click", tableRemoveColumn);
+  document.getElementById("table-row-before-btn")?.addEventListener("click", tableAddRowBefore);
+  document.getElementById("table-row-after-btn")?.addEventListener("click", tableAddRowAfter);
+  document.getElementById("table-row-del-btn")?.addEventListener("click", tableRemoveRow);
+  document.getElementById("table-align-left-btn")?.addEventListener("click", () => tableSetColumnAlignment("left"));
+  document.getElementById("table-align-center-btn")?.addEventListener("click", () => tableSetColumnAlignment("center"));
+  document.getElementById("table-align-right-btn")?.addEventListener("click", () => tableSetColumnAlignment("right"));
+
+  // Popover Menu Items
+  document.getElementById("menu-table-col-before")?.addEventListener("click", (e) => { e.stopPropagation(); tableAddColumnBefore(); closeTableMenu(); });
+  document.getElementById("menu-table-col-after")?.addEventListener("click", (e) => { e.stopPropagation(); tableAddColumnAfter(); closeTableMenu(); });
+  document.getElementById("menu-table-col-del")?.addEventListener("click", (e) => { e.stopPropagation(); tableRemoveColumn(); closeTableMenu(); });
+  document.getElementById("menu-table-row-before")?.addEventListener("click", (e) => { e.stopPropagation(); tableAddRowBefore(); closeTableMenu(); });
+  document.getElementById("menu-table-row-after")?.addEventListener("click", (e) => { e.stopPropagation(); tableAddRowAfter(); closeTableMenu(); });
+  document.getElementById("menu-table-row-del")?.addEventListener("click", (e) => { e.stopPropagation(); tableRemoveRow(); closeTableMenu(); });
+  document.getElementById("menu-table-align-left")?.addEventListener("click", (e) => { e.stopPropagation(); tableSetColumnAlignment("left"); closeTableMenu(); });
+  document.getElementById("menu-table-align-center")?.addEventListener("click", (e) => { e.stopPropagation(); tableSetColumnAlignment("center"); closeTableMenu(); });
+  document.getElementById("menu-table-align-right")?.addEventListener("click", (e) => { e.stopPropagation(); tableSetColumnAlignment("right"); closeTableMenu(); });
+
   // ── Main Menu ──
   const mainMenuBtn = document.getElementById("main-menu-btn");
   if (mainMenuBtn) {
@@ -1945,12 +2428,17 @@ window.addEventListener("DOMContentLoaded", async () => {
   document.getElementById("cancel-rename-btn")?.addEventListener("click", () => closeModal("rename-modal"));
   document.getElementById("confirm-rename-btn")?.addEventListener("click", confirmRename);
 
-  // Close main menu when clicking outside
+  // Close menus when clicking outside
   document.addEventListener("click", (e) => {
     const menu = document.getElementById("main-menu");
     const btn = document.getElementById("main-menu-btn");
     if (menu && btn && !menu.contains(e.target) && !btn.contains(e.target)) {
       menu.classList.add("hidden");
+    }
+    const tableMenu = document.getElementById("table-menu");
+    const tableBtn = document.getElementById("table-btn");
+    if (tableMenu && tableBtn && !tableMenu.contains(e.target) && !tableBtn.contains(e.target)) {
+      tableMenu.classList.add("hidden");
     }
   });
 
