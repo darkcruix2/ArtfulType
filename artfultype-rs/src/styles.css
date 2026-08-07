@@ -1434,6 +1434,16 @@ sup {
   text-align: left;
   cursor: pointer;
   transition: background-color 0.12s;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1.5rem;
+}
+
+.menu-item kbd {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--comment);
 }
 
 .menu-item:hover {

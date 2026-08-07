@@ -3187,8 +3187,15 @@ async function openFile() {
 
 async function saveFile(silent = false) {
   syncActiveFileContent();
-  const f = getActiveFile();
-  if (!f) return;
+  let f = getActiveFile();
+  if (!f) {
+    const currentContent = getCurrentMarkdown();
+    const name = "untitled-" + untitledCounter++ + ".md";
+    f = { id: "new-" + Date.now(), path: null, name, content: currentContent, dirty: true };
+    openFiles.push(f);
+    activeFileId = f.id;
+    renderTabBar(); renderFileList();
+  }
   const content = f.content;
   try {
     if (f.path) {
@@ -3216,6 +3223,42 @@ async function saveFile(silent = false) {
     if (active && !active.dirty) {
       const btn = document.getElementById("save-file-btn");
       if (btn) { btn.classList.remove("dirty"); btn.title = "Save File (Ctrl+S)"; }
+    }
+  } catch (e) {
+    console.error(e);
+    if (!silent) statusMessageEl.textContent = "Error saving file";
+  }
+}
+
+async function saveFileAs(silent = false) {
+  syncActiveFileContent();
+  let f = getActiveFile();
+  if (!f) {
+    const currentContent = getCurrentMarkdown();
+    const name = "untitled-" + untitledCounter++ + ".md";
+    f = { id: "new-" + Date.now(), path: null, name, content: currentContent, dirty: true };
+    openFiles.push(f);
+    activeFileId = f.id;
+    renderTabBar(); renderFileList();
+  }
+  const content = f.content;
+  try {
+    if (!silent) statusMessageEl.textContent = "Saving As…";
+    const savedPath = await invoke("save_file_dialog", { content });
+    if (savedPath) {
+      f.path = savedPath;
+      f.id = savedPath;
+      activeFileId = savedPath;
+      f.name = savedPath.split(/[/\\]/).pop();
+      addToRecentFiles(savedPath, f.name);
+      f.dirty = false;
+      renderTabBar(); renderFileList();
+      if (!silent) statusMessageEl.textContent = `Saved: ${f.name}`;
+      
+      const btn = document.getElementById("save-file-btn");
+      if (btn) { btn.classList.remove("dirty"); btn.title = "Save File (Ctrl+S)"; }
+    } else {
+      if (!silent) statusMessageEl.textContent = "Save cancelled.";
     }
   } catch (e) {
     console.error(e);
@@ -3428,7 +3471,10 @@ function handleKeydown(e) {
 
   if (mod && !e.altKey) {
     switch (e.key.toLowerCase()) {
-      case "s": e.preventDefault(); saveFile();          return;
+      case "s": 
+        e.preventDefault(); 
+        if (e.shiftKey) { saveFileAs(); } else { saveFile(); }
+        return;
       case "o": e.preventDefault(); openFile();          return;
       case "n": e.preventDefault(); newFile();           return;
       case "w": e.preventDefault(); if (activeFileId) closeTab(activeFileId); return;
@@ -3697,6 +3743,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   document.getElementById("tui-file-new-btn")?.addEventListener("click", () => { closeAllTuiMenus(); newFile(); });
   document.getElementById("tui-file-open-btn")?.addEventListener("click", () => { closeAllTuiMenus(); openFile(); });
   document.getElementById("tui-file-save-btn")?.addEventListener("click", () => { closeAllTuiMenus(); saveFile(); });
+  document.getElementById("tui-file-save-as-btn")?.addEventListener("click", () => { closeAllTuiMenus(); saveFileAs(); });
 
   // TUI Edit Items
   document.getElementById("tui-edit-undo-btn")?.addEventListener("click", () => { closeAllTuiMenus(); doUndo(); });
