@@ -21,7 +21,7 @@
           </button>
         </div>
         <div class="header-center">
-          <span class="app-title">ArtfulType Pro <span class="app-version">v0.25.7</span></span>
+          <span class="app-title">ArtfulType Pro <span class="app-version">v0.25.8</span></span>
         </div>
         <div class="header-right"></div>
       </header>
@@ -123,6 +123,9 @@
             <button id="date-btn" class="icon-btn fmt-btn" title="Insert Date (Ctrl+Alt+D)">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
             </button>
+            <button id="footnote-btn" class="icon-btn fmt-btn" title="Insert Footnote (Ctrl+Alt+F)">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/><line x1="9" y1="9" x2="15" y2="9"/><line x1="9" y1="13" x2="13" y2="13"/><text x="12.5" y="6.5" font-size="7" fill="currentColor" stroke="none" font-weight="bold">¹</text></svg>
+            </button>
           </div>
 
           <div class="toolbar-sep"></div>
@@ -186,6 +189,26 @@
           <div id="writer-view" class="hidden" contenteditable="true" spellcheck="true"></div>
         </div>
 
+        <!-- Footnote Fold-up Drawer -->
+        <div id="footnote-drawer" class="glass-panel footnote-drawer hidden">
+          <div class="footnote-drawer-header">
+            <div class="footnote-drawer-title">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/><line x1="9" y1="9" x2="15" y2="9"/><line x1="9" y1="13" x2="13" y2="13"/></svg>
+              <span>Footnotes</span>
+              <span id="footnote-count-badge" class="footnote-count-badge">0</span>
+            </div>
+            <div class="footnote-drawer-actions">
+              <button id="add-footnote-btn" class="btn btn-sm primary-btn" title="Add new footnote">➕ Add Footnote</button>
+              <button id="close-footnote-drawer-btn" class="icon-btn" title="Close Footnotes Frame (Esc)">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              </button>
+            </div>
+          </div>
+          <div id="footnote-list" class="footnote-list">
+            <!-- Footnote items populated dynamically -->
+          </div>
+        </div>
+
         <!-- Status bar -->
         <footer id="status-bar" class="glass-panel">
           <div class="status-left">
@@ -243,7 +266,7 @@
     <dialog id="about-modal" class="modal-dialog glass-panel">
       <div class="modal-content">
         <h2>About ArtfulType Pro</h2>
-        <p class="version-text">Version 0.25.7</p>
+        <p class="version-text">Version 0.25.8</p>
         <hr class="modal-sep" />
         <p><strong>License:</strong> GPLv3</p>
         <p><strong>Maintainer:</strong> Roland Huber</p>

@@ -584,8 +584,16 @@ function nodeToMd(node, insideBlock = false) {
 
       return [headerLine, delimiterLine, ...bodyLines].join("\n") + "\n\n";
     }
+    case "sup": {
+      if (node.classList.contains("footnote-reference") || node.classList.contains("footnote-ref") || node.dataset.footnoteId) {
+        const fnId = node.dataset.footnoteId || node.textContent.trim().replace(/^\[?|\$?\]?$/g, "");
+        return `[^${fnId}]`;
+      }
+      return `<sup>${children(true)}</sup>`;
+    }
     case "input": return "";
     case "div": case "section": case "article": {
+      if (node.classList.contains("footnotes")) return "";
       const inner = children();
       return inner.endsWith("\n") ? inner : inner + "\n";
     }
@@ -614,15 +622,220 @@ function liToMd(li) {
   return text.trim();
 }
 function htmlToMarkdown(el) {
-  return Array.from(el.childNodes)
+  let md = Array.from(el.childNodes)
     .map(n => {
-      const md = nodeToMd(n);
-      if (!md) return "";
-      return md.endsWith("\n") ? md : md + "\n\n";
+      const res = nodeToMd(n);
+      if (!res) return "";
+      return res.endsWith("\n") ? res : res + "\n\n";
     })
     .join("")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
+
+  if (docFootnotes && docFootnotes.length > 0) {
+    const fnLines = docFootnotes
+      .filter(f => f.id && f.text.trim())
+      .map(f => `[^${f.id}]: ${f.text.trim()}`);
+    if (fnLines.length > 0) {
+      md += "\n\n" + fnLines.join("\n");
+    }
+  }
+  return md;
+}
+
+// ─── Footnote Manager & Drawer ────────────────────────────────────────────────
+let docFootnotes = [];
+
+function getNextFootnoteId() {
+  let maxNum = 0;
+  for (const fn of docFootnotes) {
+    const num = parseInt(fn.id, 10);
+    if (!isNaN(num) && num > maxNum) maxNum = num;
+  }
+  return String(maxNum + 1);
+}
+
+function parseFootnotesFromMarkdown(mdText) {
+  const fns = [];
+  if (!mdText) return fns;
+  const rx = /^\[\^([^\]]+)\]:\s*(.*)$/gm;
+  let m;
+  while ((m = rx.exec(mdText)) !== null) {
+    fns.push({ id: m[1], text: m[2] });
+  }
+  return fns;
+}
+
+function openFootnoteDrawer(focusId = null) {
+  const drawer = document.getElementById("footnote-drawer");
+  if (!drawer) return;
+  drawer.classList.remove("hidden");
+  renderFootnoteDrawer();
+  if (focusId) {
+    const input = drawer.querySelector(`.footnote-input[data-footnote-id="${CSS.escape(focusId)}"]`);
+    if (input) {
+      input.focus();
+      input.select();
+      const row = input.closest(".footnote-row");
+      if (row) {
+        row.classList.add("active-row");
+        setTimeout(() => row.classList.remove("active-row"), 1500);
+      }
+    }
+  }
+}
+
+function closeFootnoteDrawer() {
+  const drawer = document.getElementById("footnote-drawer");
+  if (drawer) drawer.classList.add("hidden");
+}
+
+function toggleFootnoteDrawer() {
+  const drawer = document.getElementById("footnote-drawer");
+  if (!drawer) return;
+  if (drawer.classList.contains("hidden")) {
+    openFootnoteDrawer();
+  } else {
+    closeFootnoteDrawer();
+  }
+}
+
+function renderFootnoteDrawer() {
+  const list = document.getElementById("footnote-list");
+  const countBadge = document.getElementById("footnote-count-badge");
+  if (!list) return;
+
+  if (countBadge) countBadge.textContent = String(docFootnotes.length);
+  list.innerHTML = "";
+
+  if (docFootnotes.length === 0) {
+    const hint = document.createElement("div");
+    hint.className = "footnote-empty-hint";
+    hint.textContent = "No footnotes added yet. Click '➕ Add Footnote' or the toolbar button to create one.";
+    list.appendChild(hint);
+    return;
+  }
+
+  docFootnotes.forEach((fn) => {
+    const row = document.createElement("div");
+    row.className = "footnote-row";
+
+    const label = document.createElement("span");
+    label.className = "footnote-label-tag";
+    label.textContent = `[^${fn.id}]`;
+    row.appendChild(label);
+
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "footnote-input";
+    input.dataset.footnoteId = fn.id;
+    input.placeholder = `Enter footnote content for [^${fn.id}]...`;
+    input.value = fn.text;
+
+    input.addEventListener("input", () => {
+      fn.text = input.value;
+      debouncedStats();
+    });
+
+    row.appendChild(input);
+
+    const jumpBtn = document.createElement("button");
+    jumpBtn.className = "footnote-action-btn";
+    jumpBtn.title = "Jump to reference in text";
+    jumpBtn.innerHTML = `↟`;
+    jumpBtn.addEventListener("click", () => jumpToFootnoteRef(fn.id));
+    row.appendChild(jumpBtn);
+
+    const delBtn = document.createElement("button");
+    delBtn.className = "footnote-action-btn danger-hover";
+    delBtn.title = "Delete footnote";
+    delBtn.innerHTML = `🗑`;
+    delBtn.addEventListener("click", () => deleteFootnote(fn.id));
+    row.appendChild(delBtn);
+
+    list.appendChild(row);
+  });
+}
+
+function jumpToFootnoteRef(id) {
+  if (isMarkdownMode) {
+    const ta = markdownInputEl;
+    const pos = ta.value.indexOf(`[^${id}]`);
+    if (pos !== -1) {
+      ta.focus();
+      ta.setSelectionRange(pos, pos + id.length + 3);
+    }
+  } else {
+    const refs = Array.from(writerViewEl.querySelectorAll("sup.footnote-reference, sup.footnote-ref, [data-footnote-id]"));
+    const match = refs.find(r => r.dataset.footnoteId === id || r.textContent.includes(id));
+    if (match) {
+      match.scrollIntoView({ behavior: "smooth", block: "center" });
+      match.classList.add("just-formatted");
+      setTimeout(() => match.classList.remove("just-formatted"), 1500);
+      placeCaretAfter(match);
+      writerViewEl.focus();
+    }
+  }
+}
+
+function deleteFootnote(id) {
+  docFootnotes = docFootnotes.filter(f => f.id !== id);
+  if (!isMarkdownMode) {
+    const refs = Array.from(writerViewEl.querySelectorAll("sup.footnote-reference, sup.footnote-ref, [data-footnote-id]"));
+    refs.forEach(r => {
+      if (r.dataset.footnoteId === id || r.textContent.trim() === id || r.textContent.trim() === `[${id}]`) {
+        r.remove();
+      }
+    });
+  } else {
+    const rxDef = new RegExp(`^\\[\\^${id}\\]:.*$\\n?`, "gm");
+    markdownInputEl.value = markdownInputEl.value.replace(rxDef, "");
+  }
+  renderFootnoteDrawer();
+  debouncedStats();
+}
+
+function applyFootnote() {
+  const newId = getNextFootnoteId();
+  docFootnotes.push({ id: newId, text: "" });
+
+  if (isMarkdownMode) {
+    const ta = markdownInputEl;
+    const s = ta.selectionStart;
+    const refText = `[^${newId}]`;
+    ta.value = ta.value.slice(0, s) + refText + ta.value.slice(ta.selectionEnd);
+    ta.selectionStart = ta.selectionEnd = s + refText.length;
+    if (!ta.value.includes(`[^${newId}]:`)) {
+      ta.value = ta.value.trimEnd() + `\n\n[^${newId}]: `;
+    }
+    ta.focus();
+    openFootnoteDrawer(newId);
+  } else {
+    restoreSelection();
+    const sel = window.getSelection();
+    const sup = document.createElement("sup");
+    sup.className = "footnote-reference";
+    sup.dataset.footnoteId = newId;
+    sup.contentEditable = "false";
+    sup.title = `Footnote [^${newId}]`;
+
+    const a = document.createElement("a");
+    a.setAttribute("href", `#fn-${newId}`);
+    a.textContent = newId;
+    sup.appendChild(a);
+
+    if (sel && sel.rangeCount > 0) {
+      const range = sel.getRangeAt(0);
+      range.deleteContents();
+      range.insertNode(sup);
+      placeCaretAfter(sup);
+    } else {
+      writerViewEl.appendChild(sup);
+    }
+    writerViewEl.focus();
+    openFootnoteDrawer(newId);
+  }
+  debouncedStats();
 }
 
 // ─── Markdown Render & Syntax Highlighting ───────────────────────────────────
@@ -644,13 +857,49 @@ function applySyntaxHighlighting(container = writerViewEl) {
 
 async function renderMarkdownToWriter(markdownText) {
   try {
+    docFootnotes = parseFootnotesFromMarkdown(markdownText);
     const html = await invoke("parse_markdown", { text: markdownText });
     writerViewEl.innerHTML = html;
     await fixImageSrcs(writerViewEl);
     applySyntaxHighlighting(writerViewEl);
+    enhanceWriterFootnotes();
   } catch (e) {
     writerViewEl.innerHTML = `<p style="color:var(--red)">Render error: ${e}</p>`;
   }
+}
+
+function enhanceWriterFootnotes() {
+  const sups = writerViewEl.querySelectorAll("sup.footnote-reference");
+  sups.forEach(sup => {
+    sup.contentEditable = "false";
+    const a = sup.querySelector("a");
+    const id = a ? a.textContent.trim() : sup.textContent.trim();
+    sup.dataset.footnoteId = id;
+
+    const fn = docFootnotes.find(f => f.id === id);
+    if (fn && fn.text) {
+      sup.title = `[^${id}]: ${fn.text}`;
+    } else {
+      sup.title = `Footnote [^${id}]`;
+    }
+  });
+
+  const fnItems = writerViewEl.querySelectorAll("section.footnotes li");
+  fnItems.forEach(li => {
+    const id = li.id || "";
+    if (id && !docFootnotes.some(f => f.id === id)) {
+      const clone = li.cloneNode(true);
+      clone.querySelectorAll(".footnote-backref, a[href^='#fnref']").forEach(el => el.remove());
+      docFootnotes.push({ id, text: clone.textContent.trim() });
+    }
+  });
+
+  const fnSection = writerViewEl.querySelector("section.footnotes");
+  if (fnSection) {
+    fnSection.style.display = "none";
+  }
+
+  renderFootnoteDrawer();
 }
 
 // ─── Mode Toggle ──────────────────────────────────────────────────────────────
@@ -2293,8 +2542,12 @@ function handleKeydown(e) {
     }
   }
   if (mod && e.altKey) {
+    if (e.key === "f" || e.key === "F") { e.preventDefault(); applyFootnote(); return; }
     if (e.key === "t" || e.key === "T") { e.preventDefault(); insertAtCursor(formatTime(new Date())); return; }
     if (e.key === "d" || e.key === "D") { e.preventDefault(); insertAtCursor(formatDate(new Date())); return; }
+  }
+  if (e.key === "Escape") {
+    closeFootnoteDrawer();
   }
 }
 
@@ -2380,6 +2633,21 @@ window.addEventListener("DOMContentLoaded", async () => {
   document.getElementById("hr-btn")?.addEventListener("click",    () => applyHorizontalRule());
   document.getElementById("time-btn")?.addEventListener("click",  () => insertAtCursor(formatTime(new Date())));
   document.getElementById("date-btn")?.addEventListener("click",  () => insertAtCursor(formatDate(new Date())));
+  document.getElementById("footnote-btn")?.addEventListener("click", applyFootnote);
+
+  // ── Footnote Drawer Buttons ──
+  document.getElementById("add-footnote-btn")?.addEventListener("click", applyFootnote);
+  document.getElementById("close-footnote-drawer-btn")?.addEventListener("click", closeFootnoteDrawer);
+
+  // Click on footnote reference in writer view opens drawer
+  writerViewEl.addEventListener("click", (e) => {
+    const fnRef = e.target.closest("sup.footnote-reference, sup.footnote-ref, [data-footnote-id]");
+    if (fnRef) {
+      e.preventDefault();
+      const fnId = fnRef.dataset.footnoteId || fnRef.textContent.trim();
+      openFootnoteDrawer(fnId);
+    }
+  });
 
   // ── Table Controls ──
   document.getElementById("table-btn")?.addEventListener("click", toggleTableMenu);

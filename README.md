@@ -147,12 +147,12 @@ Modern companion binaries for macOS, Linux, and Windows are available in the `re
 - **Mac OS X 10.5+ PowerPC**: [releases/ArtfulType-1.0-macOS-PowerPC.zip](releases/ArtfulType-1.0-macOS-PowerPC.zip)
 - **Mac (ARM64)**: [releases/artfultype-rs-mac.zip](releases/artfultype-rs-mac.zip)
 - **Windows (x64)**:
-  - Installer: [releases/artfultype-rs_0.25.4_x64-setup.exe](releases/artfultype-rs_0.25.4_x64-setup.exe)
+  - Installer: [releases/artfultype-rs_0.25.8_x64-setup.exe](releases/artfultype-rs_0.25.8_x64-setup.exe)
   - Portable Executable: [releases/artfultype-rs-windows-x64.exe](releases/artfultype-rs-windows-x64.exe)
 - **Linux (AMD64)**:
-  - AppImage: [releases/artfultype-rs_0.25.4_amd64.AppImage](releases/artfultype-rs_0.25.4_amd64.AppImage)
-  - Debian Package: [releases/artfultype-rs_0.25.4_amd64.deb](releases/artfultype-rs_0.25.4_amd64.deb)
-  - RPM Package: [releases/artfultype-rs-0.25.4-1.x86_64.rpm](releases/artfultype-rs-0.25.4-1.x86_64.rpm)
+  - AppImage: [releases/artfultype-rs_0.25.8_amd64.AppImage](releases/artfultype-rs_0.25.8_amd64.AppImage)
+  - Debian Package: [releases/artfultype-rs_0.25.8_amd64.deb](releases/artfultype-rs_0.25.8_amd64.deb)
+  - RPM Package: [releases/artfultype-rs-0.25.8-1.x86_64.rpm](releases/artfultype-rs-0.25.8-1.x86_64.rpm)
   - Raw Binary: [releases/artfultype-rs-linux-amd64](releases/artfultype-rs-linux-amd64)
 
 ## License
