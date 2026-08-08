@@ -6,20 +6,20 @@ authors = ["you"]
 edition = "2021"
 
 [package.metadata.deb]
-name = "art"
+name = "artfultype-cli"
 section = "editors"
 priority = "optional"
 depends = ""
 maintainer = "ArtfulType <artfultype@space.mil>"
-extended-description = "art CLI is a distraction-free Markdown TUI editor for Linux terminals.\nSupports Writer, Markdown and Split view modes; Shift-selection, cut/copy/paste,\nbold/italic/code wrapping, multiple colour themes, and VT100/ASCII mode."
+extended-description = "ArtfulType CLI is a distraction-free Markdown TUI editor for Linux terminals.\nSupports Writer, Markdown and Split view modes; Shift-selection, cut/copy/paste,\nbold/italic/code wrapping, multiple colour themes, and VT100/ASCII mode."
 assets = [
   ["target/release/art", "usr/bin/art", "755"],
 ]
 
 [package.metadata.generate-rpm]
-name = "art"
-summary = "art \u2014 distraction-free Markdown TUI editor"
-description = """art CLI is a terminal TUI editor for Markdown files.
+name = "artfultype-cli"
+summary = "ArtfulType CLI \u2014 distraction-free Markdown TUI editor"
+description = """ArtfulType CLI is a terminal TUI editor for Markdown files.
 Supports Writer/Markdown/Split view modes, Shift-selection, cut/copy/paste,
 bold/italic/code wrapping, multiple colour themes, and VT100/ASCII mode."""
 license = "GPL-3.0"
