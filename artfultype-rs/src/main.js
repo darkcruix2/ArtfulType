@@ -108,7 +108,16 @@ function startAutoSave(intervalMinutes) {
     autoSaveTimer = setInterval(async () => {
       for (const f of openFiles) {
         if (f.dirty) {
-          if (f.path) {
+          if (f.isNextcloud && f.remotePath) {
+            try {
+              await invoke("write_nextcloud_file", { path: f.remotePath, content: f.content });
+              f.dirty = false;
+              renderTabBar();
+              renderFileList();
+            } catch (err) {
+              console.error("Auto-save Nextcloud error:", err);
+            }
+          } else if (f.path) {
             await invoke("save_file", { path: f.path, content: f.content });
             f.dirty = false;
             renderTabBar();
@@ -3083,7 +3092,15 @@ async function saveSingleFile(f) {
     syncActiveFileContent();
   }
   try {
-    if (f.path) {
+    if (f.isNextcloud && f.remotePath) {
+      statusMessageEl.textContent = `Saving ${f.remoteName || "file"} to Nextcloud…`;
+      await invoke("write_nextcloud_file", { path: f.remotePath, content: f.content });
+      f.dirty = false;
+      renderTabBar(); renderFileList();
+      if (typeof renderNextcloudFileList === "function") renderNextcloudFileList();
+      statusMessageEl.textContent = `Saved to Nextcloud: ${f.remoteName || f.name}`;
+      return true;
+    } else if (f.path) {
       await invoke("save_file", { path: f.path, content: f.content });
       f.dirty = false;
       renderTabBar(); renderFileList();
@@ -3218,7 +3235,14 @@ async function saveFile(silent = false) {
   }
   const content = f.content;
   try {
-    if (f.path) {
+    if (f.isNextcloud && f.remotePath) {
+      if (!silent) statusMessageEl.textContent = `Saving ${f.remoteName || "file"} to Nextcloud…`;
+      await invoke("write_nextcloud_file", { path: f.remotePath, content });
+      f.dirty = false;
+      renderTabBar(); renderFileList();
+      if (typeof renderNextcloudFileList === "function") renderNextcloudFileList();
+      if (!silent) statusMessageEl.textContent = `Saved to Nextcloud: ${f.remoteName || f.name}`;
+    } else if (f.path) {
       await invoke("save_file", { path: f.path, content });
       f.dirty = false;
       renderTabBar(); renderFileList();
@@ -3947,4 +3971,378 @@ function closeAllTuiMenus() {
   document.querySelectorAll(".tui-dropdown").forEach(m => m.classList.add("hidden"));
   document.querySelectorAll(".tui-menu-btn").forEach(b => b.classList.remove("active"));
 }
+
+// ─── NEXTCLOUD INTEGRATION MODULE ────────────────────────────────────────────
+let ncConfig = null;
+let ncCurrentPath = "";
+let ncEntries = [];
+let ncStatus = "unlinked"; // "unlinked" | "linked" | "error" | "syncing"
+
+async function initNextcloud() {
+  try {
+    const config = await invoke("get_nextcloud_config");
+    if (config && config.server_url && config.username) {
+      ncConfig = config;
+      updateNextcloudUI("linked", `Linked to ${config.server_url}`);
+      populateNextcloudPrefInputs(config);
+      await fetchNextcloudFolder("");
+    } else {
+      ncConfig = null;
+      updateNextcloudUI("unlinked", "Disconnected");
+    }
+  } catch (err) {
+    console.warn("Failed to initialize Nextcloud:", err);
+    updateNextcloudUI("unlinked", "Not configured");
+  }
+}
+
+function populateNextcloudPrefInputs(config) {
+  const urlEl = document.getElementById("nc-server-url");
+  const userEl = document.getElementById("nc-username");
+  const passEl = document.getElementById("nc-password");
+  if (urlEl && config) urlEl.value = config.server_url || "";
+  if (userEl && config) userEl.value = config.username || "";
+  if (passEl && config) passEl.value = config.password || "";
+}
+
+function updateNextcloudUI(status, msg) {
+  ncStatus = status;
+  const indicator = document.getElementById("nextcloud-status-indicator");
+  const syncBtn = document.getElementById("nextcloud-sync-btn");
+  const badge = document.getElementById("nc-status-badge");
+  const msgEl = document.getElementById("nc-msg");
+  const unlinkBtn = document.getElementById("nc-unlink-btn");
+  const linkBtn = document.getElementById("nc-save-btn");
+
+  if (indicator) {
+    indicator.className = `nextcloud-status ${status}`;
+    indicator.title = `Nextcloud: ${msg}`;
+  }
+
+  if (syncBtn) {
+    if (status === "linked" || status === "syncing") {
+      syncBtn.classList.remove("hidden");
+    } else {
+      syncBtn.classList.add("hidden");
+    }
+  }
+
+  if (badge) {
+    badge.className = `nc-badge ${status}`;
+    badge.textContent = status === "linked" ? "Linked" : (status === "syncing" ? "Syncing..." : (status === "error" ? "Error" : "Disconnected"));
+  }
+
+  if (unlinkBtn) {
+    if (status === "linked" || status === "error") {
+      unlinkBtn.classList.remove("hidden");
+    } else {
+      unlinkBtn.classList.add("hidden");
+    }
+  }
+
+  if (linkBtn) {
+    linkBtn.textContent = status === "linked" ? "Update Link" : "Link Account";
+  }
+
+  if (msgEl && msg) {
+    msgEl.textContent = msg;
+    msgEl.style.display = "block";
+  }
+}
+
+async function testNextcloudConnection() {
+  const url = document.getElementById("nc-server-url")?.value?.trim();
+  const username = document.getElementById("nc-username")?.value?.trim();
+  const password = document.getElementById("nc-password")?.value?.trim();
+
+  if (!url || !username) {
+    updateNextcloudUI("error", "Please provide Server URL and Username.");
+    return;
+  }
+
+  updateNextcloudUI("syncing", "Testing connection...");
+  try {
+    const res = await invoke("test_nextcloud_connection", {
+      config: { server_url: url, username, password, enabled: true }
+    });
+    updateNextcloudUI("linked", res || "Connection successful!");
+  } catch (err) {
+    updateNextcloudUI("error", `Connection failed: ${err}`);
+  }
+}
+
+async function saveNextcloudCredentials() {
+  const url = document.getElementById("nc-server-url")?.value?.trim();
+  const username = document.getElementById("nc-username")?.value?.trim();
+  const password = document.getElementById("nc-password")?.value?.trim();
+
+  if (!url || !username) {
+    updateNextcloudUI("error", "Server URL and Username are required.");
+    return;
+  }
+
+  updateNextcloudUI("syncing", "Linking Nextcloud account...");
+  const config = { server_url: url, username, password, enabled: true };
+  try {
+    await invoke("test_nextcloud_connection", { config });
+    await invoke("save_nextcloud_config", { config });
+    ncConfig = config;
+    updateNextcloudUI("linked", `Successfully linked account: ${username}`);
+    await fetchNextcloudFolder("");
+  } catch (err) {
+    updateNextcloudUI("error", `Linking failed: ${err}`);
+  }
+}
+
+async function unlinkNextcloudAccount() {
+  const confirmed = await promptConfirm("Unlink Nextcloud", "Are you sure you want to disconnect Nextcloud?", "Unlink", true);
+  if (!confirmed) return;
+  try {
+    await invoke("unlink_nextcloud");
+    ncConfig = null;
+    ncEntries = [];
+    ncCurrentPath = "";
+    populateNextcloudPrefInputs({ server_url: "", username: "", password: "" });
+    updateNextcloudUI("unlinked", "Disconnected Nextcloud account.");
+    renderNextcloudFileList();
+  } catch (err) {
+    updateNextcloudUI("error", `Unlink error: ${err}`);
+  }
+}
+
+async function fetchNextcloudFolder(remotePath) {
+  if (!ncConfig) return;
+  updateNextcloudUI("syncing", `Syncing /${remotePath || ""}...`);
+  try {
+    const entries = await invoke("list_nextcloud_folder", { path: remotePath });
+    ncCurrentPath = remotePath;
+    ncEntries = entries || [];
+    updateNextcloudUI("linked", `Linked to ${ncConfig.server_url}`);
+    renderNextcloudFileList();
+  } catch (err) {
+    console.error("Fetch Nextcloud folder error:", err);
+    updateNextcloudUI("error", `Failed to load folder: ${err}`);
+  }
+}
+
+function renderNextcloudFileList() {
+  const breadcrumbsEl = document.getElementById("nc-path-breadcrumbs");
+  const listEl = document.getElementById("nc-file-list");
+  if (!breadcrumbsEl || !listEl) return;
+
+  breadcrumbsEl.textContent = "/" + (ncCurrentPath ? ncCurrentPath : "");
+  listEl.innerHTML = "";
+
+  if (!ncConfig) {
+    const emptyLi = document.createElement("li");
+    emptyLi.style.padding = "10px"; emptyLi.style.color = "var(--comment)"; emptyLi.style.fontSize = "0.8rem";
+    emptyLi.textContent = "Nextcloud is not linked. Open Preferences to link your account.";
+    listEl.appendChild(emptyLi);
+    return;
+  }
+
+  if (ncCurrentPath) {
+    const parentPath = ncCurrentPath.includes("/") ? ncCurrentPath.replace(/\/[^/]+$/, "") : "";
+    const upLi = document.createElement("li");
+    upLi.className = "nc-file-item";
+    upLi.innerHTML = `<span class="nc-file-label">📁 .. (Parent Directory)</span>`;
+    upLi.onclick = () => fetchNextcloudFolder(parentPath);
+    listEl.appendChild(upLi);
+  }
+
+  if (ncEntries.length === 0) {
+    const emptyLi = document.createElement("li");
+    emptyLi.style.padding = "10px"; emptyLi.style.color = "var(--comment)"; emptyLi.style.fontSize = "0.8rem";
+    emptyLi.textContent = "Directory is empty";
+    listEl.appendChild(emptyLi);
+    return;
+  }
+
+  for (const item of ncEntries) {
+    const li = document.createElement("li");
+    const isActive = openFiles.some(f => f.isNextcloud && f.remotePath === item.path && f.id === activeFileId);
+    li.className = "nc-file-item" + (isActive ? " active" : "");
+
+    const labelSpan = document.createElement("span");
+    labelSpan.className = "nc-file-label";
+    const icon = item.is_dir ? "📁" : "📄";
+    labelSpan.textContent = `${icon} ${item.name}`;
+
+    const actionsDiv = document.createElement("div");
+    actionsDiv.className = "nc-file-actions";
+
+    const delBtn = document.createElement("button");
+    delBtn.className = "file-action-btn";
+    delBtn.innerHTML = "✕";
+    delBtn.title = "Delete Remote Item";
+    delBtn.onclick = (e) => {
+      e.stopPropagation();
+      deleteNextcloudItem(item);
+    };
+
+    actionsDiv.appendChild(delBtn);
+    li.appendChild(labelSpan);
+    li.appendChild(actionsDiv);
+
+    li.onclick = () => {
+      if (item.is_dir) {
+        fetchNextcloudFolder(item.path);
+      } else {
+        openNextcloudFile(item);
+      }
+    };
+
+    listEl.appendChild(li);
+  }
+}
+
+async function openNextcloudFile(item) {
+  const existing = openFiles.find(f => f.isNextcloud && f.remotePath === item.path);
+  if (existing) {
+    switchTab(existing.id);
+    return;
+  }
+
+  statusMessageEl.textContent = `Downloading ${item.name} from Nextcloud…`;
+  updateNextcloudUI("syncing", `Downloading ${item.name}...`);
+  try {
+    const content = await invoke("read_nextcloud_file", { path: item.path });
+    const tabId = "nc:" + item.path;
+    const fileObj = {
+      id: tabId,
+      name: `☁ ${item.name}`,
+      path: null,
+      isNextcloud: true,
+      remotePath: item.path,
+      remoteName: item.name,
+      content: content,
+      dirty: false,
+      history: [content],
+      historyIndex: 0,
+    };
+    openFiles.push(fileObj);
+    switchTab(tabId);
+    statusMessageEl.textContent = `Opened Nextcloud file: ${item.name}`;
+    updateNextcloudUI("linked", `Linked to ${ncConfig.server_url}`);
+    renderNextcloudFileList();
+  } catch (err) {
+    console.error("Open Nextcloud file error:", err);
+    statusMessageEl.textContent = `Failed to open ${item.name}: ${err}`;
+    updateNextcloudUI("error", `Failed to read file: ${err}`);
+  }
+}
+
+async function createNextcloudFilePrompt() {
+  if (!ncConfig) {
+    openModal("prefs-modal");
+    return;
+  }
+  const filename = prompt("Enter new Markdown filename for Nextcloud:", "notes.md");
+  if (!filename || !filename.trim()) return;
+  let cleanName = filename.trim();
+  if (!cleanName.endsWith(".md") && !cleanName.endsWith(".txt") && !cleanName.endsWith(".markdown")) {
+    cleanName += ".md";
+  }
+  const remotePath = ncCurrentPath ? `${ncCurrentPath}/${cleanName}` : cleanName;
+  updateNextcloudUI("syncing", `Creating ${cleanName}...`);
+  try {
+    await invoke("write_nextcloud_file", { path: remotePath, content: `# ${cleanName.replace(/\.md$/i, "")}\n\n` });
+    await fetchNextcloudFolder(ncCurrentPath);
+    await openNextcloudFile({ name: cleanName, path: remotePath, is_dir: false });
+  } catch (err) {
+    updateNextcloudUI("error", `Failed to create file: ${err}`);
+  }
+}
+
+async function createNextcloudFolderPrompt() {
+  if (!ncConfig) {
+    openModal("prefs-modal");
+    return;
+  }
+  const folderName = prompt("Enter new directory name for Nextcloud:", "New Folder");
+  if (!folderName || !folderName.trim()) return;
+  const cleanName = folderName.trim();
+  const remotePath = ncCurrentPath ? `${ncCurrentPath}/${cleanName}` : cleanName;
+  updateNextcloudUI("syncing", `Creating folder ${cleanName}...`);
+  try {
+    await invoke("create_nextcloud_folder", { path: remotePath });
+    await fetchNextcloudFolder(ncCurrentPath);
+  } catch (err) {
+    updateNextcloudUI("error", `Failed to create folder: ${err}`);
+  }
+}
+
+async function deleteNextcloudItem(item) {
+  const confirmed = await promptConfirm("Delete Nextcloud Item", `Are you sure you want to delete "${item.name}" from Nextcloud?`, "Delete", true);
+  if (!confirmed) return;
+  updateNextcloudUI("syncing", `Deleting ${item.name}...`);
+  try {
+    await invoke("delete_nextcloud_entry", { path: item.path });
+    await fetchNextcloudFolder(ncCurrentPath);
+    statusMessageEl.textContent = `Deleted from Nextcloud: ${item.name}`;
+  } catch (err) {
+    updateNextcloudUI("error", `Failed to delete ${item.name}: ${err}`);
+  }
+}
+
+// ─── Setup Nextcloud Event Listeners ─────────────────────────────────────────
+document.addEventListener("DOMContentLoaded", () => {
+  initNextcloud();
+
+  // Sidebar Tab Switching
+  const tabLocal = document.getElementById("sidebar-tab-local");
+  const tabNc = document.getElementById("sidebar-tab-nextcloud");
+  const localContainer = document.getElementById("local-sidebar-container");
+  const ncContainer = document.getElementById("nextcloud-sidebar-container");
+
+  if (tabLocal && tabNc && localContainer && ncContainer) {
+    tabLocal.addEventListener("click", () => {
+      tabLocal.classList.add("active");
+      tabNc.classList.remove("active");
+      localContainer.classList.remove("hidden");
+      ncContainer.classList.add("hidden");
+    });
+    tabNc.addEventListener("click", () => {
+      tabNc.classList.add("active");
+      tabLocal.classList.remove("active");
+      ncContainer.classList.remove("hidden");
+      localContainer.classList.add("hidden");
+      if (ncConfig) {
+        fetchNextcloudFolder(ncCurrentPath);
+      } else {
+        renderNextcloudFileList();
+      }
+    });
+  }
+
+  // Header status indicator & sync button
+  const statusIndicator = document.getElementById("nextcloud-status-indicator");
+  if (statusIndicator) {
+    statusIndicator.addEventListener("click", () => openModal("prefs-modal"));
+  }
+  const syncBtn = document.getElementById("nextcloud-sync-btn");
+  if (syncBtn) {
+    syncBtn.addEventListener("click", () => fetchNextcloudFolder(ncCurrentPath));
+  }
+
+  // Preferences buttons
+  const testBtn = document.getElementById("nc-test-btn");
+  if (testBtn) testBtn.addEventListener("click", testNextcloudConnection);
+
+  const saveBtn = document.getElementById("nc-save-btn");
+  if (saveBtn) saveBtn.addEventListener("click", saveNextcloudCredentials);
+
+  const unlinkBtn = document.getElementById("nc-unlink-btn");
+  if (unlinkBtn) unlinkBtn.addEventListener("click", unlinkNextcloudAccount);
+
+  // Nextcloud Sidebar Action buttons
+  const ncNewFileBtn = document.getElementById("nc-new-file-btn");
+  if (ncNewFileBtn) ncNewFileBtn.addEventListener("click", createNextcloudFilePrompt);
+
+  const ncNewFolderBtn = document.getElementById("nc-new-folder-btn");
+  if (ncNewFolderBtn) ncNewFolderBtn.addEventListener("click", createNextcloudFolderPrompt);
+
+  const ncRefreshBtn = document.getElementById("nc-refresh-btn");
+  if (ncRefreshBtn) ncRefreshBtn.addEventListener("click", () => fetchNextcloudFolder(ncCurrentPath));
+});
 

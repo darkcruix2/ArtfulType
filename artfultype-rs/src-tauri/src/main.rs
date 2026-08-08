@@ -197,11 +197,61 @@ fn delete_file(path: String) -> Result<(), String> {
     fs::remove_file(path).map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn get_nextcloud_config() -> Option<artfultype_rs_lib::nextcloud::NextcloudConfig> {
+    artfultype_rs_lib::nextcloud::load_config()
+}
+
+#[tauri::command]
+fn save_nextcloud_config(config: artfultype_rs_lib::nextcloud::NextcloudConfig) -> Result<(), String> {
+    artfultype_rs_lib::nextcloud::save_config(&config)
+}
+
+#[tauri::command]
+fn unlink_nextcloud() -> Result<(), String> {
+    artfultype_rs_lib::nextcloud::unlink_config()
+}
+
+#[tauri::command]
+fn test_nextcloud_connection(config: artfultype_rs_lib::nextcloud::NextcloudConfig) -> Result<String, String> {
+    artfultype_rs_lib::nextcloud::test_connection(&config)
+}
+
+#[tauri::command]
+fn list_nextcloud_folder(path: String) -> Result<Vec<artfultype_rs_lib::nextcloud::NextcloudEntry>, String> {
+    let cfg = artfultype_rs_lib::nextcloud::load_config().ok_or_else(|| "Nextcloud is not linked".to_string())?;
+    artfultype_rs_lib::nextcloud::list_folder(&cfg, &path)
+}
+
+#[tauri::command]
+fn read_nextcloud_file(path: String) -> Result<String, String> {
+    let cfg = artfultype_rs_lib::nextcloud::load_config().ok_or_else(|| "Nextcloud is not linked".to_string())?;
+    artfultype_rs_lib::nextcloud::read_file(&cfg, &path)
+}
+
+#[tauri::command]
+fn write_nextcloud_file(path: String, content: String) -> Result<(), String> {
+    let cfg = artfultype_rs_lib::nextcloud::load_config().ok_or_else(|| "Nextcloud is not linked".to_string())?;
+    artfultype_rs_lib::nextcloud::write_file(&cfg, &path, &content)
+}
+
+#[tauri::command]
+fn delete_nextcloud_entry(path: String) -> Result<(), String> {
+    let cfg = artfultype_rs_lib::nextcloud::load_config().ok_or_else(|| "Nextcloud is not linked".to_string())?;
+    artfultype_rs_lib::nextcloud::delete_entry(&cfg, &path)
+}
+
+#[tauri::command]
+fn create_nextcloud_folder(path: String) -> Result<(), String> {
+    let cfg = artfultype_rs_lib::nextcloud::load_config().ok_or_else(|| "Nextcloud is not linked".to_string())?;
+    artfultype_rs_lib::nextcloud::create_folder(&cfg, &path)
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     for arg in &args[1..] {
         if arg == "-h" || arg == "--help" {
-            println!("ArtfulType Terminal / CLI WebKit Executable v0.26.1");
+            println!("ArtfulType Terminal / CLI WebKit Executable v0.30.0");
             println!("Usage: artfultype-rs [OPTIONS] [FILE]\n");
             println!("Options:");
             println!("  --mode <MODE>      Set initial view mode (writer | markdown | split)");
@@ -210,7 +260,7 @@ fn main() {
             println!("  -v, --version      Print version information");
             return;
         } else if arg == "-v" || arg == "--version" {
-            println!("ArtfulType Terminal / CLI WebKit Executable v0.26.1");
+            println!("ArtfulType Terminal / CLI WebKit Executable v0.30.0");
             return;
         }
     }
@@ -228,6 +278,16 @@ fn main() {
             read_file,
             read_image_base64,
             rename_file,
+            delete_file,
+            get_nextcloud_config,
+            save_nextcloud_config,
+            unlink_nextcloud,
+            test_nextcloud_connection,
+            list_nextcloud_folder,
+            read_nextcloud_file,
+            write_nextcloud_file,
+            delete_nextcloud_entry,
+            create_nextcloud_folder,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

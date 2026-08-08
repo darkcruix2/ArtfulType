@@ -43,8 +43,22 @@ enum PopupState {
         selected: usize,
         scroll: usize,
     },
+    NextcloudConfig {
+        url_input: String,
+        username_input: String,
+        password_input: String,
+        focus: usize, // 0: url, 1: username, 2: password, 3: link, 4: unlink
+        status_msg: String,
+    },
+    NextcloudOpen {
+        remote_path: String,
+        entries: Vec<artfultype_rs_lib::nextcloud::NextcloudEntry>,
+        selected: usize,
+        scroll: usize,
+    },
     Search { input: String },
     SearchReplace { search: String, replace: String, step: u8 }, // step 0: search, step 1: replace
+    About,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -176,6 +190,8 @@ enum MenuAction {
     OpenFile,
     SaveFile,
     SaveAs,
+    NextcloudConfig,
+    NextcloudOpen,
     Quit,
     Heading1,
     Heading2,
@@ -202,6 +218,7 @@ enum MenuAction {
     ReplaceAll,
     Indent,
     Unindent,
+    About,
     NoOp,
 }
 
@@ -230,6 +247,9 @@ struct App {
     quit_after_save: bool,
     snapshot_disabled: bool,
     word_wrap: bool,
+    is_nextcloud_file: bool,
+    nextcloud_remote_path: Option<String>,
+    nextcloud_config: Option<artfultype_rs_lib::nextcloud::NextcloudConfig>,
 }
 
 impl App {
@@ -265,6 +285,7 @@ impl App {
                 .to_string();
         }
 
+        let nc_cfg = artfultype_rs_lib::nextcloud::load_config();
         App {
             file_path,
             file_name,
@@ -288,6 +309,9 @@ impl App {
             quit_after_save: false,
             snapshot_disabled: false,
             word_wrap: false,
+            is_nextcloud_file: false,
+            nextcloud_remote_path: None,
+            nextcloud_config: nc_cfg,
         }
     }
 
@@ -726,6 +750,21 @@ impl App {
     }
 
     fn save_file(&mut self) {
+        if self.is_nextcloud_file {
+            if let (Some(ref cfg), Some(ref remote_path)) = (&self.nextcloud_config, &self.nextcloud_remote_path) {
+                match artfultype_rs_lib::nextcloud::write_file(cfg, remote_path, &self.content) {
+                    Ok(_) => {
+                        self.dirty = false;
+                        self.status_msg = format!("Saved to Nextcloud: {}", self.file_name);
+                    }
+                    Err(e) => {
+                        self.status_msg = format!("Nextcloud save error: {}", e);
+                    }
+                }
+                return;
+            }
+        }
+
         if let Some(ref path) = self.file_path {
             if std::fs::write(path, &self.content).is_ok() {
                 self.dirty = false;
@@ -891,6 +930,55 @@ impl App {
                     input_focused: false,
                 };
             }
+            MenuAction::NextcloudConfig => {
+                if self.nextcloud_config.is_none() {
+                    self.nextcloud_config = artfultype_rs_lib::nextcloud::load_config();
+                }
+                let (url, user, pass) = if let Some(ref cfg) = self.nextcloud_config {
+                    (cfg.server_url.clone(), cfg.username.clone(), cfg.password.clone())
+                } else {
+                    ("https://cloud.example.com".to_string(), "".to_string(), "".to_string())
+                };
+                self.popup = PopupState::NextcloudConfig {
+                    url_input: url,
+                    username_input: user,
+                    password_input: pass,
+                    focus: 0,
+                    status_msg: "Configure Nextcloud integration".to_string(),
+                };
+            }
+            MenuAction::NextcloudOpen => {
+                if self.nextcloud_config.is_none() {
+                    self.nextcloud_config = artfultype_rs_lib::nextcloud::load_config();
+                }
+                if let Some(ref cfg) = self.nextcloud_config {
+                    match artfultype_rs_lib::nextcloud::list_folder(cfg, "") {
+                        Ok(entries) => {
+                            self.popup = PopupState::NextcloudOpen {
+                                remote_path: "".to_string(),
+                                entries,
+                                selected: 0,
+                                scroll: 0,
+                            };
+                        }
+                        Err(e) => {
+                            self.status_msg = format!("Nextcloud error: {}", e);
+                        }
+                    }
+                } else {
+                    let (url, user, pass) = ("https://cloud.example.com".to_string(), "".to_string(), "".to_string());
+                    self.popup = PopupState::NextcloudConfig {
+                        url_input: url,
+                        username_input: user,
+                        password_input: pass,
+                        focus: 0,
+                        status_msg: "Nextcloud is not linked yet. Enter credentials below:".to_string(),
+                    };
+                }
+            }
+            MenuAction::About => {
+                self.popup = PopupState::About;
+            }
             MenuAction::Quit => {
                 self.popup = PopupState::QuitConfirm;
             }
@@ -953,11 +1041,13 @@ impl App {
 fn get_menu_items(menu: ActiveMenu) -> Vec<(&'static str, MenuAction)> {
     match menu {
         ActiveMenu::File => vec![
-            ("[N] New File      (Ctrl+N)", MenuAction::NewFile),
-            ("[O] Open File...  (Ctrl+O)", MenuAction::OpenFile),
-            ("[S] Save File     (Ctrl+S)", MenuAction::SaveFile),
+            ("[N] New File          (Ctrl+N)", MenuAction::NewFile),
+            ("[O] Open Local File   (Ctrl+O)", MenuAction::OpenFile),
+            ("[C] Open Nextcloud... (Ctrl+Shift+O)", MenuAction::NextcloudOpen),
+            ("[S] Save File         (Ctrl+S)", MenuAction::SaveFile),
             ("[A] Save As...", MenuAction::SaveAs),
-            ("[Q] Quit          (Ctrl+Q)", MenuAction::Quit),
+            ("[L] Nextcloud Settings(Ctrl+L)", MenuAction::NextcloudConfig),
+            ("[Q] Quit              (Ctrl+Q)", MenuAction::Quit),
         ],
         ActiveMenu::Edit => vec![
             ("Undo          (Ctrl+Alt+Z)", MenuAction::Undo),
@@ -998,6 +1088,9 @@ fn get_menu_items(menu: ActiveMenu) -> Vec<(&'static str, MenuAction)> {
             ("VT100 Pure ASCII", MenuAction::ThemeVT100),
         ],
         ActiveMenu::Help => vec![
+            ("About ArtfulType CLI", MenuAction::About),
+            ("Maintainer: Roland Huber", MenuAction::About),
+            ("Original Creator: Sean Malseed", MenuAction::About),
             ("Shift+Arrows: Select text", MenuAction::NoOp),
             ("Ctrl+Alt+C/X/V: Copy/Cut/Paste", MenuAction::NoOp),
             ("Alt+F/E/O/V/T: Open Menus", MenuAction::NoOp),
@@ -1050,7 +1143,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     while i < args.len() {
         let arg = &args[i];
         if arg == "-h" || arg == "--help" {
-            println!("ArtfulType Terminal / TUI v0.26.1");
+            println!("ArtfulType Terminal / TUI v0.30.0");
             println!("Usage: artfultype-cli [OPTIONS] [FILE]\n");
             println!("  --mode writer|markdown|split");
             println!("  --theme dark-antigravity|retro-green|retro-amber|dracula|vt100");
@@ -1059,7 +1152,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("  -v, --version      Version");
             return Ok(());
         } else if arg == "-v" || arg == "--version" {
-            println!("ArtfulType Terminal / TUI v0.26.1");
+            println!("ArtfulType Terminal / TUI v0.30.0");
             return Ok(());
         } else if arg == "--vt100" || arg == "--ascii" {
             initial_theme = Some(Theme::VT100);
@@ -1330,10 +1423,168 @@ fn run_app<B: ratatui::backend::Backend>(
                                         }
                                     }
                                 }
-                                KeyCode::Esc => app.popup = PopupState::None,
-                                _ => {}
-                            }
-                        }
+                                 KeyCode::Esc => app.popup = PopupState::None,
+                                 KeyCode::Tab => {
+                                     if app.nextcloud_config.is_none() {
+                                         app.nextcloud_config = artfultype_rs_lib::nextcloud::load_config();
+                                     }
+                                     if let Some(ref cfg) = app.nextcloud_config {
+                                         if let Ok(nc_entries) = artfultype_rs_lib::nextcloud::list_folder(cfg, "") {
+                                             app.popup = PopupState::NextcloudOpen {
+                                                 remote_path: "".to_string(),
+                                                 entries: nc_entries,
+                                                 selected: 0,
+                                                 scroll: 0,
+                                             };
+                                         } else {
+                                             app.status_msg = "Failed to list Nextcloud folder".to_string();
+                                         }
+                                     } else {
+                                         app.status_msg = "Nextcloud is not linked (Press Ctrl+L)".to_string();
+                                     }
+                                 }
+                                 _ => {}
+                             }
+                         }
+                         PopupState::NextcloudConfig { mut url_input, mut username_input, mut password_input, mut focus, mut status_msg } => {
+                             match key.code {
+                                 KeyCode::Tab | KeyCode::Down => {
+                                     focus = (focus + 1) % 5;
+                                     app.popup = PopupState::NextcloudConfig { url_input, username_input, password_input, focus, status_msg };
+                                 }
+                                 KeyCode::Up => {
+                                     focus = if focus == 0 { 4 } else { focus - 1 };
+                                     app.popup = PopupState::NextcloudConfig { url_input, username_input, password_input, focus, status_msg };
+                                 }
+                                 KeyCode::Enter => {
+                                     if focus == 4 {
+                                         let _ = artfultype_rs_lib::nextcloud::unlink_config();
+                                         app.nextcloud_config = None;
+                                         app.popup = PopupState::None;
+                                         app.status_msg = "Unlinked Nextcloud account".to_string();
+                                     } else {
+                                         let cfg = artfultype_rs_lib::nextcloud::NextcloudConfig {
+                                             server_url: url_input.clone(),
+                                             username: username_input.clone(),
+                                             password: password_input.clone(),
+                                             enabled: true,
+                                         };
+                                         match artfultype_rs_lib::nextcloud::test_connection(&cfg) {
+                                             Ok(msg) => {
+                                                 let _ = artfultype_rs_lib::nextcloud::save_config(&cfg);
+                                                 app.nextcloud_config = Some(cfg);
+                                                 app.popup = PopupState::None;
+                                                 app.status_msg = format!("Nextcloud linked: {}", msg);
+                                             }
+                                             Err(err) => {
+                                                 status_msg = format!("Error: {}", err);
+                                                 app.popup = PopupState::NextcloudConfig { url_input, username_input, password_input, focus, status_msg };
+                                             }
+                                         }
+                                     }
+                                 }
+                                 KeyCode::Esc => app.popup = PopupState::None,
+                                 KeyCode::Char(c) => {
+                                     match focus {
+                                         0 => url_input.push(c),
+                                         1 => username_input.push(c),
+                                         2 => password_input.push(c),
+                                         _ => {}
+                                     }
+                                     app.popup = PopupState::NextcloudConfig { url_input, username_input, password_input, focus, status_msg };
+                                 }
+                                 KeyCode::Backspace => {
+                                     match focus {
+                                         0 => { url_input.pop(); }
+                                         1 => { username_input.pop(); }
+                                         2 => { password_input.pop(); }
+                                         _ => {}
+                                     }
+                                     app.popup = PopupState::NextcloudConfig { url_input, username_input, password_input, focus, status_msg };
+                                 }
+                                 _ => {}
+                             }
+                         }
+                         PopupState::NextcloudOpen { mut remote_path, mut entries, mut selected, mut scroll } => {
+                             match key.code {
+                                 KeyCode::Up => {
+                                     if selected > 0 {
+                                         selected -= 1;
+                                         if selected < scroll { scroll = selected; }
+                                     }
+                                     app.popup = PopupState::NextcloudOpen { remote_path, entries, selected, scroll };
+                                 }
+                                 KeyCode::Down => {
+                                     if !entries.is_empty() && selected < entries.len() - 1 {
+                                         selected += 1;
+                                         if selected >= scroll + 15 { scroll = selected.saturating_sub(14); }
+                                     }
+                                     app.popup = PopupState::NextcloudOpen { remote_path, entries, selected, scroll };
+                                 }
+                                 KeyCode::Tab => {
+                                     let dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")).to_string_lossy().to_string();
+                                     let local_entries = read_dir_entries(&dir);
+                                     app.popup = PopupState::OpenFile { current_dir: dir, entries: local_entries, selected: 0, scroll: 0 };
+                                 }
+                                 KeyCode::Enter => {
+                                     if !entries.is_empty() && selected < entries.len() {
+                                         let item = entries[selected].clone();
+                                         if item.is_dir {
+                                             if item.name == ".." {
+                                                 let parent = std::path::Path::new(&remote_path).parent().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
+                                                 if let Some(ref cfg) = app.nextcloud_config {
+                                                     if let Ok(mut new_entries) = artfultype_rs_lib::nextcloud::list_folder(cfg, &parent) {
+                                                         if !parent.is_empty() {
+                                                             let p_dir = std::path::Path::new(&parent).parent().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
+                                                             new_entries.insert(0, artfultype_rs_lib::nextcloud::NextcloudEntry { name: "..".to_string(), path: p_dir, is_dir: true, size: 0, modified: String::new() });
+                                                         }
+                                                         remote_path = parent;
+                                                         entries = new_entries;
+                                                         selected = 0;
+                                                         scroll = 0;
+                                                     }
+                                                 }
+                                             } else if let Some(ref cfg) = app.nextcloud_config {
+                                                 if let Ok(mut new_entries) = artfultype_rs_lib::nextcloud::list_folder(cfg, &item.path) {
+                                                     new_entries.insert(0, artfultype_rs_lib::nextcloud::NextcloudEntry { name: "..".to_string(), path: remote_path.clone(), is_dir: true, size: 0, modified: String::new() });
+                                                     remote_path = item.path;
+                                                     entries = new_entries;
+                                                     selected = 0;
+                                                     scroll = 0;
+                                                 }
+                                             }
+                                             app.popup = PopupState::NextcloudOpen { remote_path, entries, selected, scroll };
+                                         } else {
+                                             if let Some(ref cfg) = app.nextcloud_config {
+                                                 match artfultype_rs_lib::nextcloud::read_file(cfg, &item.path) {
+                                                     Ok(content) => {
+                                                         app.content = content;
+                                                         app.file_path = None;
+                                                         app.is_nextcloud_file = true;
+                                                         app.nextcloud_remote_path = Some(item.path.clone());
+                                                         app.file_name = format!("☁ {}", item.name);
+                                                         app.cursor_line = 0;
+                                                         app.cursor_col = 0;
+                                                         app.scroll_top = 0;
+                                                         app.scroll_left = 0;
+                                                         app.dirty = false;
+                                                         app.history.clear();
+                                                         app.history_index = 0;
+                                                         app.snapshot();
+                                                         app.clear_selection();
+                                                         app.status_msg = format!("Opened Nextcloud file: {}", item.name);
+                                                     }
+                                                     Err(e) => app.status_msg = format!("Failed to open Nextcloud file: {}", e),
+                                                 }
+                                             }
+                                             app.popup = PopupState::None;
+                                         }
+                                     }
+                                 }
+                                 KeyCode::Esc => app.popup = PopupState::None,
+                                 _ => {}
+                             }
+                         }
                         PopupState::Search { mut input } => {
                             match key.code {
                                 KeyCode::Enter => {
@@ -1385,6 +1636,12 @@ fn run_app<B: ratatui::backend::Backend>(
                                 _ => {}
                             }
                         }
+                        PopupState::About => {
+                            match key.code {
+                                KeyCode::Enter | KeyCode::Esc | KeyCode::Char(' ') => app.popup = PopupState::None,
+                                _ => {}
+                            }
+                        }
                         _ => {}
                     }
                     continue;
@@ -1392,6 +1649,11 @@ fn run_app<B: ratatui::backend::Backend>(
 
                 // ── Alt key: open menus ──────────────────────────────────
                 if alt && !ctrl {
+                    if key.modifiers.contains(KeyModifiers::CONTROL) && (key.code == KeyCode::Char('l') || key.code == KeyCode::Char('L')) {
+                        app.execute_action(MenuAction::NextcloudConfig, inner_h);
+                        continue;
+                    }
+
                     match key.code {
                         KeyCode::Char('f') | KeyCode::Char('F') => app.open_menu(ActiveMenu::File),
                         KeyCode::Char('e') | KeyCode::Char('E') => app.open_menu(ActiveMenu::Edit),
@@ -1466,7 +1728,14 @@ fn run_app<B: ratatui::backend::Backend>(
                                 app.popup = PopupState::QuitConfirm;
                             }
                             KeyCode::Char('s') => app.save_file(),
-                            KeyCode::Char('o') => app.execute_action(MenuAction::OpenFile, inner_h),
+                            KeyCode::Char('o') => {
+                                if shift {
+                                    app.execute_action(MenuAction::NextcloudOpen, inner_h);
+                                } else {
+                                    app.execute_action(MenuAction::OpenFile, inner_h);
+                                }
+                            }
+                            KeyCode::Char('l') => app.execute_action(MenuAction::NextcloudConfig, inner_h),
                             KeyCode::Char('n') => app.execute_action(MenuAction::NewFile, inner_h),
                             KeyCode::Char('1') => app.insert_str_at_cursor("# "),
                             KeyCode::Char('2') => app.insert_str_at_cursor("## "),
@@ -1630,7 +1899,7 @@ fn ui(f: &mut ratatui::Frame, app: &App) {
                 Style::default().fg(colors.fg)
             },
         ),
-        Span::styled("  | ArtfulType CLI v0.26.1", Style::default().fg(colors.muted)),
+        Span::styled("  | ArtfulType CLI v0.30.0", Style::default().fg(colors.muted)),
     ];
     f.render_widget(
         Paragraph::new(Line::from(menu_spans)).style(Style::default().bg(colors.border)),
@@ -1684,11 +1953,15 @@ fn ui(f: &mut ratatui::Frame, app: &App) {
     } else {
         String::new()
     };
+    let nc_str = match &app.nextcloud_config {
+        Some(cfg) => format!(" | ☁ Linked ({})", cfg.username),
+        None => " | ☁ Off".to_string(),
+    };
     let status = Line::from(vec![
         Span::styled(format!(" {} ", app.status_msg), Style::default().fg(colors.fg)),
         Span::styled(
             format!(
-                " | {mode_str}{theme_tag} | {} {dirty} | L:{}/{} C:{}{sel_tag} | W:{words} ",
+                " | {mode_str}{theme_tag}{nc_str} | {} {dirty} | L:{}/{} C:{}{sel_tag} | W:{words} ",
                 app.file_name,
                 app.cursor_line + 1,
                 total_lines,
@@ -1717,9 +1990,9 @@ fn render_popup(f: &mut ratatui::Frame, app: &App, colors: &ThemeColors) {
     let size = f.area();
     let mut height = 5;
     let mut width = 40;
-    if let PopupState::OpenFile { .. } | PopupState::SaveAs { .. } = &app.popup {
+    if let PopupState::OpenFile { .. } | PopupState::SaveAs { .. } | PopupState::NextcloudOpen { .. } | PopupState::NextcloudConfig { .. } = &app.popup {
         height = 20;
-        width = 60;
+        width = 65;
     }
 
     let area = Rect::new(
@@ -1766,7 +2039,7 @@ fn render_popup(f: &mut ratatui::Frame, app: &App, colors: &ThemeColors) {
             )
         }
         PopupState::OpenFile { current_dir, entries, selected, scroll } => {
-            let mut lines = vec![format!("Dir: {}", current_dir), "".to_string()];
+            let mut lines = vec![format!("Local Dir: {}  [Press Tab for Nextcloud]", current_dir), "".to_string()];
             let display_count = height.saturating_sub(5) as usize; // account for borders (2), headers/footers (3)
             for (i, (name, is_dir)) in entries.iter().skip(*scroll).take(display_count).enumerate() {
                 let actual_idx = i + scroll;
@@ -1778,7 +2051,52 @@ fn render_popup(f: &mut ratatui::Frame, app: &App, colors: &ThemeColors) {
                 lines.push("   ...".to_string());
             }
             (
-                " Open File ",
+                " Open File (Local FS) ",
+                lines
+            )
+        }
+        PopupState::NextcloudConfig { url_input, username_input, password_input, focus, status_msg } => {
+            let u_sel = if *focus == 0 { "> " } else { "  " };
+            let un_sel = if *focus == 1 { "> " } else { "  " };
+            let p_sel = if *focus == 2 { "> " } else { "  " };
+            let l_sel = if *focus == 3 { "> [ LINK ACCOUNT / TEST ] <" } else { "  [ Link Account / Test ]" };
+            let ul_sel = if *focus == 4 { "> [ UNLINK ACCOUNT ] <" } else { "  [ Unlink Account ]" };
+
+            let pass_mask = "*".repeat(password_input.len());
+
+            (
+                " Nextcloud Integration ",
+                vec![
+                    status_msg.clone(),
+                    "".to_string(),
+                    format!("{}Server URL: {}", u_sel, url_input),
+                    format!("{}Username:   {}", un_sel, username_input),
+                    format!("{}Password:   {}", p_sel, pass_mask),
+                    "".to_string(),
+                    l_sel.to_string(),
+                    ul_sel.to_string(),
+                    "".to_string(),
+                    "[Tab/Up/Down] Focus | [Enter] Select/Save | [Esc] Close".to_string(),
+                ]
+            )
+        }
+        PopupState::NextcloudOpen { remote_path, entries, selected, scroll } => {
+            let mut lines = vec![
+                format!("Remote Path: /{}  [Press Tab for Local FS]", remote_path),
+                "".to_string(),
+            ];
+            let display_count = height.saturating_sub(5) as usize;
+            for (i, item) in entries.iter().skip(*scroll).take(display_count).enumerate() {
+                let actual_idx = i + scroll;
+                let cursor = if actual_idx == *selected { ">" } else { " " };
+                let icon = if item.is_dir { "📁" } else { "📄" };
+                lines.push(format!("{} {} {}", cursor, icon, item.name));
+            }
+            if entries.len() > scroll + display_count {
+                lines.push("   ...".to_string());
+            }
+            (
+                " Open Nextcloud File ",
                 lines
             )
         }
@@ -1809,6 +2127,21 @@ fn render_popup(f: &mut ratatui::Frame, app: &App, colors: &ThemeColors) {
                     ]
                 )
             }
+        }
+        PopupState::About => {
+            (
+                " About ArtfulType CLI ",
+                vec![
+                    "ArtfulType CLI v0.30.0".to_string(),
+                    "Distraction-free Markdown TUI Editor".to_string(),
+                    "".to_string(),
+                    "Maintainer:       Roland Huber".to_string(),
+                    "Original Creator: Sean Malseed (Action Retro)".to_string(),
+                    "License:          GPLv3".to_string(),
+                    "".to_string(),
+                    "[Enter / Esc] Close".to_string(),
+                ]
+            )
         }
         PopupState::None => ("", vec![]),
     };

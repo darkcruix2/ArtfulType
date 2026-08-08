@@ -1,12 +1,13 @@
-# ArtfulType Pro (Rust / Tauri Edition)
+# ArtfulType Pro (Rust / Tauri Edition) v0.30.0
 
-A distraction-free Markdown writing app built natively for desktop using Rust and Tauri. This is the modern, cross-platform successor to the classic Macintosh `ArtfulType`.
+A distraction-free Markdown writing app built natively for desktop and terminal using Rust and Tauri. This is the modern, cross-platform successor to the classic Macintosh `ArtfulType`.
 
 ## Features
 - **Writer mode** — live Markdown-to-rich-text preview
 - **Markdown mode** — plain raw-syntax editing
-- Native File I/O (Open/Save plain Markdown files)
-- Dark mode glassmorphism UI
+- **☁ Nextcloud Cloud Integration** — link Nextcloud storage via WebDAV, browse remote folder structures, edit and auto-save directly to Nextcloud in both GUI (`artfultype-rs`) and TUI (`artfultype-cli`)
+- **Native File I/O** — Open/Save local plain Markdown files
+- **Dark mode glassmorphism & Dracula themes**
 
 ## Building from Source
 

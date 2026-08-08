@@ -1,6 +1,6 @@
 [package]
 name = "artfultype-rs"
-version = "0.26.3"
+version = "0.30.0"
 description = "ArtfulType — distraction-free Markdown writer & TUI editor"
 authors = ["you"]
 edition = "2021"
@@ -36,7 +36,7 @@ mode = "0755"
 # to make the lib name unique and wouldn't conflict with the bin name.
 # This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
 name = "artfultype_rs_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
+crate-type = ["rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -61,6 +61,7 @@ tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros"] }
 base64 = "0.22"
 ratatui = "0.29.0"
 crossterm = "0.28.1"
+reqwest = { version = "0.12", features = ["json", "blocking"] }
 
 
 
