@@ -1,6 +1,6 @@
 [package]
 name = "artfultype-rs"
-version = "0.26.2"
+version = "0.26.3"
 description = "ArtfulType — distraction-free Markdown writer & TUI editor"
 authors = ["you"]
 edition = "2021"

@@ -157,6 +157,26 @@ function updateThemeUI(themeName) {
   }
 }
 
+// ─── Word Wrap ────────────────────────────────────────────────────────────────
+function applyWordWrapSetting(enabled) {
+  saveSettings({ wordWrap: enabled });
+  const editorArea = document.getElementById("editor-area");
+  const check = document.getElementById("wordwrap-check");
+  if (enabled) {
+    editorArea.classList.remove("no-word-wrap");
+    if (check) check.style.visibility = "visible";
+  } else {
+    editorArea.classList.add("no-word-wrap");
+    if (check) check.style.visibility = "hidden";
+  }
+}
+
+function toggleWordWrap() {
+  const settings = loadSettings();
+  const current = settings.wordWrap ?? true;
+  applyWordWrapSetting(!current);
+}
+
 // ─── Stats ────────────────────────────────────────────────────────────────────
 function updateStats(text) {
   const trimmed = text.trim();
@@ -3769,6 +3789,10 @@ window.addEventListener("DOMContentLoaded", async () => {
   document.getElementById("tui-view-writer")?.addEventListener("click", () => { closeAllTuiMenus(); setViewMode("writer"); });
   document.getElementById("tui-view-markdown")?.addEventListener("click", () => { closeAllTuiMenus(); setViewMode("markdown"); });
   document.getElementById("tui-view-split")?.addEventListener("click", () => { closeAllTuiMenus(); setViewMode("split"); });
+  document.getElementById("tui-view-wordwrap")?.addEventListener("click", () => {
+    closeAllTuiMenus();
+    toggleWordWrap();
+  });
 
   // TUI Theme Items
   document.querySelectorAll(".theme-option-btn").forEach(btn => {
@@ -3830,6 +3854,9 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   const themeName = settings.theme || "dracula";
   applyThemeSetting(themeName);
+
+  const wordWrap = settings.wordWrap ?? true;
+  applyWordWrapSetting(wordWrap);
 
   // ── File list ──
   renderFileList();

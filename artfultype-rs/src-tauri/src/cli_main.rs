@@ -172,6 +172,7 @@ enum ActiveMenu {
 
 #[derive(Debug, Clone, Copy)]
 enum MenuAction {
+    NewFile,
     OpenFile,
     SaveFile,
     SaveAs,
@@ -193,6 +194,7 @@ enum MenuAction {
     ThemeRetroAmber,
     ThemeDracula,
     ThemeVT100,
+    WordWrap,
     Undo,
     Redo,
     Search,
@@ -225,7 +227,9 @@ struct App {
     dirty: bool,
     status_msg: String,
     should_quit: bool,
+    quit_after_save: bool,
     snapshot_disabled: bool,
+    word_wrap: bool,
 }
 
 impl App {
@@ -281,7 +285,9 @@ impl App {
             dirty: false,
             status_msg: "Ready".to_string(),
             should_quit: false,
+            quit_after_save: false,
             snapshot_disabled: false,
+            word_wrap: false,
         }
     }
 
@@ -847,6 +853,21 @@ impl App {
 
     fn execute_action(&mut self, action: MenuAction, inner_height: usize) {
         match action {
+            MenuAction::NewFile => {
+                self.content = String::new();
+                self.file_path = None;
+                self.file_name = "untitled.md".to_string();
+                self.cursor_line = 0;
+                self.cursor_col = 0;
+                self.scroll_top = 0;
+                self.scroll_left = 0;
+                self.dirty = false;
+                self.history.clear();
+                self.history_index = 0;
+                self.snapshot();
+                self.clear_selection();
+                self.status_msg = "New file".to_string();
+            }
             MenuAction::OpenFile => {
                 let dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")).to_string_lossy().to_string();
                 let entries = read_dir_entries(&dir);
@@ -871,11 +892,7 @@ impl App {
                 };
             }
             MenuAction::Quit => {
-                if self.dirty {
-                    self.popup = PopupState::QuitConfirm;
-                } else {
-                    self.should_quit = true;
-                }
+                self.popup = PopupState::QuitConfirm;
             }
             MenuAction::Heading1 => self.insert_str_at_cursor("# "),
             MenuAction::Heading2 => self.insert_str_at_cursor("## "),
@@ -906,6 +923,7 @@ impl App {
             MenuAction::ThemeRetroAmber => self.theme = Theme::RetroAmber,
             MenuAction::ThemeDracula => self.theme = Theme::Dracula,
             MenuAction::ThemeVT100 => self.theme = Theme::VT100,
+            MenuAction::WordWrap => self.word_wrap = !self.word_wrap,
             MenuAction::Undo => self.undo(),
             MenuAction::Redo => self.redo(),
             MenuAction::Search => {
@@ -935,6 +953,7 @@ impl App {
 fn get_menu_items(menu: ActiveMenu) -> Vec<(&'static str, MenuAction)> {
     match menu {
         ActiveMenu::File => vec![
+            ("[N] New File      (Ctrl+N)", MenuAction::NewFile),
             ("[O] Open File...  (Ctrl+O)", MenuAction::OpenFile),
             ("[S] Save File     (Ctrl+S)", MenuAction::SaveFile),
             ("[A] Save As...", MenuAction::SaveAs),
@@ -969,6 +988,7 @@ fn get_menu_items(menu: ActiveMenu) -> Vec<(&'static str, MenuAction)> {
             ("Markdown Mode (F3)", MenuAction::ViewMarkdown),
             ("Split Mode    (F4)", MenuAction::ViewSplit),
             ("Pure Text Mode (Ctrl+F2)", MenuAction::ViewPureText),
+            ("Word Wrap", MenuAction::WordWrap),
         ],
         ActiveMenu::Theme => vec![
             ("Dark Antigravity", MenuAction::ThemeDarkAntigravity),
@@ -1128,13 +1148,29 @@ fn run_app<B: ratatui::backend::Backend>(
                         PopupState::QuitConfirm => {
                             match key.code {
                                 KeyCode::Char('y') | KeyCode::Char('Y') => {
+                                    app.quit_after_save = true;
                                     app.save_file();
-                                    app.should_quit = true;
-                                    app.popup = PopupState::None;
+                                    if !matches!(app.popup, PopupState::SaveAs { .. }) {
+                                        app.should_quit = true;
+                                        app.popup = PopupState::None;
+                                    }
                                 }
                                 KeyCode::Char('n') | KeyCode::Char('N') => {
                                     app.should_quit = true;
                                     app.popup = PopupState::None;
+                                }
+                                KeyCode::Enter => {
+                                    if app.dirty {
+                                        app.quit_after_save = true;
+                                        app.save_file();
+                                        if !matches!(app.popup, PopupState::SaveAs { .. }) {
+                                            app.should_quit = true;
+                                            app.popup = PopupState::None;
+                                        }
+                                    } else {
+                                        app.should_quit = true;
+                                        app.popup = PopupState::None;
+                                    }
                                 }
                                 KeyCode::Esc => {
                                     app.popup = PopupState::None;
@@ -1209,10 +1245,16 @@ fn run_app<B: ratatui::backend::Backend>(
                                             app.file_name = input.clone();
                                             app.save_file();
                                             app.popup = PopupState::None;
+                                            if app.quit_after_save {
+                                                app.should_quit = true;
+                                            }
                                         }
                                     }
                                 }
-                                KeyCode::Esc => app.popup = PopupState::None,
+                                KeyCode::Esc => {
+                                    app.popup = PopupState::None;
+                                    app.quit_after_save = false;
+                                }
                                 KeyCode::Char(c) => {
                                     if input_focused {
                                         input.push(c);
@@ -1421,14 +1463,11 @@ fn run_app<B: ratatui::backend::Backend>(
                             KeyCode::Char('a') => app.select_all(),
                             KeyCode::Char('k') => app.delete_to_end_of_line(),
                             KeyCode::Char('q') => {
-                                if app.dirty {
-                                    app.popup = PopupState::QuitConfirm;
-                                } else {
-                                    app.should_quit = true;
-                                }
+                                app.popup = PopupState::QuitConfirm;
                             }
                             KeyCode::Char('s') => app.save_file(),
                             KeyCode::Char('o') => app.execute_action(MenuAction::OpenFile, inner_h),
+                            KeyCode::Char('n') => app.execute_action(MenuAction::NewFile, inner_h),
                             KeyCode::Char('1') => app.insert_str_at_cursor("# "),
                             KeyCode::Char('2') => app.insert_str_at_cursor("## "),
                             KeyCode::Char('3') => app.insert_str_at_cursor("### "),
@@ -1607,21 +1646,13 @@ fn ui(f: &mut ratatui::Frame, app: &App) {
 
     match app.view_mode {
         ViewMode::Markdown | ViewMode::PureText => {
-            render_markdown_editor(f, editor_rect, app, &colors);
-            if app.active_menu == ActiveMenu::None && cursor_row_in_view < inner_h {
-                let col = app.cursor_col.saturating_sub(app.scroll_left) as u16;
-                let cx = inner_x + 6 + col;
-                let cy = inner_y + cursor_row_in_view as u16;
-                f.set_cursor_position((cx, cy));
+            if let Some((cx, cy)) = render_markdown_editor(f, editor_rect, app, &colors) {
+                if app.active_menu == ActiveMenu::None { f.set_cursor_position((cx, cy)); }
             }
         }
         ViewMode::Writer => {
-            render_writer_view(f, editor_rect, app, &colors);
-            if app.active_menu == ActiveMenu::None && cursor_row_in_view < inner_h {
-                let col = app.cursor_col.saturating_sub(app.scroll_left) as u16;
-                let cx = inner_x + col;
-                let cy = inner_y + cursor_row_in_view as u16;
-                f.set_cursor_position((cx, cy));
+            if let Some((cx, cy)) = render_writer_view(f, editor_rect, app, &colors) {
+                if app.active_menu == ActiveMenu::None { f.set_cursor_position((cx, cy)); }
             }
         }
         ViewMode::Split => {
@@ -1629,16 +1660,10 @@ fn ui(f: &mut ratatui::Frame, app: &App) {
                 .direction(Direction::Horizontal)
                 .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
                 .split(editor_rect);
-            render_markdown_editor(f, split[0], app, &colors);
-            render_writer_view(f, split[1], app, &colors);
-            if app.active_menu == ActiveMenu::None && cursor_row_in_view < inner_h {
-                let col = app.cursor_col.saturating_sub(app.scroll_left) as u16;
-                let left_inner_x = split[0].x + 1;
-                let left_inner_y = split[0].y + 1;
-                let cx = left_inner_x + 6 + col;
-                let cy = left_inner_y + cursor_row_in_view as u16;
-                f.set_cursor_position((cx, cy));
+            if let Some((cx, cy)) = render_markdown_editor(f, split[0], app, &colors) {
+                if app.active_menu == ActiveMenu::None { f.set_cursor_position((cx, cy)); }
             }
+            render_writer_view(f, split[1], app, &colors);
         }
     }
 
@@ -1707,11 +1732,16 @@ fn render_popup(f: &mut ratatui::Frame, app: &App, colors: &ThemeColors) {
 
     let (title, content_lines) = match &app.popup {
         PopupState::QuitConfirm => {
+            let (default_prompt, title_msg) = if app.dirty {
+                ("Save before quitting? [Y/n/Esc]", "File has unsaved changes.")
+            } else {
+                ("Quit app? [y/N/Esc]", "File has no unsaved changes.")
+            };
             (
                 " Quit ",
                 vec![
-                    "File has unsaved changes.".to_string(),
-                    "Save before quitting? [Y/N/Esc]".to_string(),
+                    title_msg.to_string(),
+                    default_prompt.to_string(),
                 ]
             )
         }
@@ -1799,10 +1829,53 @@ fn render_popup(f: &mut ratatui::Frame, app: &App, colors: &ThemeColors) {
     f.render_widget(p, area);
 }
 
-/// Styled writer preview — one rendered line per source line, no word-wrap.
-fn render_writer_view(f: &mut ratatui::Frame, area: Rect, app: &App, colors: &ThemeColors) {
-    let is_vt100 = app.theme == Theme::VT100;
 
+fn wrap_line_chars(chars: &[char], width: usize) -> Vec<Vec<char>> {
+    if chars.is_empty() { return vec![vec![]]; }
+    let w = width.max(1);
+    let mut lines = Vec::new();
+    let mut current_line = Vec::new();
+    let mut current_word = Vec::new();
+
+    for &c in chars {
+        current_word.push(c);
+        if c == ' ' || c == '-' {
+            if current_line.len() + current_word.len() > w && !current_line.is_empty() {
+                lines.push(current_line);
+                current_line = Vec::new();
+            }
+            current_line.extend(current_word.drain(..));
+        } else {
+            if current_line.len() + current_word.len() > w {
+                if current_line.is_empty() {
+                    if current_word.len() > w {
+                        let last = current_word.pop().unwrap();
+                        lines.push(current_word.drain(..).collect());
+                        current_word.push(last);
+                    }
+                } else {
+                    lines.push(current_line);
+                    current_line = Vec::new();
+                }
+            }
+        }
+    }
+    if !current_word.is_empty() {
+        if current_line.len() + current_word.len() > w && !current_line.is_empty() {
+            lines.push(current_line);
+            current_line = Vec::new();
+        }
+        current_line.extend(current_word.drain(..));
+    }
+    if !current_line.is_empty() || lines.is_empty() {
+        lines.push(current_line);
+    }
+    lines
+}
+
+/// Styled writer preview — one rendered line per source line, no word-wrap.
+fn render_writer_view(f: &mut ratatui::Frame, area: Rect, app: &App, colors: &ThemeColors) -> Option<(u16, u16)> {
+    let is_vt100 = app.theme == Theme::VT100;
     let check   = if is_vt100 { "[x] " } else { "☑ " };
     let uncheck = if is_vt100 { "[ ] " } else { "☐ " };
     let bullet  = if is_vt100 { "* "  } else { "• " };
@@ -1814,132 +1887,206 @@ fn render_writer_view(f: &mut ratatui::Frame, area: Rect, app: &App, colors: &Th
     let sel = app.selection_range();
     let (sel_bg, sel_fg) = (colors.sel_bg, colors.sel_fg);
 
-    let rendered: Vec<Line> = app
-        .get_lines()
-        .into_iter()
-        .enumerate()
-        .skip(app.scroll_top)
-        .map(|(idx, line)| {
-            let t = line.trim();
+    let inner_x = area.x + 1;
+    let inner_y = area.y + 1;
+    let inner_h = area.height.saturating_sub(2) as usize;
+    let inner_width = area.width.saturating_sub(2) as usize;
 
-            // Compute which character range on this source line is selected.
-            // source_len = char count of the raw source line (used to clamp columns).
-            let source_len = line.chars().count();
+    let mut cursor_pos = None;
+    let mut visual_y = 0;
+    let mut rendered = Vec::new();
+
+    for (idx, line) in app.get_lines().into_iter().enumerate().skip(app.scroll_top) {
+        if visual_y >= inner_h { break; }
+
+        let t = line.trim();
+        let source_len = line.chars().count();
+
+        // prefix, icon_span, plain_text, col_offset
+        let mut col_offset = 0;
+        let mut icon_span: Option<Span> = None;
+        let mut blank_icon_span: Option<Span> = None;
+        let plain_text: String;
+        let mut base_style = Style::default().fg(colors.fg);
+        let mut sel_style = Style::default().fg(sel_fg).bg(sel_bg);
+
+        let sel_style_bold_ul = Style::default().fg(sel_fg).bg(sel_bg).add_modifier(Modifier::BOLD | Modifier::UNDERLINED);
+        let sel_style_bold    = Style::default().fg(sel_fg).bg(sel_bg).add_modifier(Modifier::BOLD);
+        let sel_style_plain   = Style::default().fg(sel_fg).bg(sel_bg);
+
+        if t.starts_with("# ") {
+            plain_text = t.trim_start_matches("# ").to_string();
+            col_offset = 2;
+            base_style = Style::default().fg(colors.header).add_modifier(Modifier::BOLD | Modifier::UNDERLINED);
+            sel_style = sel_style_bold_ul;
+        } else if t.starts_with("## ") {
+            plain_text = t.trim_start_matches("## ").to_string();
+            col_offset = 3;
+            base_style = Style::default().fg(colors.accent).add_modifier(Modifier::BOLD);
+            sel_style = sel_style_bold;
+        } else if t.starts_with("### ") {
+            plain_text = t.trim_start_matches("### ").to_string();
+            col_offset = 4;
+            base_style = Style::default().fg(colors.quote).add_modifier(Modifier::BOLD);
+            sel_style = sel_style_bold;
+        } else if t.starts_with("> [!") {
+            plain_text = format!("{ct}{}{ce}", t.trim_start_matches("> "));
+            col_offset = 2;
+            base_style = Style::default().fg(colors.quote).add_modifier(Modifier::BOLD);
+            sel_style = sel_style_bold;
+        } else if t.starts_with("> ") {
+            plain_text = format!("{cb}{}", t.trim_start_matches("> "));
+            col_offset = 2;
+            base_style = Style::default().fg(colors.quote);
+            sel_style = sel_style_plain;
+        } else if t.starts_with("- [x]") || t.starts_with("- [X]") {
+            plain_text = t.trim_start_matches("- [x]").trim_start_matches("- [X]").trim().to_string();
+            col_offset = 6;
+            let icon_s = Style::default().fg(colors.accent).add_modifier(Modifier::BOLD);
+            icon_span = Some(Span::styled(check, icon_s));
+            blank_icon_span = Some(Span::styled("    ", Style::default()));
+        } else if t.starts_with("- [ ]") {
+            plain_text = t.trim_start_matches("- [ ]").trim().to_string();
+            col_offset = 6;
+            let icon_s = Style::default().fg(colors.muted);
+            icon_span = Some(Span::styled(uncheck, icon_s));
+            blank_icon_span = Some(Span::styled("    ", Style::default()));
+        } else if t.starts_with("- ") || t.starts_with("* ") {
+            plain_text = t.trim_start_matches("- ").trim_start_matches("* ").to_string();
+            col_offset = 2;
+            let icon_s = Style::default().fg(colors.accent);
+            icon_span = Some(Span::styled(bullet, icon_s));
+            blank_icon_span = Some(Span::styled("  ", Style::default()));
+        } else if t == "---" {
+            plain_text = hr.to_string();
+            base_style = Style::default().fg(colors.muted);
+        } else {
+            plain_text = line.to_string();
+        }
+
+        let chars: Vec<char> = plain_text.chars().collect();
+        let display_chars: Vec<char> = if app.word_wrap {
+            chars.clone()
+        } else {
+            chars.into_iter().skip(app.scroll_left).collect()
+        };
+
+        // Determine available text width.
+        // If there's an icon span, it takes up some width.
+        let prefix_width = icon_span.as_ref().map(|s| s.content.chars().count()).unwrap_or(0);
+        let text_inner_width = inner_width.saturating_sub(prefix_width);
+
+        let chunks = if app.word_wrap {
+            wrap_line_chars(&display_chars, text_inner_width)
+        } else {
+            vec![display_chars]
+        };
+
+        let mut chunk_col_offset = if app.word_wrap { 0 } else { app.scroll_left };
+
+        for (chunk_idx, chunk) in chunks.iter().enumerate() {
+            if visual_y >= inner_h { break; }
+
+            // Check cursor
+            if idx == app.cursor_line && cursor_pos.is_none() {
+                let chunk_len = chunk.len();
+                let is_last_chunk = chunk_idx == chunks.len() - 1;
+                // app.cursor_col is the source column.
+                // We need to map it to the chunk. The chunk covers [col_offset + chunk_col_offset, ... ]
+                let rel_col = app.cursor_col;
+                let chunk_start_src = col_offset + chunk_col_offset;
+                let chunk_end_src = col_offset + chunk_col_offset + chunk_len;
+
+                // Wait, if it's a special line like "> [!", mapping is lost, but let's just approximate
+                if rel_col >= chunk_start_src && (rel_col < chunk_end_src || (is_last_chunk && rel_col == chunk_end_src)) {
+                    let cx = inner_x + prefix_width as u16 + (rel_col.saturating_sub(chunk_start_src)) as u16;
+                    let cy = inner_y + visual_y as u16;
+                    cursor_pos = Some((cx, cy));
+                }
+            }
+
+            let chunk_start = chunk_col_offset;
+            let chunk_end = chunk_col_offset + chunk.len();
+            chunk_col_offset += chunk.len();
+
+            let prefix = if chunk_idx == 0 {
+                icon_span.clone()
+            } else {
+                blank_icon_span.clone()
+            };
+
             let sel_range: Option<(usize, usize)> = sel.and_then(|((sl, sc), (el, ec))| {
                 if idx < sl || idx > el { return None; }
                 let start = if idx == sl { sc.min(source_len) } else { 0 };
                 let end   = if idx == el { ec.min(source_len) } else { source_len };
-                if start == end { None } else { Some((start, end)) }
+                
+                let start_mapped = start.saturating_sub(col_offset);
+                let end_mapped = end.saturating_sub(col_offset);
+
+                if start_mapped >= chunk_end || end_mapped <= chunk_start { return None; }
+                
+                let adj_start = start_mapped.saturating_sub(chunk_start).min(chunk.len());
+                let adj_end = end_mapped.saturating_sub(chunk_start).min(chunk.len());
+                
+                if adj_start == adj_end { None } else { Some((adj_start, adj_end)) }
             });
 
-            // Helper: given rendered text (owned String) and optional col_offset
-            // (how many source chars were stripped from the front), return a Line
-            // with proper partial selection spans.
-            // col_offset: source chars stripped before the rendered text begins.
-            // For regular lines col_offset=0, for "# Title" col_offset=2, etc.
-            let make_line = |rendered_text: String, col_offset: usize, base_style: Style, sel_style: Style| -> Line {
-                match sel_range {
-                    None => Line::styled(rendered_text, base_style),
-                    Some((src_start, src_end)) => {
-                        // Map source selection columns into rendered-text columns.
-                        let rlen = rendered_text.chars().count();
-                        let r_start = src_start.saturating_sub(col_offset).min(rlen);
-                        let r_end   = src_end.saturating_sub(col_offset).min(rlen);
-                        if r_start == 0 && r_end == rlen {
-                            return Line::styled(rendered_text, sel_style);
-                        }
-                        if r_start >= r_end {
-                            return Line::styled(rendered_text, base_style);
-                        }
-                        let chars: Vec<char> = rendered_text.chars().collect();
-                        let before:   String = chars[..r_start].iter().collect();
-                        let selected: String = chars[r_start..r_end].iter().collect();
-                        let after:    String = chars[r_end..].iter().collect();
-                        let mut spans = vec![];
-                        if !before.is_empty()   { spans.push(Span::styled(before,   base_style)); }
-                        spans.push(Span::styled(selected, sel_style));
-                        if !after.is_empty()    { spans.push(Span::styled(after,    base_style)); }
-                        Line::from(spans)
-                    }
+            match sel_range {
+                None => {
+                    let mut spans = vec![];
+                    if let Some(p) = prefix { spans.push(p); }
+                    spans.push(Span::styled(chunk.iter().collect::<String>(), base_style));
+                    rendered.push(Line::from(spans));
                 }
-            };
+                Some((start, end)) if start == 0 && end == chunk.len() => {
+                    let mut spans = vec![];
+                    // Should we highlight the prefix? Only if it's not a blank icon span?
+                    if let Some(p) = prefix {
+                        if chunk_idx == 0 { spans.push(Span::styled(p.content.clone(), sel_style)); }
+                        else { spans.push(p); }
+                    }
+                    spans.push(Span::styled(chunk.iter().collect::<String>(), sel_style));
+                    rendered.push(Line::from(spans));
+                }
+                Some((start, end)) => {
+                    let mut spans = vec![];
+                    // highlight prefix if selection starts at 0 and it's the first chunk
+                    if let Some(p) = prefix {
+                        if chunk_idx == 0 && start == 0 { spans.push(Span::styled(p.content.clone(), sel_style)); }
+                        else { spans.push(p); }
+                    }
 
-            let sel_style_bold_ul = Style::default().fg(sel_fg).bg(sel_bg).add_modifier(Modifier::BOLD | Modifier::UNDERLINED);
-            let sel_style_bold    = Style::default().fg(sel_fg).bg(sel_bg).add_modifier(Modifier::BOLD);
-            let sel_style_plain   = Style::default().fg(sel_fg).bg(sel_bg);
-
-            if t.starts_with("# ") {
-                let text = t.trim_start_matches("# ").to_string();
-                let base = Style::default().fg(colors.header).add_modifier(Modifier::BOLD | Modifier::UNDERLINED);
-                make_line(text, 2, base, sel_style_bold_ul)
-            } else if t.starts_with("## ") {
-                let text = t.trim_start_matches("## ").to_string();
-                let base = Style::default().fg(colors.accent).add_modifier(Modifier::BOLD);
-                make_line(text, 3, base, sel_style_bold)
-            } else if t.starts_with("### ") {
-                let text = t.trim_start_matches("### ").to_string();
-                let base = Style::default().fg(colors.quote).add_modifier(Modifier::BOLD);
-                make_line(text, 4, base, sel_style_bold)
-            } else if t.starts_with("> [!") {
-                // Callout — keep full-line highlight (rendered text is transformed, col mapping unreliable).
-                let text = format!("{ct}{}{ce}", t.trim_start_matches("> "));
-                let base = Style::default().fg(colors.quote).add_modifier(Modifier::BOLD);
-                make_line(text, 2, base, sel_style_bold)
-            } else if t.starts_with("> ") {
-                let text = format!("{cb}{}", t.trim_start_matches("> "));
-                let base = Style::default().fg(colors.quote);
-                make_line(text, 2, base, sel_style_plain)
-            } else if t.starts_with("- [x]") || t.starts_with("- [X]") {
-                // Prefix "- [x] " = 6 chars stripped, replaced by check glyph.
-                let body = t.trim_start_matches("- [x]").trim_start_matches("- [X]").trim().to_string();
-                let icon_sel = sel_range.is_some();
-                let icon_s = if icon_sel { sel_style_bold    } else { Style::default().fg(colors.accent).add_modifier(Modifier::BOLD) };
-                let text_s = if icon_sel { sel_style_plain   } else { Style::default().fg(colors.fg) };
-                Line::from(vec![Span::styled(check, icon_s), Span::styled(body, text_s)])
-            } else if t.starts_with("- [ ]") {
-                let body = t.trim_start_matches("- [ ]").trim().to_string();
-                let icon_sel = sel_range.is_some();
-                let icon_s = if icon_sel { sel_style_plain   } else { Style::default().fg(colors.muted) };
-                let text_s = if icon_sel { sel_style_plain   } else { Style::default().fg(colors.fg) };
-                Line::from(vec![Span::styled(uncheck, icon_s), Span::styled(body, text_s)])
-            } else if t.starts_with("- ") || t.starts_with("* ") {
-                let body = t.trim_start_matches("- ").trim_start_matches("* ").to_string();
-                let icon_sel = sel_range.is_some();
-                let icon_s = if icon_sel { sel_style_plain   } else { Style::default().fg(colors.accent) };
-                let text_s = if icon_sel { sel_style_plain   } else { Style::default().fg(colors.fg) };
-                Line::from(vec![Span::styled(bullet, icon_s), Span::styled(body, text_s)])
-            } else if t == "---" {
-                let base = Style::default().fg(colors.muted);
-                make_line(hr.to_string(), 0, base, sel_style_plain)
-            } else {
-                // Regular text: source columns map 1:1 to rendered columns.
-                let base = Style::default().fg(colors.fg);
-                make_line(line.to_string(), 0, base, sel_style_plain)
+                    let before:   String = chunk[..start].iter().collect();
+                    let selected: String = chunk[start..end].iter().collect();
+                    let after:    String = chunk[end..].iter().collect();
+                    
+                    if !before.is_empty() { spans.push(Span::styled(before, base_style)); }
+                    spans.push(Span::styled(selected, sel_style));
+                    if !after.is_empty() { spans.push(Span::styled(after, base_style)); }
+                    rendered.push(Line::from(spans));
+                }
             }
-        })
-        .collect();
+            visual_y += 1;
+        }
+    }
 
-    let inner_width = area.width.saturating_sub(2) as usize;
-    
-    let right_scrolled = app.get_lines().iter().skip(app.scroll_top).take(area.height as usize).any(|l| l.chars().count() > app.scroll_left + inner_width);
+    let right_scrolled = !app.word_wrap && app.get_lines().iter().skip(app.scroll_top).take(area.height as usize).any(|l| l.chars().count() > app.scroll_left + inner_width);
     
     let mut block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(colors.accent))
         .title(ratatui::widgets::block::Title::from(" Writer Preview ").alignment(ratatui::layout::Alignment::Center));
 
-    if app.scroll_left > 0 {
+    if app.scroll_left > 0 && !app.word_wrap {
         block = block.title(ratatui::widgets::block::Title::from(" < ").alignment(ratatui::layout::Alignment::Left));
     }
     if right_scrolled {
         block = block.title(ratatui::widgets::block::Title::from(" > ").alignment(ratatui::layout::Alignment::Right));
     }
 
-    let p = Paragraph::new(Text::from(rendered))
-        .block(block)
-        .scroll((0, app.scroll_left as u16))
-        .style(Style::default().bg(colors.bg));
+    let p = Paragraph::new(Text::from(rendered)).block(block).style(Style::default().bg(colors.bg));
     f.render_widget(p, area);
+    cursor_pos
 }
 
 /// Raw markdown editor with line numbers and selection highlighting.
@@ -1948,91 +2095,123 @@ fn render_markdown_editor(
     area: Rect,
     app: &App,
     colors: &ThemeColors,
-) {
+) -> Option<(u16, u16)> {
     let sep = if app.theme == Theme::VT100 { "|" } else { "│" };
     let sel = app.selection_range();
     let (sel_bg, sel_fg) = (colors.sel_bg, colors.sel_fg);
 
-    let lines: Vec<Line> = app
-        .get_lines()
-        .into_iter()
-        .enumerate()
-        .skip(app.scroll_top)
-        .map(|(idx, line)| {
-            let chars: Vec<char> = line.chars().collect();
-            let len = chars.len();
+    let inner_x = area.x + 1;
+    let inner_y = area.y + 1;
+    let inner_h = area.height.saturating_sub(2) as usize;
+    let inner_width = area.width.saturating_sub(8) as usize;
 
-            let inner_width = area.width.saturating_sub(8) as usize;
-            let mut line_sep = sep.to_string();
-            let mut sep_style = Style::default().fg(colors.muted);
+    let mut cursor_pos = None;
+    let mut visual_y = 0;
+    
+    let mut out_lines: Vec<Line> = Vec::new();
 
-            if app.scroll_left > 0 && len > 0 {
-                line_sep = "<".to_string();
-                sep_style = Style::default().fg(colors.accent).add_modifier(Modifier::BOLD);
-            } else if len > app.scroll_left + inner_width {
-                line_sep = ">".to_string();
-                sep_style = Style::default().fg(colors.accent).add_modifier(Modifier::BOLD);
+    for (idx, line) in app.get_lines().into_iter().enumerate().skip(app.scroll_top) {
+        if visual_y >= inner_h { break; }
+
+        let chars: Vec<char> = line.chars().collect();
+        let len = chars.len();
+
+        let mut line_sep = sep.to_string();
+        let mut sep_style = Style::default().fg(colors.muted);
+
+        if app.scroll_left > 0 && len > 0 && !app.word_wrap {
+            line_sep = "<".to_string();
+            sep_style = Style::default().fg(colors.accent).add_modifier(Modifier::BOLD);
+        } else if !app.word_wrap && len > app.scroll_left + inner_width {
+            line_sep = ">".to_string();
+            sep_style = Style::default().fg(colors.accent).add_modifier(Modifier::BOLD);
+        }
+
+        let num_span = Span::styled(format!("{:3} {line_sep} ", idx + 1), sep_style);
+        let blank_num_span = Span::styled(format!("    {line_sep} "), sep_style);
+
+        let display_chars: Vec<char> = if app.word_wrap {
+            chars.clone()
+        } else {
+            chars.into_iter().skip(app.scroll_left).collect()
+        };
+
+        let chunks = if app.word_wrap {
+            wrap_line_chars(&display_chars, inner_width)
+        } else {
+            vec![display_chars]
+        };
+
+        let mut col_offset = if app.word_wrap { 0 } else { app.scroll_left };
+
+        for (chunk_idx, chunk) in chunks.iter().enumerate() {
+            if visual_y >= inner_h { break; }
+
+            // Check cursor
+            if idx == app.cursor_line && cursor_pos.is_none() {
+                let chunk_len = chunk.len();
+                let is_last_chunk = chunk_idx == chunks.len() - 1;
+                let rel_col = app.cursor_col;
+
+                if rel_col >= col_offset && (rel_col < col_offset + chunk_len || (is_last_chunk && rel_col == col_offset + chunk_len)) {
+                    let cx = inner_x + 6 + (rel_col - col_offset) as u16;
+                    let cy = inner_y + visual_y as u16;
+                    cursor_pos = Some((cx, cy));
+                }
             }
 
-            let num_span = Span::styled(
-                format!("{:3} {line_sep} ", idx + 1),
-                sep_style,
-            );
+            let chunk_start = col_offset;
+            let chunk_end = col_offset + chunk.len();
+            col_offset += chunk.len();
 
-            let display_chars: Vec<char> = chars.into_iter().skip(app.scroll_left).collect();
-            let display_len = display_chars.len();
+            let prefix = if chunk_idx == 0 { num_span.clone() } else { blank_num_span.clone() };
 
-            // Determine selection column range for this specific line.
             let sel_range: Option<(usize, usize)> = sel.and_then(|((sl, sc), (el, ec))| {
                 if idx < sl || idx > el { return None; }
                 let start = if idx == sl { sc.min(len) } else { 0 };
                 let end   = if idx == el { ec.min(len) } else { len };
                 
-                let adj_start = start.saturating_sub(app.scroll_left).min(display_len);
-                let adj_end = end.saturating_sub(app.scroll_left).min(display_len);
+                if start >= chunk_end || end <= chunk_start { return None; }
+                
+                let adj_start = start.saturating_sub(chunk_start).min(chunk.len());
+                let adj_end = end.saturating_sub(chunk_start).min(chunk.len());
                 
                 if adj_start == adj_end { None } else { Some((adj_start, adj_end)) }
             });
 
             match sel_range {
                 None => {
-                    Line::from(vec![num_span,
-                        Span::styled(display_chars.into_iter().collect::<String>(), Style::default().fg(colors.fg))])
+                    out_lines.push(Line::from(vec![prefix,
+                        Span::styled(chunk.iter().collect::<String>(), Style::default().fg(colors.fg))]));
                 }
-                Some((start, end)) if start == 0 && end == display_len => {
-                    Line::from(vec![num_span,
-                        Span::styled(display_chars.into_iter().collect::<String>(), Style::default().fg(sel_fg).bg(sel_bg))])
+                Some((start, end)) if start == 0 && end == chunk.len() => {
+                    out_lines.push(Line::from(vec![prefix,
+                        Span::styled(chunk.iter().collect::<String>(), Style::default().fg(sel_fg).bg(sel_bg))]));
                 }
                 Some((start, end)) => {
-                    let before:   String = display_chars[..start].iter().collect();
-                    let selected: String = display_chars[start..end].iter().collect();
-                    let after:    String = display_chars[end..].iter().collect();
-                    let mut spans = vec![num_span];
-                    if !before.is_empty() {
-                        spans.push(Span::styled(before, Style::default().fg(colors.fg)));
-                    }
+                    let before:   String = chunk[..start].iter().collect();
+                    let selected: String = chunk[start..end].iter().collect();
+                    let after:    String = chunk[end..].iter().collect();
+                    let mut spans = vec![prefix];
+                    if !before.is_empty() { spans.push(Span::styled(before, Style::default().fg(colors.fg))); }
                     spans.push(Span::styled(selected, Style::default().fg(sel_fg).bg(sel_bg)));
-                    if !after.is_empty() {
-                        spans.push(Span::styled(after, Style::default().fg(colors.fg)));
-                    }
-                    Line::from(spans)
+                    if !after.is_empty() { spans.push(Span::styled(after, Style::default().fg(colors.fg))); }
+                    out_lines.push(Line::from(spans));
                 }
             }
-        })
-        .collect();
+            visual_y += 1;
+        }
+    }
 
-    let inner_width = area.width.saturating_sub(8) as usize;
-    
     let base_title = if app.view_mode == ViewMode::PureText { " Pure Text Editor " } else { " Markdown Editor " };
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(colors.border))
         .title(ratatui::widgets::block::Title::from(base_title).alignment(ratatui::layout::Alignment::Center));
 
-    let p = Paragraph::new(Text::from(lines))
-        .block(block)
-        .style(Style::default().bg(colors.bg));
+    let p = Paragraph::new(Text::from(out_lines)).block(block).style(Style::default().bg(colors.bg));
     f.render_widget(p, area);
+    cursor_pos
 }
 
 fn render_dropdown_popup(f: &mut ratatui::Frame, app: &App, colors: &ThemeColors) {
@@ -2062,10 +2241,23 @@ fn render_dropdown_popup(f: &mut ratatui::Frame, app: &App, colors: &ThemeColors
     let list_items: Vec<ListItem> = items
         .iter()
         .enumerate()
-        .map(|(idx, (label, _))| {
+        .map(|(idx, (label, action))| {
+            let mut display_label = label.to_string();
+            match action {
+                MenuAction::WordWrap => {
+                    let check = if app.theme == Theme::VT100 {
+                        if app.word_wrap { "[x]" } else { "[ ]" }
+                    } else {
+                        if app.word_wrap { "☑" } else { "☐" }
+                    };
+                    display_label = format!("{} {}", check, label);
+                }
+                _ => {}
+            }
+
             if idx == app.menu_selected {
                 ListItem::new(Span::styled(
-                    format!("{prefix}{label}"),
+                    format!("{prefix}{display_label}"),
                     Style::default()
                         .bg(colors.accent)
                         .fg(colors.bg)
@@ -2073,7 +2265,7 @@ fn render_dropdown_popup(f: &mut ratatui::Frame, app: &App, colors: &ThemeColors
                 ))
             } else {
                 ListItem::new(Span::styled(
-                    format!("   {label}"),
+                    format!("   {display_label}"),
                     Style::default().fg(colors.fg),
                 ))
             }

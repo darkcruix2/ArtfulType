@@ -883,6 +883,19 @@ body {
   pointer-events: none;
 }
 
+#editor-area.no-word-wrap #markdown-input,
+#editor-area.no-word-wrap #writer-view,
+#editor-area.no-word-wrap #writer-view * {
+  white-space: pre !important;
+  word-wrap: normal !important;
+  word-break: normal !important;
+  overflow-wrap: normal !important;
+}
+#editor-area.no-word-wrap #markdown-input,
+#editor-area.no-word-wrap #writer-view {
+  overflow-x: auto !important;
+}
+
 .hidden { display: none !important; }
 
 /* ── Writer View Typography ────────────────────────────────────────────────── */
