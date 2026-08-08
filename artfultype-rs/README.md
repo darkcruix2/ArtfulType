@@ -5,7 +5,7 @@ A distraction-free Markdown writing app built natively for desktop and terminal 
 ## Features
 - **Writer mode** — live Markdown-to-rich-text preview
 - **Markdown mode** — plain raw-syntax editing
-- **☁ Nextcloud Cloud Integration** — link Nextcloud storage via WebDAV, browse remote folder structures, edit and auto-save directly to Nextcloud in both GUI (`artfultype-rs`) and TUI (`artfultype-cli`)
+- **☁ Nextcloud Cloud Integration** — link Nextcloud storage via WebDAV, browse remote folder structures, edit and auto-save directly to Nextcloud in both GUI (`artfultype-rs`) and TUI (`art`)
 - **Native File I/O** — Open/Save local plain Markdown files
 - **Dark mode glassmorphism & Dracula themes**
 

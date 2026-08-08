@@ -285,7 +285,7 @@ impl App {
         }
 
         if content.is_empty() {
-            content = "# Welcome to ArtfulType CLI\n\n\
+            content = "# Welcome to art TUI\n\n\
                        A distraction-free Markdown Writer & TUI Editor.\n\n\
                        ## Features\n\n\
                        - [x] **Writer mode** — live styled preview in terminal\n\
@@ -1204,7 +1204,7 @@ fn get_menu_items(menu: ActiveMenu) -> Vec<(&'static str, MenuAction)> {
             ("VT100 Pure ASCII", MenuAction::ThemeVT100),
         ],
         ActiveMenu::Help => vec![
-            ("About ArtfulType CLI", MenuAction::About),
+            ("About art", MenuAction::About),
             ("Maintainer: Roland Huber", MenuAction::About),
             ("Original Creator: Sean Malseed", MenuAction::About),
             ("Shift+Arrows: Select text", MenuAction::NoOp),
@@ -1259,8 +1259,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     while i < args.len() {
         let arg = &args[i];
         if arg == "-h" || arg == "--help" {
-            println!("ArtfulType Terminal / TUI v0.30.0");
-            println!("Usage: artfultype-cli [OPTIONS] [FILE]\n");
+            println!("art Terminal / TUI v0.30.0");
+            println!("Usage: art [OPTIONS] [FILE]\n");
             println!("  --mode writer|markdown|split");
             println!("  --theme dark-antigravity|retro-green|retro-amber|dracula|dos-edit|vt100");
             println!("  --vt100, --ascii   Force VT100/ASCII mode");
@@ -1268,7 +1268,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("  -v, --version      Version");
             return Ok(());
         } else if arg == "-v" || arg == "--version" {
-            println!("ArtfulType Terminal / TUI v0.30.0");
+            println!("art Terminal / TUI v0.30.0");
             return Ok(());
         } else if arg == "--vt100" || arg == "--ascii" {
             initial_theme = Some(Theme::VT100);
@@ -2024,7 +2024,7 @@ fn ui(f: &mut ratatui::Frame, app: &mut App) {
                 Style::default().fg(colors.fg)
             },
         ),
-        Span::styled("  | ArtfulType CLI v0.30.0", Style::default().fg(colors.muted)),
+        Span::styled("  | art v0.30.0", Style::default().fg(colors.muted)),
     ];
     f.render_widget(
         Paragraph::new(Line::from(menu_spans)).style(Style::default().bg(colors.border)),
@@ -2242,9 +2242,9 @@ fn render_popup(f: &mut ratatui::Frame, app: &App, colors: &ThemeColors) {
         }
         PopupState::About => {
             (
-                " About ArtfulType CLI ",
+                " About art ",
                 vec![
-                    "ArtfulType CLI v0.30.0".to_string(),
+                    "art v0.30.0".to_string(),
                     "Distraction-free Markdown TUI Editor".to_string(),
                     "".to_string(),
                     "Maintainer:       Roland Huber".to_string(),

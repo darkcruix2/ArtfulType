@@ -159,12 +159,12 @@ Modern companion binaries for macOS, Linux, and Windows are available in the `re
 
 ---
 
-## ArtfulType CLI — Terminal TUI (Linux)
+## art — Terminal TUI (Linux)
 
 A distraction-free Markdown editor that runs entirely in the terminal — no GUI required.  
 Supports **Writer**, **Markdown**, and **Split** view modes with live Markdown preview, multi-theme support, shift-selection, cut/copy/paste, bold/italic/code wrapping, and VT100/ASCII mode for legacy terminals.
 
-![ArtfulType CLI — Split view showing Markdown editor and Writer preview side by side](screenshots/artfultype-cli-split.png)
+![art TUI — Split view showing Markdown editor and Writer preview side by side](screenshots/artfultype-cli-split.png)
 
 ### CLI Features
 
@@ -191,20 +191,20 @@ Supports **Writer**, **Markdown**, and **Split** view modes with live Markdown p
 
 ### CLI Downloads (Linux AMD64, v0.30.0)
 
-- **Debian/Ubuntu `.deb`**: [releases/artfultype-cli_0.30.0-1_amd64.deb](releases/artfultype-cli_0.30.0-1_amd64.deb)
-- **RPM (Fedora/RHEL/openSUSE)**: [releases/artfultype-cli-0.30.0-1.x86_64.rpm](releases/artfultype-cli-0.30.0-1.x86_64.rpm)
-- **AppImage** (run anywhere): [releases/artfultype-cli_0.30.0_amd64.AppImage](releases/artfultype-cli_0.30.0_amd64.AppImage)
+- **Debian/Ubuntu `.deb`**: [releases/art_0.30.0-1_amd64.deb](releases/art_0.30.0-1_amd64.deb)
+- **RPM (Fedora/RHEL/openSUSE)**: [releases/art-0.30.0-1.x86_64.rpm](releases/art-0.30.0-1.x86_64.rpm)
+- **AppImage** (run anywhere): [releases/art_0.30.0_amd64.AppImage](releases/art_0.30.0_amd64.AppImage)
 
 ```bash
 # Install .deb
-sudo dpkg -i artfultype-cli_0.30.0-1_amd64.deb
+sudo dpkg -i art_0.30.0-1_amd64.deb
 
 # Install .rpm
-sudo rpm -i artfultype-cli-0.30.0-1.x86_64.rpm
+sudo rpm -i art-0.30.0-1.x86_64.rpm
 
 # Run AppImage (no install needed)
-chmod +x artfultype-cli_0.30.0_amd64.AppImage
-./artfultype-cli_0.30.0_amd64.AppImage myfile.md
+chmod +x art_0.30.0_amd64.AppImage
+./art_0.30.0_amd64.AppImage myfile.md
 ```
 
 ## License
