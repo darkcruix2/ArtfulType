@@ -285,6 +285,21 @@ impl App {
                 .to_string();
         }
 
+        let saved_settings = artfultype_rs_lib::nextcloud::load_cli_settings();
+        let default_mode = match saved_settings.view_mode.as_str() {
+            "markdown" => ViewMode::Markdown,
+            "split" => ViewMode::Split,
+            "pure-text" => ViewMode::PureText,
+            _ => ViewMode::Writer,
+        };
+        let default_theme = match saved_settings.theme.as_str() {
+            "dark-antigravity" => Theme::DarkAntigravity,
+            "retro-green" => Theme::RetroGreen,
+            "retro-amber" => Theme::RetroAmber,
+            "vt100" => Theme::VT100,
+            _ => Theme::Dracula,
+        };
+
         let nc_cfg = artfultype_rs_lib::nextcloud::load_config();
         App {
             file_path,
@@ -298,8 +313,8 @@ impl App {
             clipboard: String::new(),
             history: vec![content.clone()],
             history_index: 0,
-            view_mode: initial_mode.unwrap_or(ViewMode::Split),
-            theme: initial_theme.unwrap_or(Theme::DarkAntigravity),
+            view_mode: initial_mode.unwrap_or(default_mode),
+            theme: initial_theme.unwrap_or(default_theme),
             active_menu: ActiveMenu::None,
             menu_selected: 0,
             popup: PopupState::None,
@@ -308,11 +323,31 @@ impl App {
             should_quit: false,
             quit_after_save: false,
             snapshot_disabled: false,
-            word_wrap: false,
+            word_wrap: saved_settings.word_wrap,
             is_nextcloud_file: false,
             nextcloud_remote_path: None,
             nextcloud_config: nc_cfg,
         }
+    }
+
+    fn save_settings(&self) {
+        let s = artfultype_rs_lib::nextcloud::CliSettings {
+            theme: match self.theme {
+                Theme::DarkAntigravity => "dark-antigravity".to_string(),
+                Theme::RetroGreen => "retro-green".to_string(),
+                Theme::RetroAmber => "retro-amber".to_string(),
+                Theme::Dracula => "dracula".to_string(),
+                Theme::VT100 => "vt100".to_string(),
+            },
+            word_wrap: self.word_wrap,
+            view_mode: match self.view_mode {
+                ViewMode::Writer => "writer".to_string(),
+                ViewMode::Markdown => "markdown".to_string(),
+                ViewMode::Split => "split".to_string(),
+                ViewMode::PureText => "pure-text".to_string(),
+            },
+        };
+        let _ = artfultype_rs_lib::nextcloud::save_cli_settings(&s);
     }
 
     fn snapshot(&mut self) {
@@ -377,14 +412,48 @@ impl App {
         }
     }
 
+    fn line_vis_h(&self, line: &str, inner_width: usize) -> usize {
+        if !self.word_wrap || inner_width == 0 {
+            1
+        } else {
+            let chars: Vec<char> = line.chars().collect();
+            wrap_line_chars(&chars, inner_width).len().max(1)
+        }
+    }
+
     /// Keep scroll_top so that cursor_line is always visible inside inner_height rows.
-    fn clamp_scroll(&mut self, inner_height: usize) {
+    fn clamp_scroll(&mut self, inner_height: usize, inner_width: usize) {
         let h = inner_height.max(1);
+        let lines: Vec<String> = self.get_lines().into_iter().map(|s| s.to_string()).collect();
+        if lines.is_empty() {
+            self.scroll_top = 0;
+            return;
+        }
+
+        if self.cursor_line >= lines.len() {
+            self.cursor_line = lines.len().saturating_sub(1);
+        }
+
         if self.cursor_line < self.scroll_top {
             self.scroll_top = self.cursor_line;
-        } else if self.cursor_line >= self.scroll_top + h {
-            self.scroll_top = self.cursor_line + 1 - h;
         }
+
+        let mut vis_h = 0;
+        for i in self.scroll_top..=self.cursor_line {
+            vis_h += self.line_vis_h(&lines[i], inner_width);
+        }
+
+        while vis_h > h && self.scroll_top < self.cursor_line {
+            let sub = self.line_vis_h(&lines[self.scroll_top], inner_width);
+            vis_h = vis_h.saturating_sub(sub);
+            self.scroll_top += 1;
+        }
+
+        self.scroll_top = self.scroll_top.min(lines.len().saturating_sub(1));
+    }
+
+    fn clamp_scroll_h(&mut self, inner_height: usize) {
+        self.clamp_scroll(inner_height, 80);
     }
 
     /// Keep scroll_left so that cursor_col is always visible inside inner_width columns.
@@ -498,24 +567,24 @@ impl App {
 
     // ── Cursor movement (no-selection variants) ────────────────────────────
 
-    fn move_up(&mut self, inner_height: usize) {
+    fn move_up(&mut self, inner_height: usize, inner_width: usize) {
         if self.cursor_line > 0 {
             self.cursor_line -= 1;
         }
         self.ensure_cursor_valid();
-        self.clamp_scroll(inner_height);
+        self.clamp_scroll(inner_height, inner_width);
     }
 
-    fn move_down(&mut self, inner_height: usize) {
+    fn move_down(&mut self, inner_height: usize, inner_width: usize) {
         let lc = self.get_lines().len();
         if self.cursor_line + 1 < lc {
             self.cursor_line += 1;
         }
         self.ensure_cursor_valid();
-        self.clamp_scroll(inner_height);
+        self.clamp_scroll(inner_height, inner_width);
     }
 
-    fn move_left(&mut self, inner_height: usize) {
+    fn move_left(&mut self, inner_height: usize, inner_width: usize) {
         if self.cursor_col > 0 {
             self.cursor_col -= 1;
         } else if self.cursor_line > 0 {
@@ -524,10 +593,10 @@ impl App {
             self.cursor_col = lines[self.cursor_line].chars().count();
         }
         self.ensure_cursor_valid();
-        self.clamp_scroll(inner_height);
+        self.clamp_scroll(inner_height, inner_width);
     }
 
-    fn move_right(&mut self, inner_height: usize) {
+    fn move_right(&mut self, inner_height: usize, inner_width: usize) {
         let lines = self.get_lines();
         if self.cursor_line < lines.len() {
             let ll = lines[self.cursor_line].chars().count();
@@ -539,7 +608,7 @@ impl App {
             }
         }
         self.ensure_cursor_valid();
-        self.clamp_scroll(inner_height);
+        self.clamp_scroll(inner_height, inner_width);
     }
 
     fn move_home(&mut self) {
@@ -559,29 +628,29 @@ impl App {
         self.scroll_top = 0;
     }
 
-    fn move_to_file_end(&mut self, inner_height: usize) {
+    fn move_to_file_end(&mut self, inner_height: usize, inner_width: usize) {
         let lc = self.get_lines().len();
         if lc > 0 {
             self.cursor_line = lc - 1;
             let lines = self.get_lines();
             self.cursor_col = lines[self.cursor_line].chars().count();
         }
-        self.clamp_scroll(inner_height);
+        self.clamp_scroll(inner_height, inner_width);
     }
 
-    fn move_page_up(&mut self, inner_height: usize) {
+    fn move_page_up(&mut self, inner_height: usize, inner_width: usize) {
         let page = inner_height.max(1);
         self.cursor_line = self.cursor_line.saturating_sub(page);
         self.ensure_cursor_valid();
-        self.clamp_scroll(inner_height);
+        self.clamp_scroll(inner_height, inner_width);
     }
 
-    fn move_page_down(&mut self, inner_height: usize) {
+    fn move_page_down(&mut self, inner_height: usize, inner_width: usize) {
         let lc = self.get_lines().len();
         let page = inner_height.max(1);
         self.cursor_line = (self.cursor_line + page).min(lc.saturating_sub(1));
         self.ensure_cursor_valid();
-        self.clamp_scroll(inner_height);
+        self.clamp_scroll(inner_height, inner_width);
     }
 
     // ── Editing ───────────────────────────────────────────────────────────
@@ -615,23 +684,49 @@ impl App {
         if self.cursor_line >= lines.len() {
             self.cursor_line = lines.len().saturating_sub(1);
         }
-        let bi = lines[self.cursor_line]
+
+        let cur_line = lines[self.cursor_line].clone();
+        let (prefix, is_empty_bullet) = if cur_line == "- " || cur_line == "* " || cur_line == "> " {
+            ("", true)
+        } else if cur_line == "- [ ] " || cur_line == "- [x] " || cur_line == "- [X] " {
+            ("", true)
+        } else if cur_line.starts_with("- [ ] ") || cur_line.starts_with("- [x] ") || cur_line.starts_with("- [X] ") {
+            ("- [ ] ", false)
+        } else if cur_line.starts_with("- ") {
+            ("- ", false)
+        } else if cur_line.starts_with("* ") {
+            ("* ", false)
+        } else if cur_line.starts_with("> ") {
+            ("> ", false)
+        } else {
+            ("", false)
+        };
+
+        if is_empty_bullet {
+            lines[self.cursor_line].clear();
+            self.cursor_col = 0;
+            self.sync_content_from_lines(lines);
+            return;
+        }
+
+        let bi = cur_line
             .char_indices()
             .map(|(i, _)| i)
             .nth(self.cursor_col)
-            .unwrap_or(lines[self.cursor_line].len());
-        let tail = lines[self.cursor_line][bi..].to_string();
+            .unwrap_or(cur_line.len());
+        let tail = cur_line[bi..].to_string();
         lines[self.cursor_line].truncate(bi);
-        lines.insert(self.cursor_line + 1, tail);
+        let new_line = format!("{}{}", prefix, tail);
+        lines.insert(self.cursor_line + 1, new_line);
         self.cursor_line += 1;
-        self.cursor_col = 0;
+        self.cursor_col = prefix.chars().count();
         self.sync_content_from_lines(lines);
     }
 
     fn backspace(&mut self, inner_height: usize) {
         if self.selection_anchor.is_some() {
             self.delete_selection();
-            self.clamp_scroll(inner_height);
+            self.clamp_scroll_h(inner_height);
             return;
         }
         let mut lines: Vec<String> =
@@ -655,7 +750,7 @@ impl App {
             self.cursor_col = lines[self.cursor_line].chars().count();
             lines[self.cursor_line].push_str(&curr);
             self.sync_content_from_lines(lines);
-            self.clamp_scroll(inner_height);
+            self.clamp_scroll_h(inner_height);
         }
     }
 
@@ -701,7 +796,7 @@ impl App {
             self.clipboard = text.clone();
             copy_to_system_clipboard(&text);
             self.delete_selection();
-            self.clamp_scroll(inner_height);
+            self.clamp_scroll_h(inner_height);
             self.status_msg = "Cut".to_string();
         }
     }
@@ -835,10 +930,10 @@ impl App {
         if let Some((i, col)) = target {
             self.cursor_line = i;
             self.cursor_col = col;
-            self.clamp_scroll(inner_height);
+            self.clamp_scroll_h(inner_height);
             self.start_selection();
             self.cursor_col += query.chars().count();
-            self.clamp_scroll(inner_height);
+            self.clamp_scroll_h(inner_height);
             self.status_msg = format!("Found '{}'", query);
         } else {
             self.status_msg = format!("'{}' not found", query);
@@ -993,25 +1088,29 @@ impl App {
             MenuAction::ViewWriter => {
                 self.view_mode = ViewMode::Writer;
                 if self.active_menu == ActiveMenu::Manipulation { self.active_menu = ActiveMenu::Format; }
+                self.save_settings();
             }
             MenuAction::ViewMarkdown => {
                 self.view_mode = ViewMode::Markdown;
                 if self.active_menu == ActiveMenu::Manipulation { self.active_menu = ActiveMenu::Format; }
+                self.save_settings();
             }
             MenuAction::ViewSplit => {
                 self.view_mode = ViewMode::Split;
                 if self.active_menu == ActiveMenu::Manipulation { self.active_menu = ActiveMenu::Format; }
+                self.save_settings();
             }
             MenuAction::ViewPureText => {
                 self.view_mode = ViewMode::PureText;
                 if self.active_menu == ActiveMenu::Format { self.active_menu = ActiveMenu::Manipulation; }
+                self.save_settings();
             }
-            MenuAction::ThemeDarkAntigravity => self.theme = Theme::DarkAntigravity,
-            MenuAction::ThemeRetroGreen => self.theme = Theme::RetroGreen,
-            MenuAction::ThemeRetroAmber => self.theme = Theme::RetroAmber,
-            MenuAction::ThemeDracula => self.theme = Theme::Dracula,
-            MenuAction::ThemeVT100 => self.theme = Theme::VT100,
-            MenuAction::WordWrap => self.word_wrap = !self.word_wrap,
+            MenuAction::ThemeDarkAntigravity => { self.theme = Theme::DarkAntigravity; self.save_settings(); }
+            MenuAction::ThemeRetroGreen => { self.theme = Theme::RetroGreen; self.save_settings(); }
+            MenuAction::ThemeRetroAmber => { self.theme = Theme::RetroAmber; self.save_settings(); }
+            MenuAction::ThemeDracula => { self.theme = Theme::Dracula; self.save_settings(); }
+            MenuAction::ThemeVT100 => { self.theme = Theme::VT100; self.save_settings(); }
+            MenuAction::WordWrap => { self.word_wrap = !self.word_wrap; self.save_settings(); }
             MenuAction::Undo => self.undo(),
             MenuAction::Redo => self.redo(),
             MenuAction::Search => {
@@ -1027,7 +1126,7 @@ impl App {
             MenuAction::Unindent => self.unindent_selection(),
             MenuAction::NoOp => {}
         }
-        self.clamp_scroll(inner_height);
+        self.clamp_scroll_h(inner_height);
         // If a popup was opened, don't close active menu until popup is done,
         // or close it now? Let's close the dropdown.
         if self.popup == PopupState::None {
@@ -1668,7 +1767,7 @@ fn run_app<B: ratatui::backend::Backend>(
                         KeyCode::Char('t') | KeyCode::Char('T') => app.open_menu(ActiveMenu::Theme),
                         KeyCode::Char('h') | KeyCode::Char('H') => app.open_menu(ActiveMenu::Help),
                         KeyCode::Up => app.move_to_file_start(),
-                        KeyCode::Down => app.move_to_file_end(inner_h),
+                        KeyCode::Down => app.move_to_file_end(inner_h, inner_w),
                         _ => {}
                     }
                     continue;
@@ -1741,12 +1840,12 @@ fn run_app<B: ratatui::backend::Backend>(
                             KeyCode::Char('2') => app.insert_str_at_cursor("## "),
                             KeyCode::Char('3') => app.insert_str_at_cursor("### "),
                             KeyCode::Home | KeyCode::Up => app.move_to_file_start(),
-                            KeyCode::End | KeyCode::Down => app.move_to_file_end(inner_h),
-                            KeyCode::F(2) => app.view_mode = ViewMode::PureText,
+                            KeyCode::End | KeyCode::Down => app.move_to_file_end(inner_h, inner_w),
+                            KeyCode::F(2) => { app.view_mode = ViewMode::PureText; app.save_settings(); }
                             _ => {}
                         }
                     }
-                    app.clamp_scroll(inner_h);
+                    app.clamp_scroll(inner_h, inner_w);
                     app.clamp_scroll_x(inner_w);
                     continue;
                 }
@@ -1756,19 +1855,19 @@ fn run_app<B: ratatui::backend::Backend>(
                     match key.code {
                         KeyCode::Up => {
                             app.start_selection();
-                            app.move_up(inner_h);
+                            app.move_up(inner_h, inner_w);
                         }
                         KeyCode::Down => {
                             app.start_selection();
-                            app.move_down(inner_h);
+                            app.move_down(inner_h, inner_w);
                         }
                         KeyCode::Left => {
                             app.start_selection();
-                            app.move_left(inner_h);
+                            app.move_left(inner_h, inner_w);
                         }
                         KeyCode::Right => {
                             app.start_selection();
-                            app.move_right(inner_h);
+                            app.move_right(inner_h, inner_w);
                         }
                         KeyCode::Home => {
                             app.start_selection();
@@ -1780,11 +1879,11 @@ fn run_app<B: ratatui::backend::Backend>(
                         }
                         KeyCode::PageUp => {
                             app.start_selection();
-                            app.move_page_up(inner_h);
+                            app.move_page_up(inner_h, inner_w);
                         }
                         KeyCode::PageDown => {
                             app.start_selection();
-                            app.move_page_down(inner_h);
+                            app.move_page_down(inner_h, inner_w);
                         }
                         // Shift+Char: just insert the uppercase character normally
                         KeyCode::Char(c) => {
@@ -1793,25 +1892,25 @@ fn run_app<B: ratatui::backend::Backend>(
                         }
                         _ => {}
                     }
-                    app.clamp_scroll(inner_h);
+                    app.clamp_scroll(inner_h, inner_w);
                     app.clamp_scroll_x(inner_w);
                     continue;
                 }
 
                 // ── Regular (unmodified) keys ────────────────────────────
                 match key.code {
-                    KeyCode::F(2) => app.view_mode = ViewMode::Writer,
-                    KeyCode::F(3) => app.view_mode = ViewMode::Markdown,
-                    KeyCode::F(4) => app.view_mode = ViewMode::Split,
+                    KeyCode::F(2) => { app.view_mode = ViewMode::Writer; app.save_settings(); }
+                    KeyCode::F(3) => { app.view_mode = ViewMode::Markdown; app.save_settings(); }
+                    KeyCode::F(4) => { app.view_mode = ViewMode::Split; app.save_settings(); }
                     // Movement keys clear selection
-                    KeyCode::Up => { app.clear_selection(); app.move_up(inner_h); }
-                    KeyCode::Down => { app.clear_selection(); app.move_down(inner_h); }
-                    KeyCode::Left => { app.clear_selection(); app.move_left(inner_h); }
-                    KeyCode::Right => { app.clear_selection(); app.move_right(inner_h); }
+                    KeyCode::Up => { app.clear_selection(); app.move_up(inner_h, inner_w); }
+                    KeyCode::Down => { app.clear_selection(); app.move_down(inner_h, inner_w); }
+                    KeyCode::Left => { app.clear_selection(); app.move_left(inner_h, inner_w); }
+                    KeyCode::Right => { app.clear_selection(); app.move_right(inner_h, inner_w); }
                     KeyCode::Home => { app.clear_selection(); app.move_home(); }
                     KeyCode::End => { app.clear_selection(); app.move_end(); }
-                    KeyCode::PageUp => { app.clear_selection(); app.move_page_up(inner_h); }
-                    KeyCode::PageDown => { app.clear_selection(); app.move_page_down(inner_h); }
+                    KeyCode::PageUp => { app.clear_selection(); app.move_page_up(inner_h, inner_w); }
+                    KeyCode::PageDown => { app.clear_selection(); app.move_page_down(inner_h, inner_w); }
                     // Editing
                     KeyCode::Char(c) => app.insert_char(c),
                     KeyCode::Enter => app.insert_newline(),
@@ -1821,7 +1920,7 @@ fn run_app<B: ratatui::backend::Backend>(
                     _ => {}
                 }
                 // Sync scroll after every keypress
-                app.clamp_scroll(inner_h);
+                app.clamp_scroll(inner_h, inner_w);
                 app.clamp_scroll_x(inner_w);
             }
         }
@@ -1832,7 +1931,7 @@ fn run_app<B: ratatui::backend::Backend>(
     }
 }
 
-fn ui(f: &mut ratatui::Frame, app: &App) {
+fn ui(f: &mut ratatui::Frame, app: &mut App) {
     let colors = app.theme.colors();
     let size = f.area();
 
@@ -1844,6 +1943,17 @@ fn ui(f: &mut ratatui::Frame, app: &App) {
             Constraint::Length(1), // statusbar
         ])
         .split(size);
+
+    // ── Editor area ──
+    let editor_rect = chunks[1];
+    let inner_h = editor_rect.height.saturating_sub(2) as usize;
+    let inner_w = match app.view_mode {
+        ViewMode::Split => (editor_rect.width / 2).saturating_sub(8) as usize,
+        ViewMode::Writer => editor_rect.width.saturating_sub(2) as usize,
+        _ => editor_rect.width.saturating_sub(8) as usize,
+    };
+
+    app.clamp_scroll(inner_h, inner_w);
 
     // ── Menubar ──
     let menu_spans = vec![
@@ -1864,11 +1974,7 @@ fn ui(f: &mut ratatui::Frame, app: &App) {
             },
         ),
         Span::styled(
-            if app.view_mode == ViewMode::PureText {
-                " [Manipulation] "
-            } else {
-                " [Format] "
-            },
+            if app.view_mode == ViewMode::PureText { " [Manipulation] " } else { " [Format] " },
             if app.active_menu == ActiveMenu::Format || app.active_menu == ActiveMenu::Manipulation {
                 Style::default().bg(colors.accent).fg(colors.bg).add_modifier(Modifier::BOLD)
             } else {
@@ -1906,34 +2012,21 @@ fn ui(f: &mut ratatui::Frame, app: &App) {
         chunks[0],
     );
 
-    // ── Editor area ──
-    let editor_rect = chunks[1];
-    let inner_x = editor_rect.x + 1;
-    let inner_y = editor_rect.y + 1;
-    let inner_h = editor_rect.height.saturating_sub(2) as usize;
-    let cursor_row_in_view = app.cursor_line.saturating_sub(app.scroll_top);
-
-    match app.view_mode {
-        ViewMode::Markdown | ViewMode::PureText => {
-            if let Some((cx, cy)) = render_markdown_editor(f, editor_rect, app, &colors) {
-                if app.active_menu == ActiveMenu::None { f.set_cursor_position((cx, cy)); }
-            }
-        }
-        ViewMode::Writer => {
-            if let Some((cx, cy)) = render_writer_view(f, editor_rect, app, &colors) {
-                if app.active_menu == ActiveMenu::None { f.set_cursor_position((cx, cy)); }
-            }
-        }
+    let (target_rect, pos_opt) = match app.view_mode {
+        ViewMode::Markdown | ViewMode::PureText => (editor_rect, render_markdown_editor(f, editor_rect, app, &colors)),
+        ViewMode::Writer => (editor_rect, render_writer_view(f, editor_rect, app, &colors)),
         ViewMode::Split => {
             let split = Layout::default()
                 .direction(Direction::Horizontal)
                 .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
                 .split(editor_rect);
-            if let Some((cx, cy)) = render_markdown_editor(f, split[0], app, &colors) {
-                if app.active_menu == ActiveMenu::None { f.set_cursor_position((cx, cy)); }
-            }
             render_writer_view(f, split[1], app, &colors);
+            (split[0], render_markdown_editor(f, split[0], app, &colors))
         }
+    };
+
+    if let Some((cx, cy)) = pos_opt {
+        if app.active_menu == ActiveMenu::None { f.set_cursor_position((cx, cy)); }
     }
 
     // ── Statusbar ──

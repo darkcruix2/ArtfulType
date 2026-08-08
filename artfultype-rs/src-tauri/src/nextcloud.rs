@@ -76,6 +76,55 @@ pub fn unlink_config() -> Result<(), String> {
     Ok(())
 }
 
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct CliSettings {
+    pub theme: String,
+    pub word_wrap: bool,
+    pub view_mode: String,
+}
+
+impl Default for CliSettings {
+    fn default() -> Self {
+        CliSettings {
+            theme: "dracula".to_string(),
+            word_wrap: true,
+            view_mode: "writer".to_string(),
+        }
+    }
+}
+
+pub fn get_cli_settings_path() -> PathBuf {
+    get_config_dir().join("cli_settings.json")
+}
+
+pub fn load_cli_settings() -> CliSettings {
+    let path = get_cli_settings_path();
+    if path.exists() {
+        if let Ok(content) = fs::read_to_string(path) {
+            if let Ok(settings) = serde_json::from_str::<CliSettings>(&content) {
+                return settings;
+            }
+        }
+    }
+    CliSettings::default()
+}
+
+pub fn save_cli_settings(settings: &CliSettings) -> Result<(), String> {
+    let path = get_cli_settings_path();
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let content = serde_json::to_string_pretty(settings).map_err(|e| e.to_string())?;
+    fs::write(&path, content).map_err(|e| e.to_string())?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
+    }
+    Ok(())
+}
+
 pub fn build_webdav_base_url(config: &NextcloudConfig) -> String {
     let mut server = config.server_url.trim().to_string();
     if server.ends_with('/') {
