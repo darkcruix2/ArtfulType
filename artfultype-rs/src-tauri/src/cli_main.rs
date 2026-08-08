@@ -67,6 +67,7 @@ enum Theme {
     RetroGreen,
     RetroAmber,
     Dracula,
+    DosEdit,
     VT100,
 }
 
@@ -116,6 +117,17 @@ impl Theme {
                 quote: Color::Rgb(241, 250, 140),
                 sel_bg: Color::Rgb(68, 71, 90),
                 sel_fg: Color::Rgb(248, 248, 242),
+            },
+            Theme::DosEdit => ThemeColors {
+                bg: Color::Rgb(0, 0, 170),      // Classic DOS Edit Blue
+                fg: Color::Rgb(255, 255, 255),  // High-Contrast White Text
+                accent: Color::Rgb(85, 255, 255),// Light Cyan
+                muted: Color::Rgb(170, 170, 170),// Light Grey
+                border: Color::Rgb(0, 170, 170), // DOS Cyan for Menus/Statusbar
+                header: Color::Rgb(255, 255, 85),// Classic DOS Yellow
+                quote: Color::Rgb(85, 255, 85),  // Light Green
+                sel_bg: Color::Rgb(0, 170, 170), // DOS Cyan selection
+                sel_fg: Color::Rgb(0, 0, 0),     // Black selection text
             },
             Theme::VT100 => ThemeColors {
                 bg: Color::Rgb(0, 0, 0),    // True-color black; bypasses ANSI palette detection with TERM=vt100
@@ -209,6 +221,7 @@ enum MenuAction {
     ThemeRetroGreen,
     ThemeRetroAmber,
     ThemeDracula,
+    ThemeDosEdit,
     ThemeVT100,
     WordWrap,
     Undo,
@@ -296,6 +309,7 @@ impl App {
             "dark-antigravity" => Theme::DarkAntigravity,
             "retro-green" => Theme::RetroGreen,
             "retro-amber" => Theme::RetroAmber,
+            "dos-edit" | "dos" => Theme::DosEdit,
             "vt100" => Theme::VT100,
             _ => Theme::Dracula,
         };
@@ -337,6 +351,7 @@ impl App {
                 Theme::RetroGreen => "retro-green".to_string(),
                 Theme::RetroAmber => "retro-amber".to_string(),
                 Theme::Dracula => "dracula".to_string(),
+                Theme::DosEdit => "dos-edit".to_string(),
                 Theme::VT100 => "vt100".to_string(),
             },
             word_wrap: self.word_wrap,
@@ -1109,6 +1124,7 @@ impl App {
             MenuAction::ThemeRetroGreen => { self.theme = Theme::RetroGreen; self.save_settings(); }
             MenuAction::ThemeRetroAmber => { self.theme = Theme::RetroAmber; self.save_settings(); }
             MenuAction::ThemeDracula => { self.theme = Theme::Dracula; self.save_settings(); }
+            MenuAction::ThemeDosEdit => { self.theme = Theme::DosEdit; self.save_settings(); }
             MenuAction::ThemeVT100 => { self.theme = Theme::VT100; self.save_settings(); }
             MenuAction::WordWrap => { self.word_wrap = !self.word_wrap; self.save_settings(); }
             MenuAction::Undo => self.undo(),
@@ -1184,6 +1200,7 @@ fn get_menu_items(menu: ActiveMenu) -> Vec<(&'static str, MenuAction)> {
             ("Retro Green CRT", MenuAction::ThemeRetroGreen),
             ("Retro Amber CRT", MenuAction::ThemeRetroAmber),
             ("Dracula Standard", MenuAction::ThemeDracula),
+            ("DOS Edit (Classic Blue)", MenuAction::ThemeDosEdit),
             ("VT100 Pure ASCII", MenuAction::ThemeVT100),
         ],
         ActiveMenu::Help => vec![
@@ -1245,7 +1262,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("ArtfulType Terminal / TUI v0.30.0");
             println!("Usage: artfultype-cli [OPTIONS] [FILE]\n");
             println!("  --mode writer|markdown|split");
-            println!("  --theme dark-antigravity|retro-green|retro-amber|dracula|vt100");
+            println!("  --theme dark-antigravity|retro-green|retro-amber|dracula|dos-edit|vt100");
             println!("  --vt100, --ascii   Force VT100/ASCII mode");
             println!("  -h, --help         Help");
             println!("  -v, --version      Version");
@@ -1275,6 +1292,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "retro-green" => initial_theme = Some(Theme::RetroGreen),
                 "retro-amber" => initial_theme = Some(Theme::RetroAmber),
                 "dracula" => initial_theme = Some(Theme::Dracula),
+                "dos-edit" | "dos" => initial_theme = Some(Theme::DosEdit),
                 "vt100" | "ascii" => initial_theme = Some(Theme::VT100),
                 _ => initial_theme = Some(Theme::DarkAntigravity),
             }
@@ -1284,6 +1302,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "retro-green" => initial_theme = Some(Theme::RetroGreen),
                 "retro-amber" => initial_theme = Some(Theme::RetroAmber),
                 "dracula" => initial_theme = Some(Theme::Dracula),
+                "dos-edit" | "dos" => initial_theme = Some(Theme::DosEdit),
                 "vt100" | "ascii" => initial_theme = Some(Theme::VT100),
                 _ => initial_theme = Some(Theme::DarkAntigravity),
             }
