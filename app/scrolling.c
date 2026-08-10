@@ -1,217 +1,376 @@
 #include "app.h"
 
-/*
-    The scrollbar's value is never tracked as an independent counter --
-    it's always derived fresh from TextEdit's own destRect vs. viewRect,
-    so it can't drift out of sync with where the text actually is. Every
-    scroll operation below scrolls by (current real offset - desired
-    offset) and then re-reads the real offset afterward, rather than
-    trusting an incrementally-adjusted running total.
-*/
-static short CurrentScrollOffset(TEHandle te)
+long TotalLength(void) {
+    if (gHideMarkdown) return gWriterLen;
+    return gMarkdownLen;
+}
+
+static short CurrentScrollOffset(WEHandle te)
 {
-    return (**te).viewRect.top - (**te).destRect.top;
+    LongRect viewRect, destRect;
+    WEGetViewRect(&viewRect, te);
+    WEGetDestRect(&destRect, te);
+    return (short)(viewRect.top - destRect.top);
+}
+
+static short LineContaining(WEHandle te, long pos)
+{
+    return (short) WEOffsetToLine(pos, te);
+}
+
+static long GetMaxScrollPixels(void)
+{
+    LongRect viewRect;
+    long viewHeight, totalHeight, maxScroll;
+    
+    if (!gActiveTE) return 0;
+    
+    WEGetViewRect(&viewRect, gActiveTE);
+    viewHeight = viewRect.bottom - viewRect.top;
+    totalHeight = WEGetHeight(0, WEGetLineCount(gActiveTE), gActiveTE);
+    
+    maxScroll = totalHeight + (viewHeight / 2);
+    if (maxScroll < 0) maxScroll = 0;
+    return maxScroll;
+}
+
+static void SafeScroll(long dy)
+{
+    long maxScroll = GetMaxScrollPixels();
+    LongRect viewRect, destRect;
+    long currentPixelsScrolled, newPixelsScrolled;
+    
+    if (!gActiveTE || !(*gActiveTE)->te) return;
+    
+    WEGetViewRect(&viewRect, gActiveTE);
+    WEGetDestRect(&destRect, gActiveTE);
+    currentPixelsScrolled = viewRect.top - destRect.top;
+    
+    newPixelsScrolled = currentPixelsScrolled - dy;
+    if (newPixelsScrolled < 0) {
+        dy = currentPixelsScrolled;
+    } else if (newPixelsScrolled > maxScroll) {
+        dy = currentPixelsScrolled - maxScroll;
+    }
+    
+    if (dy != 0) {
+        WEPinScroll(0, dy, gActiveTE);
+    }
 }
 
 static void SyncScrollbarToOffset(void)
 {
-    short newValue = CurrentScrollOffset(gActiveTE);
+    long total = TotalLength();
+    short val = 0;
 
-    /* SetControlValue always redraws the control, even when the value is
-       unchanged -- called every tick, an unguarded call here would redraw
-       the scrollbar (and the flicker that comes with it) on every single
-       keystroke for no reason. */
-    if (newValue != GetControlValue(gScrollBar))
-        SetControlValue(gScrollBar, newValue);
+    if (total == 0) {
+        SetControlValue(gScrollBar, 0);
+        return;
+    }
+    
+    if (total <= WINDOW_SIZE) {
+        long maxScroll = GetMaxScrollPixels();
+        if (maxScroll > 0) {
+            LongRect viewRect, destRect;
+            WEGetViewRect(&viewRect, gActiveTE);
+            WEGetDestRect(&destRect, gActiveTE);
+            long currentPixelsScrolled = viewRect.top - destRect.top;
+            if (currentPixelsScrolled < 0) currentPixelsScrolled = 0;
+            if (currentPixelsScrolled > maxScroll) currentPixelsScrolled = maxScroll;
+            double calcVal = ((double)currentPixelsScrolled * 32767.0) / (double)maxScroll;
+            if (calcVal < 0.0) calcVal = 0.0;
+            if (calcVal > 32767.0) calcVal = 32767.0;
+            val = (short) calcVal;
+        }
+    } else {
+        /* For large documents, combine the window start offset with the
+           pixel scroll position within the current window.  The window
+           covers gWindowStart..gWindowEnd in the backing store; within
+           that window, the TE may be scrolled by some number of pixels.
+           Map the pixel offset to a fractional character offset so the
+           scrollbar moves smoothly during arrow/page scrolling. */
+        double effectiveOffset = (double)gWindowStart;
+        long maxScroll = GetMaxScrollPixels();
+        if (maxScroll > 0) {
+            LongRect viewRect, destRect;
+            long windowChars = gWindowEnd - gWindowStart;
+            WEGetViewRect(&viewRect, gActiveTE);
+            WEGetDestRect(&destRect, gActiveTE);
+            long currentPixelsScrolled = viewRect.top - destRect.top;
+            if (currentPixelsScrolled < 0) currentPixelsScrolled = 0;
+            if (currentPixelsScrolled > maxScroll) currentPixelsScrolled = maxScroll;
+            /* fraction of the window that has been scrolled past */
+            effectiveOffset += ((double)currentPixelsScrolled / (double)maxScroll) * (double)windowChars;
+        }
+        double calcVal = (effectiveOffset * 32767.0) / (double)total;
+        if (calcVal < 0.0) calcVal = 0.0;
+        if (calcVal > 32767.0) calcVal = 32767.0;
+        val = (short) calcVal;
+    }
+
+    if (val < 0) val = 0;
+    if (val > 32767) val = 32767;
+    if (val != GetControlValue(gScrollBar))
+        SetControlValue(gScrollBar, val);
 }
-
-/*
-    TEGetHeight(nLines, 0, te) and the two calls in ScrollCaretIntoView
-    below are cumulative-from-line-0 height sums -- the form that's
-    proven reliable (see the comment in ScrollCaretIntoView), but O(n)
-    in the document's current line count. Calling that on every single
-    keystroke is fine on a fast emulator but visibly slows typing down
-    on real 68000 hardware as a document grows. These two small caches
-    skip the recompute whenever nothing that affects the answer has
-    changed since the last call -- the underlying TEGetHeight calls and
-    their cumulative-from-0 form are otherwise untouched.
-
-    Invalidated via InvalidateHeightCache(): unconditionally from
-    AdjustScrollbar (the full/infrequent path covering style changes,
-    zoom, mode switches, undo/redo, save/load -- anything that can
-    change a line's height without necessarily changing nLines), and
-    from DetectInlineMarkdown's live-typing conversions (markdown.c),
-    since those happen within the fast per-keystroke path and can also
-    change a line's height (heading conversion) without changing
-    nLines.
-*/
-static short gCachedTotalHeightNLines = -1;
-static long gCachedTotalHeight = 0;
-
-static short gCachedCaretLine = -1;
-static long gCachedHeightToLine = 0;
-static long gCachedHeightToLineNext = 0;
 
 void InvalidateHeightCache(void)
 {
-    gCachedTotalHeightNLines = -1;
-    gCachedCaretLine = -1;
+    /* Called after DetectInlineMarkdown applies styles to gActiveTE.
+       Reflow and repaint immediately so bold/italic/header changes
+       appear without requiring a scroll. */
+    if (!gActiveTE || !gWindow) return;
+    LongRect viewRectLong;
+    Rect viewRect;
+    WEGetViewRect(&viewRectLong, gActiveTE);
+    viewRect.left   = (short)viewRectLong.left;
+    viewRect.top    = (short)viewRectLong.top;
+    viewRect.right  = (short)viewRectLong.right;
+    viewRect.bottom = (short)viewRectLong.bottom;
+    WECalText(gActiveTE);
+    EraseRect(&viewRect);
+    WEUpdate(&viewRect, gActiveTE);
 }
 
-/*
-    Updates the scrollbar's range/visibility only -- no clamping of the
-    current position. Used on the typing path, where ScrollCaretIntoView
-    already owns getting the position right; re-deriving maxVal from
-    TEGetHeight for a line that's actively growing as you type is exactly
-    the kind of thing that could disagree with ScrollCaretIntoView's own
-    (separately computed) target by a pixel or two, and clamping on that
-    discrepancy every keystroke is what was causing a brief upward jump.
-*/
 void UpdateScrollbarRange(void)
 {
-    long textHeight;
-    short viewHeight;
+    long total = TotalLength();
     short maxVal;
-    Boolean shouldShow;
-
-    if ((**gActiveTE).nLines == gCachedTotalHeightNLines) {
-        textHeight = gCachedTotalHeight;
+    
+    if (total <= WINDOW_SIZE) {
+        long maxScroll = GetMaxScrollPixels();
+        maxVal = (maxScroll > 0) ? 32767 : 0;
     } else {
-        textHeight = TEGetHeight((**gActiveTE).nLines, 0, gActiveTE);
-        gCachedTotalHeightNLines = (**gActiveTE).nLines;
-        gCachedTotalHeight = textHeight;
+        maxVal = (total > 0) ? 32767 : 0;
     }
-    viewHeight = (**gActiveTE).viewRect.bottom - (**gActiveTE).viewRect.top;
-
-    maxVal = (textHeight > viewHeight) ? (short) (textHeight - viewHeight) : 0;
 
     if (maxVal != GetControlMaximum(gScrollBar))
         SetControlMaximum(gScrollBar, maxVal);
-
-    shouldShow = (maxVal > 0);
-    if (shouldShow != gScrollBarVisible) {
-        if (shouldShow)
-            ShowControl(gScrollBar);
-        else
-            HideControl(gScrollBar);
-        gScrollBarVisible = shouldShow;
+    
+    if (maxVal > 0 && !gScrollBarVisible) {
+        ShowControl(gScrollBar);
+        gScrollBarVisible = true;
     }
 }
 
-/*
-    Full version: also clamps the current scroll position if it now
-    exceeds the (possibly shrunk) range. Needed after anything that can
-    reduce content height -- Style commands, zoom, load/new, mode switch
-    -- but not after plain typing, which only ever grows it.
-*/
 void AdjustScrollbar(void)
 {
-    short maxVal;
-    short curOffset;
-
-    InvalidateHeightCache();
+    static Boolean lastUpdate = false;
+    
+    // Only update scrollbar range if needed
     UpdateScrollbarRange();
-
-    maxVal = GetControlMaximum(gScrollBar);
-    curOffset = CurrentScrollOffset(gActiveTE);
-    if (curOffset > maxVal)
-        TEScroll(0, curOffset - maxVal, gActiveTE);
-    else if (curOffset < 0)
-        TEScroll(0, curOffset, gActiveTE);
-
-    SyncScrollbarToOffset();
-}
-
-/* lineStarts[] is sorted, so the line containing pos is found with a
-   binary search instead of a linear scan -- same result, no behavior
-   change, just faster for documents with many lines. */
-static short LineContaining(TEHandle te, short pos)
-{
-    short low = 0;
-    short high = (**te).nLines - 1;
-
-    while (low < high) {
-        short mid = low + (high - low + 1) / 2;
-
-        if ((**te).lineStarts[mid] <= pos)
-            low = mid;
-        else
-            high = mid - 1;
+    
+    // Only sync offset if it's not already being driven by the scrollbar
+    if (!gScrollbarDriven) {
+        SyncScrollbarToOffset();
     }
-    return low;
 }
 
-void ScrollCaretIntoView(void)
+
+void ScrollCaretIntoView(Boolean movingBackward)
 {
     short caretLine;
     long heightToLine, heightToLineNext;
     short lineTop, lineBottom;
     short viewTop, viewBottom;
+    long selStart, selEnd;
 
-    caretLine = LineContaining(gActiveTE, (**gActiveTE).selEnd);
+    if (!gActiveTE) return;
 
-    /* Querying a single line's height in isolation (e.g. TEGetHeight
-       for just [caretLine, caretLine+1)) comes back unreliable right
-       after Enter creates a new, still-empty line -- it hasn't
-       "settled" with any content yet. (**te).lineHeight turned out
-       to have the same problem, returning a stale/wrong value rather
-       than tracking the actual current font size. Avoid isolated
-       single-line queries entirely: always sum cumulatively from the
-       very start of the document, the same pattern already proven
-       reliable in UpdateScrollbarRange's TEGetHeight(nLines, 0, ...).
-       Cached below (see InvalidateHeightCache) since this is otherwise
-       an O(n) call on every keystroke -- the raw heights are cached
-       rather than the final lineTop/lineBottom, since those also
-       depend on destRect.top, which changes on scroll. */
-    if (caretLine == gCachedCaretLine) {
-        heightToLine = gCachedHeightToLine;
-        heightToLineNext = gCachedHeightToLineNext;
-    } else {
-        heightToLine = TEGetHeight(caretLine, 0, gActiveTE);
-        heightToLineNext = TEGetHeight(caretLine + 1, 0, gActiveTE);
-        gCachedCaretLine = caretLine;
-        gCachedHeightToLine = heightToLine;
-        gCachedHeightToLineNext = heightToLineNext;
+    WEGetSelection(&selStart, &selEnd, gActiveTE);
+    caretLine = LineContaining(gActiveTE, selEnd);
+
+    heightToLine     = WEGetHeight(0, caretLine, gActiveTE);
+    heightToLineNext = WEGetHeight(0, caretLine + 1, gActiveTE);
+
+    short fontHeight = CurrentFontSize() + 4;
+    if (fontHeight < 16) fontHeight = 16;
+
+    if (heightToLineNext <= heightToLine) {
+        heightToLineNext = heightToLine + fontHeight;
     }
-    lineTop = (**gActiveTE).destRect.top + heightToLine;
-    lineBottom = (**gActiveTE).destRect.top + heightToLineNext;
+    
+    LongRect viewRect, destRect;
+    WEGetViewRect(&viewRect, gActiveTE);
+    WEGetDestRect(&destRect, gActiveTE);
 
-    viewTop = (**gActiveTE).viewRect.top;
-    viewBottom = (**gActiveTE).viewRect.bottom;
+    lineTop    = destRect.top + (short)heightToLine;
+    lineBottom = destRect.top + (short)heightToLineNext;
 
-    if (lineBottom > viewBottom)
-        TEScroll(0, viewBottom - lineBottom, gActiveTE);
-    else if (lineTop < viewTop)
-        TEScroll(0, viewTop - lineTop, gActiveTE);
+    viewTop    = viewRect.top;
+    viewBottom = viewRect.bottom;
+
+    /* --- Step 1: bring caret into visible view rectangle --- */
+    if (lineBottom > viewBottom) {
+        SafeScroll(viewBottom - lineBottom);
+    } else if (lineTop < viewTop) {
+        SafeScroll(viewTop - lineTop);
+    }
+
+    /* --- Step 2: window shift (only when caret is still off-screen) --- */
+    if (!gScrollbarDriven) {
+        /* re-compute lineTop after the possible WEPinScroll above */
+        LongRect destRect2;
+        WEGetDestRect(&destRect2, gActiveTE);
+        lineTop = destRect2.top + (short)WEGetHeight(0, caretLine, gActiveTE);
+
+        if (selEnd > WINDOW_SIZE - 200 && gWindowEnd < TotalLength()) {
+            /* Caret is near the end of the loaded window. */
+            long globalCaretPos = gWindowStart + selEnd;
+            long newStart = globalCaretPos - WINDOW_SIZE / 8;
+            if (newStart < 0) newStart = 0;
+            SyncWindowToBacking();
+            LoadTextWindow(newStart);
+            /* Reposition caret to the same global document position */
+            {
+                long localCaret = globalCaretPos - gWindowStart;
+                long len = WEGetTextLength(gActiveTE);
+                if (localCaret < 0) localCaret = 0;
+                if (localCaret > len) localCaret = len;
+                WESetSelect(localCaret, localCaret, gActiveTE);
+            }
+        } else if (movingBackward && selEnd < 200 && gWindowStart > 0) {
+            /* Caret is near the top of the loaded window and user is navigating backward: */
+            long globalCaretPos = gWindowStart + selEnd;
+            long newStart = globalCaretPos - (3 * WINDOW_SIZE / 4);
+            if (newStart < 0) newStart = 0;
+            SyncWindowToBacking();
+            LoadTextWindow(newStart);
+            /* Reposition caret to the same global document position */
+            {
+                long localCaret = globalCaretPos - gWindowStart;
+                long len = WEGetTextLength(gActiveTE);
+                if (localCaret < 0) localCaret = 0;
+                if (localCaret > len) localCaret = len;
+                WESetSelect(localCaret, localCaret, gActiveTE);
+            }
+        }
+    }
 
     SyncScrollbarToOffset();
 }
 
+static void ApplyScrollbarValue(short cur)
+{
+    long total = TotalLength();
+    if (total <= 0 || !gActiveTE) return;
+
+    if (total <= WINDOW_SIZE) {
+        long maxScroll = GetMaxScrollPixels();
+        if (maxScroll > 0) {
+            long targetPixels = (long) (((double)cur * (double)maxScroll) / 32767.0);
+            long currentPixels = CurrentScrollOffset(gActiveTE);
+            long dy = currentPixels - targetPixels;
+            if (dy != 0) {
+                WEPinScroll(0, dy, gActiveTE);
+            }
+        }
+    } else {
+        double desiredEffective = ((double)cur * (double)total) / 32767.0;
+        long windowLen = gWindowEnd - gWindowStart;
+        long maxStart = total - WINDOW_SIZE;
+        if (maxStart < 0) maxStart = 0;
+        
+        Boolean insideWindow = false;
+        if (desiredEffective >= (double)gWindowStart && windowLen > 0) {
+            if (desiredEffective <= (double)gWindowEnd) {
+                insideWindow = true;
+            } else if (gWindowStart >= maxStart || gWindowEnd >= total) {
+                insideWindow = true;
+            }
+        }
+        
+        /* Check if desired position is inside current loaded window */
+        if (insideWindow) {
+            double fraction = (desiredEffective - (double)gWindowStart) / (double)windowLen;
+            if (fraction < 0.0) fraction = 0.0;
+            if (fraction > 1.0) fraction = 1.0;
+            
+            long maxScroll = GetMaxScrollPixels();
+            long targetPixels = (long) (fraction * (double)maxScroll);
+            long currentPixels = CurrentScrollOffset(gActiveTE);
+            long dy = currentPixels - targetPixels;
+            if (dy != 0) {
+                WEPinScroll(0, dy, gActiveTE);
+            }
+        } else {
+            /* Desired position is outside current window: calculate new window start */
+            long newStart = (long) desiredEffective - (WINDOW_SIZE / 2);
+            if (newStart < 0) newStart = 0;
+            if (newStart > maxStart) newStart = maxStart;
+            
+            gScrollbarDriven = true;
+            SyncWindowToBacking();
+            LoadTextWindow(newStart);
+            
+            windowLen = gWindowEnd - gWindowStart;
+            if (windowLen > 0) {
+                double fraction = (desiredEffective - (double)gWindowStart) / (double)windowLen;
+                if (fraction < 0.0) fraction = 0.0;
+                if (fraction > 1.0) fraction = 1.0;
+                
+                long maxScroll = GetMaxScrollPixels();
+                long targetPixels = (long) (fraction * (double)maxScroll);
+                if (targetPixels > 0) {
+                    WEPinScroll(0, -targetPixels, gActiveTE);
+                }
+            }
+        }
+    }
+}
+
 static pascal void ScrollAction(ControlHandle control, short part)
 {
-    short max, delta, desired;
-    short pageSize;
+    short max = GetControlMaximum(control);
+    short cur = GetControlValue(control);
+    long total = TotalLength();
+    long delta = 0;
 
-    if (part == 0)
-        return;
+    if (part == 0 || total <= 0) return;
 
-    max = GetControlMaximum(control);
-    pageSize = (**gActiveTE).viewRect.bottom - (**gActiveTE).viewRect.top;
+    if (total <= WINDOW_SIZE) {
+        LongRect viewRect;
+        long viewHeight;
+        WEGetViewRect(&viewRect, gActiveTE);
+        viewHeight = viewRect.bottom - viewRect.top;
+        
+        switch (part) {
+            case inUpButton:   delta = -20; break;
+            case inDownButton: delta = 20; break;
+            case inPageUp:     delta = -(viewHeight - 20); break;
+            case inPageDown:   delta = viewHeight - 20; break;
+            default:           delta = 0; break;
+        }
+        
+        if (delta != 0) {
+            SafeScroll(-delta);
+            SyncScrollbarToOffset();
+        }
+    } else {
+        /* Scale delta dynamically */
+        long lineDelta = (long) ((80.0 * 32767.0) / (double)total);
+        if (lineDelta < 1) lineDelta = 1;
+        long pageDelta = (long) ((1600.0 * 32767.0) / (double)total);
+        if (pageDelta < 5) pageDelta = 5;
 
-    switch (part) {
-        case inUpButton:   delta = -16; break;
-        case inDownButton: delta = 16; break;
-        case inPageUp:     delta = -pageSize; break;
-        case inPageDown:   delta = pageSize; break;
-        default:           delta = 0; break;
+        switch (part) {
+            case inUpButton:   delta = -lineDelta; break;
+            case inDownButton: delta = lineDelta; break;
+            case inPageUp:     delta = -pageDelta; break;
+            case inPageDown:   delta = pageDelta; break;
+            default:           delta = 0; break;
+        }
+
+        long newCur = (long)cur + delta;
+        if (newCur < 0) newCur = 0;
+        if (newCur > (long)max) newCur = (long)max;
+        cur = (short)newCur;
+        
+        SetControlValue(control, cur);
+        
+        gScrollbarDriven = true;
+        ApplyScrollbarValue(cur);
     }
-
-    desired = CurrentScrollOffset(gActiveTE) + delta;
-    if (desired < 0) desired = 0;
-    if (desired > max) desired = max;
-
-    TEScroll(0, CurrentScrollOffset(gActiveTE) - desired, gActiveTE);
-    SetControlValue(control, CurrentScrollOffset(gActiveTE));
 }
 
 void DoScrollClick(Point pt)
@@ -227,9 +386,89 @@ void DoScrollClick(Point pt)
     if (part == inThumb) {
         TrackControl(gScrollBar, pt, NULL);
         desired = GetControlValue(gScrollBar);
-        TEScroll(0, CurrentScrollOffset(gActiveTE) - desired, gActiveTE);
-        SyncScrollbarToOffset();
+        gScrollbarDriven = true;
+        ApplyScrollbarValue(desired);
     } else {
         TrackControl(gScrollBar, pt, NewControlActionUPP(ScrollAction));
+    }
+}
+
+void HandleJumpToTop(void)
+{
+    SyncWindowToBacking();
+    LoadTextWindow(0);
+    WESetSelect(0, 0, gActiveTE);
+    ScrollCaretIntoView(true);
+    UpdateScrollbarRange();
+}
+
+void HandleJumpToEnd(void)
+{
+    long total = TotalLength();
+    long newStart = total - (WINDOW_SIZE / 2);
+    if (newStart < 0) newStart = 0;
+    
+    SyncWindowToBacking();
+    LoadTextWindow(newStart);
+    
+    {
+        long len = WEGetTextLength(gActiveTE);
+        WESetSelect(len, len, gActiveTE);
+    }
+    
+    ScrollCaretIntoView(false);
+    UpdateScrollbarRange();
+}
+
+void HandlePageUp(void)
+{
+    if (!gActiveTE) return;
+    
+    LongRect viewRect;
+    WEGetViewRect(&viewRect, gActiveTE);
+    long viewHeight = viewRect.bottom - viewRect.top;
+    long pageScroll = viewHeight - 20;
+    if (pageScroll < 20) pageScroll = 20;
+    
+    long total = TotalLength();
+    if (total <= WINDOW_SIZE) {
+        SafeScroll(pageScroll);
+        SyncScrollbarToOffset();
+    } else {
+        short cur = GetControlValue(gScrollBar);
+        long pageDelta = (long) ((1600.0 * 32767.0) / (double)total);
+        if (pageDelta < 5) pageDelta = 5;
+        cur -= pageDelta;
+        if (cur < 0) cur = 0;
+        SetControlValue(gScrollBar, cur);
+        gScrollbarDriven = true;
+        ApplyScrollbarValue(cur);
+    }
+}
+
+void HandlePageDown(void)
+{
+    if (!gActiveTE) return;
+    
+    LongRect viewRect;
+    WEGetViewRect(&viewRect, gActiveTE);
+    long viewHeight = viewRect.bottom - viewRect.top;
+    long pageScroll = viewHeight - 20;
+    if (pageScroll < 20) pageScroll = 20;
+    
+    long total = TotalLength();
+    if (total <= WINDOW_SIZE) {
+        SafeScroll(-pageScroll);
+        SyncScrollbarToOffset();
+    } else {
+        short cur = GetControlValue(gScrollBar);
+        short max = GetControlMaximum(gScrollBar);
+        long pageDelta = (long) ((1600.0 * 32767.0) / (double)total);
+        if (pageDelta < 5) pageDelta = 5;
+        cur += pageDelta;
+        if (cur > max) cur = max;
+        SetControlValue(gScrollBar, cur);
+        gScrollbarDriven = true;
+        ApplyScrollbarValue(cur);
     }
 }

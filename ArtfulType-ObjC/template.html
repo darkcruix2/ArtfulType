@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <link rel="stylesheet" href="style.css">
+    <script src="marked.min.js"></script>
+    <script>
+        function updateMarkdown(rawMarkdown) {
+            document.getElementById('content').innerHTML = marked(rawMarkdown);
+        }
+        
+        function getHtmlAsMarkdown() {
+            return encodeURIComponent(htmlToMarkdown(document.getElementById('content')));
+        }
+        
+        function prepareMarkdownLines() {
+            var md = htmlToMarkdown(document.body);
+            window._mdLines = md.split('\n');
+            return String(window._mdLines.length);
+        }
+        function getMarkdownLine(i) {
+            if (!window._mdLines || i >= window._mdLines.length) return "";
+            return window._mdLines[i];
+        }
+        
+        function getTextContent(node) {
+            if (node.nodeType === 3) return node.nodeValue || "";
+            var t = "";
+            for (var ci = 0; ci < node.childNodes.length; ci++) {
+                t += getTextContent(node.childNodes[ci]);
+            }
+            return t;
+        }
+        
+        function nodeToMd(node) {
+          if (node.nodeType === 3) return (node.nodeValue || "").replace(/\u200B/g, "");
+          if (node.nodeType !== 1) return "";
+          var tag = node.tagName.toLowerCase();
+          var children = function() {
+              var arr = [];
+              for (var i = 0; i < node.childNodes.length; i++) {
+                  arr.push(nodeToMd(node.childNodes[i]));
+              }
+              return arr.join("");
+          };
+          
+          switch (tag) {
+            case "h1": return "# " + children().replace(/^\s+|\s+$/g, '') + "\n\n";
+            case "h2": return "## " + children().replace(/^\s+|\s+$/g, '') + "\n\n";
+            case "h3": return "### " + children().replace(/^\s+|\s+$/g, '') + "\n\n";
+            case "h4": return "#### " + children().replace(/^\s+|\s+$/g, '') + "\n\n";
+            case "h5": return "##### " + children().replace(/^\s+|\s+$/g, '') + "\n\n";
+            case "h6": return "###### " + children().replace(/^\s+|\s+$/g, '') + "\n\n";
+            case "p":  return children() + "\n\n";
+            case "br": return "\n";
+            case "strong": case "b": return "**" + children() + "**";
+            case "em": case "i": return "*" + children() + "*";
+            case "del": case "s": return "~~" + children() + "~~";
+            case "code": {
+              if (node.parentNode && node.parentNode.tagName && node.parentNode.tagName.toLowerCase() === "pre") return getTextContent(node);
+              return "`" + getTextContent(node) + "`";
+            }
+            case "pre": {
+              var codeEls = node.getElementsByTagName("code");
+              var codeEl = (codeEls.length > 0) ? codeEls[0] : null;
+              var lang = codeEl ? codeEl.className.replace(/language-/, "").replace(/^\s+|\s+$/g, '') : "";
+              return "```" + lang + "\n" + getTextContent(codeEl || node) + "\n```\n\n";
+            }
+            case "a": return "[" + children() + "](" + (node.getAttribute("href") || "") + ")";
+            case "img": {
+              var src = node.getAttribute("data-originalsrc") || node.getAttribute("src") || "";
+              return "![" + (node.getAttribute("alt") || "") + "](" + src + ")";
+            }
+            case "ul": {
+              var items = [];
+              for (var i=0; i < node.childNodes.length; i++) { 
+                  if (node.childNodes[i].nodeType === 1) {
+                      items.push("- " + liToMd(node.childNodes[i])); 
+                  }
+              }
+              return items.join("\n") + "\n\n";
+            }
+            case "ol": {
+              var items = [];
+              var idx = 1;
+              for (var i=0; i < node.childNodes.length; i++) { 
+                  if (node.childNodes[i].nodeType === 1) {
+                      items.push(idx + ". " + liToMd(node.childNodes[i])); 
+                      idx++;
+                  }
+              }
+              return items.join("\n") + "\n\n";
+            }
+            case "li": return liToMd(node);
+            case "blockquote": {
+              var inner = children().replace(/^\s+|\s+$/g, '').split("\n");
+              for(var i=0; i<inner.length; i++) { inner[i] = "> " + inner[i]; }
+              return inner.join("\n") + "\n\n";
+            }
+            case "hr": return "---\n\n";
+            case "table": {
+              var rows = node.getElementsByTagName("tr");
+              if (!rows || rows.length === 0) return children();
+              
+              var headers = [];
+              var firstRowCells = [];
+              for(var c=0; c<rows[0].childNodes.length; c++) {
+                  if (rows[0].childNodes[c].nodeType === 1) {
+                      firstRowCells.push(rows[0].childNodes[c]);
+                  }
+              }
+              for(var i=0; i<firstRowCells.length; i++) { headers.push(firstRowCells[i].textContent.replace(/^\s+|\s+$/g, '')); }
+              
+              var dashes = [];
+              for(var i=0; i<headers.length; i++) { dashes.push("---"); }
+              
+              var bodyRows = [];
+              for(var r=1; r<rows.length; r++) {
+                  var cellTexts = [];
+                  for(var c=0; c<rows[r].childNodes.length; c++) {
+                      if (rows[r].childNodes[c].nodeType === 1) {
+                          cellTexts.push(rows[r].childNodes[c].textContent.replace(/^\s+|\s+$/g, ''));
+                      }
+                  }
+                  bodyRows.push(cellTexts.join(" | "));
+              }
+              
+              return headers.join(" | ") + "\n" + dashes.join(" | ") + "\n" + bodyRows.join("\n") + "\n\n";
+            }
+            case "input": return "";
+            case "div": case "section": case "article": {
+              var inner = children();
+              var len = inner.length;
+              return (len > 0 && inner.charAt(len-1) === '\n') ? inner : inner + "\n";
+            }
+            case "span": return children();
+            case "script": case "style": return "";
+            default: return children();
+          }
+        }
+        function liToMd(li) {
+          var text = "";
+          for (var i = 0; i < li.childNodes.length; i++) {
+            var child = li.childNodes[i];
+            if (child.nodeType === 3) {
+              text += child.textContent.replace(/\u200B/g, "");
+            } else if (child.nodeType === 1) {
+              var t = child.tagName.toLowerCase();
+              if (t === "input") continue;
+              if (t === "ul" || t === "ol") {
+                var nested = nodeToMd(child).replace(/\s+$/, "");
+                var lines = nested.split("\n");
+                for(var j=0; j<lines.length; j++) { lines[j] = "  " + lines[j]; }
+                text += "\n" + lines.join("\n");
+              } else {
+                text += nodeToMd(child);
+              }
+            }
+          }
+          return text.replace(/^\s+|\s+$/g, '');
+        }
+        function htmlToMarkdown(el) {
+            var arr = [];
+            for (var i = 0; i < el.childNodes.length; i++) {
+                arr.push(nodeToMd(el.childNodes[i]));
+            }
+            return arr.join("").replace(/\n{3,}/g, "\n\n").replace(/^\s+|\s+$/g, '');
+        }
+        
+        document.addEventListener("DOMContentLoaded", function() {
+            var content = document.getElementById('content');
+            if (content) {
+                var notify = function() { window.location.href = "artfultype://textdidchange"; };
+                content.addEventListener('keyup', notify, false);
+                content.addEventListener('input', notify, false);
+            }
+        });
+    </script>
+</head>
+<body>
+    <div id="content" contenteditable="true" spellcheck="true" style="outline:none; caret-color:var(--purple); min-height: 100vh;"></div>
+</body>
+</html>

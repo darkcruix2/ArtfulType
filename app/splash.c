@@ -14,12 +14,10 @@
     word/long access. Confirmed live: this exact crash, at startup,
     on a real Mac Plus, on both disk images -- not a guess.
 */
-static const unsigned char kSplashImageBits[kSplashImageHeight * kSplashImageRowBytes] __attribute__((aligned(4))) = {
 #include "splash_image.h"
-};
 
 /* Bump this on every release. */
-static const unsigned char kVersionString[] = "\pv0.1.2-alpha";
+static const unsigned char kVersionString[] = "\pv0.25";
 static const unsigned char kGitHubURL[] = "\pgithub.com/ActionRetro";
 
 static pascal void DrawSplashTitle(DialogPtr dlg, short itemNo)
@@ -38,10 +36,11 @@ static pascal void DrawSplashTitle(DialogPtr dlg, short itemNo)
     TextFont(0);
     TextSize(0);
     TextFace(bold);
-    BlockMove("\pThe Artful Type", s, 16);
+    BlockMove("\pArtfulType Pro", s, 15);
     textWidth = StringWidth(s);
     MoveTo(box.left + (box.right - box.left - textWidth) / 2, box.top + 18);
     DrawString(s);
+
 
     image.baseAddr = (Ptr)kSplashImageBits;
     image.rowBytes = kSplashImageRowBytes;

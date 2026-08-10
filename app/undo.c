@@ -44,16 +44,29 @@ void PushUndoSnapshot(void)
     long len;
     short i;
 
-    if (gHideMarkdown)
-        SyncHiddenToCanonical();
-
-    len = (**gTE).teLength;
-    textH = NewHandle(len);
-    HLock(textH);
-    HLock((**gTE).hText);
-    BlockMove(*(**gTE).hText, *textH, len);
-    HUnlock((**gTE).hText);
-    HUnlock(textH);
+    if (gHideMarkdown) {
+        /* In Writer mode, snapshot the writer text directly.
+           SyncHiddenToCanonical is extremely expensive (O(n²) style ops scan)
+           and we only need the canonical form when saving or switching views,
+           not for every undo checkpoint. */
+        SyncWindowToBacking();
+        len = gWriterLen;
+        textH = NewHandle(len);
+        HLock(textH);
+        HLock(gWriterText);
+        BlockMove(*gWriterText, *textH, len);
+        HUnlock(gWriterText);
+        HUnlock(textH);
+    } else {
+        len = WEGetTextLength(gTE);
+        textH = NewHandle(len);
+        HLock(textH);
+        Handle geText = WEGetText(gTE);
+        HLock(geText);
+        BlockMove(*geText, *textH, len);
+        HUnlock(geText);
+        HUnlock(textH);
+    }
 
     if (gUndoCount == MAX_UNDO_LEVELS) {
         FreeSnapshot(&gUndoStack[0]);
@@ -62,11 +75,15 @@ void PushUndoSnapshot(void)
         gUndoCount--;
     }
 
+    long selStart, selEnd;
+    WEGetSelection(&selStart, &selEnd, gActiveTE);
+
     slot = &gUndoStack[gUndoCount++];
     slot->textH = textH;
     slot->length = len;
-    slot->selStart = (**gActiveTE).selStart;
-    slot->selEnd = (**gActiveTE).selEnd;
+    slot->selStart = (short) selStart;
+    slot->selEnd = (short) selEnd;
+    slot->isWriterMode = gHideMarkdown;
 
     for (i = 0; i < gRedoCount; i++)
         FreeSnapshot(&gRedoStack[i]);
@@ -84,16 +101,25 @@ static void PushRedoSnapshot(void)
     long len;
     short i;
 
-    if (gHideMarkdown)
-        SyncHiddenToCanonical();
-
-    len = (**gTE).teLength;
-    textH = NewHandle(len);
-    HLock(textH);
-    HLock((**gTE).hText);
-    BlockMove(*(**gTE).hText, *textH, len);
-    HUnlock((**gTE).hText);
-    HUnlock(textH);
+    if (gHideMarkdown) {
+        SyncWindowToBacking();
+        len = gWriterLen;
+        textH = NewHandle(len);
+        HLock(textH);
+        HLock(gWriterText);
+        BlockMove(*gWriterText, *textH, len);
+        HUnlock(gWriterText);
+        HUnlock(textH);
+    } else {
+        len = WEGetTextLength(gTE);
+        textH = NewHandle(len);
+        HLock(textH);
+        Handle geText = WEGetText(gTE);
+        HLock(geText);
+        BlockMove(*geText, *textH, len);
+        HUnlock(geText);
+        HUnlock(textH);
+    }
 
     if (gRedoCount == MAX_UNDO_LEVELS) {
         FreeSnapshot(&gRedoStack[0]);
@@ -102,34 +128,77 @@ static void PushRedoSnapshot(void)
         gRedoCount--;
     }
 
+    long selStart, selEnd;
+    WEGetSelection(&selStart, &selEnd, gActiveTE);
+
     slot = &gRedoStack[gRedoCount++];
     slot->textH = textH;
     slot->length = len;
-    slot->selStart = (**gActiveTE).selStart;
-    slot->selEnd = (**gActiveTE).selEnd;
+    slot->selStart = (short) selStart;
+    slot->selEnd = (short) selEnd;
+    slot->isWriterMode = gHideMarkdown;
 }
 
-/* Replaces gTE's text with a snapshot and, if Writer mode is active,
-   rebuilds gHiddenTE from it so styling comes back correctly. Doesn't
-   free the snapshot -- the caller (DoUndo/DoRedo) owns that. */
+/* Replaces document text with a snapshot. If the snapshot was taken in
+   writer mode, it contains writer text which we load directly into the
+   writer backing store and rebuild. If taken in markdown mode, it
+   contains canonical markdown which we load into gTE. */
 static void RestoreSnapshot(UndoSnapshot *snap)
 {
     Rect savedViewRect;
 
-    SuppressDrawing(gTE, &savedViewRect);
-    TESetSelect(0, 32767, gTE);
-    TEDelete(gTE);
-    HLock(snap->textH);
-    TEInsert(*snap->textH, snap->length, gTE);
-    HUnlock(snap->textH);
-    RestoreDrawing(gTE, &savedViewRect);
-
-    if (gHideMarkdown) {
-        BuildHiddenView();
-        TESetSelect(snap->selStart, snap->selEnd, gHiddenTE);
-    } else {
+    if (snap->isWriterMode && gHideMarkdown) {
+        /* Snapshot is writer text and we're still in writer mode:
+           replace writer backing store directly and rebuild */
+        SetHandleSize(gWriterText, snap->length);
+        HLock(gWriterText);
+        HLock(snap->textH);
+        BlockMove(*snap->textH, *gWriterText, snap->length);
+        HUnlock(snap->textH);
+        HUnlock(gWriterText);
+        gWriterLen = snap->length;
+        gWindowStart = 0;
+        gWindowEnd = 0;
+        LoadTextWindow(0);
+        WESetSelect(snap->selStart, snap->selEnd, gHiddenTE);
+    } else if (snap->isWriterMode && !gHideMarkdown) {
+        /* Snapshot is writer text but we're in markdown mode:
+           need to convert. Put writer text in backing, sync to canonical. */
+        SetHandleSize(gWriterText, snap->length);
+        HLock(gWriterText);
+        HLock(snap->textH);
+        BlockMove(*snap->textH, *gWriterText, snap->length);
+        HUnlock(snap->textH);
+        HUnlock(gWriterText);
+        gWriterLen = snap->length;
+        SyncHiddenToCanonical();
+        /* Now load canonical into gTE */
+        SuppressDrawing(gTE, &savedViewRect);
+        WESetSelect(0, WEGetTextLength(gTE), gTE);
+        WEDelete(gTE);
+        HLock(gMarkdownText);
+        WEInsert(*gMarkdownText, gMarkdownLen, NULL, gTE);
+        HUnlock(gMarkdownText);
+        RestoreDrawing(gTE, &savedViewRect);
         ClearStyles();
-        TESetSelect(snap->selStart, snap->selEnd, gTE);
+        WESetSelect(snap->selStart, snap->selEnd, gTE);
+    } else {
+        /* Snapshot is canonical markdown */
+        SuppressDrawing(gTE, &savedViewRect);
+        WESetSelect(0, WEGetTextLength(gTE), gTE);
+        WEDelete(gTE);
+        HLock(snap->textH);
+        WEInsert(*snap->textH, snap->length, NULL, gTE);
+        HUnlock(snap->textH);
+        RestoreDrawing(gTE, &savedViewRect);
+
+        if (gHideMarkdown) {
+            BuildHiddenView();
+            WESetSelect(snap->selStart, snap->selEnd, gHiddenTE);
+        } else {
+            ClearStyles();
+            WESetSelect(snap->selStart, snap->selEnd, gTE);
+        }
     }
 
     gDirty = true;
@@ -182,15 +251,18 @@ void DoCut(void)
     long selLen;
     Handle scrapText;
 
-    selStart = (**gActiveTE).selStart;
-    selEnd = (**gActiveTE).selEnd;
+    long sStart, sEnd;
+    WEGetSelection(&sStart, &sEnd, gActiveTE);
+    selStart = (short) sStart;
+    selEnd = (short) sEnd;
+
     if (selStart == selEnd)
         return;
 
     if (gHideMarkdown) {
         scrapText = EncodeSelectionAsMarkdown(selStart, selEnd, gActiveTE);
     } else {
-        Handle textH = (**gActiveTE).hText;
+        Handle textH = WEGetText(gActiveTE);
 
         selLen = selEnd - selStart;
         scrapText = NewHandle(selLen);
@@ -209,7 +281,7 @@ void DoCut(void)
     HUnlock(scrapText);
     DisposeHandle(scrapText);
 
-    TEDelete(gActiveTE);
+    WEDelete(gActiveTE);
 
     gDirty = true;
     gTypingRunActive = false;
@@ -222,15 +294,18 @@ void DoCopy(void)
     long selLen;
     Handle scrapText;
 
-    selStart = (**gActiveTE).selStart;
-    selEnd = (**gActiveTE).selEnd;
+    long sStart, sEnd;
+    WEGetSelection(&sStart, &sEnd, gActiveTE);
+    selStart = (short) sStart;
+    selEnd = (short) sEnd;
+
     if (selStart == selEnd)
         return;
 
     if (gHideMarkdown) {
         scrapText = EncodeSelectionAsMarkdown(selStart, selEnd, gActiveTE);
     } else {
-        Handle textH = (**gActiveTE).hText;
+        Handle textH = WEGetText(gActiveTE);
 
         selLen = selEnd - selStart;
         scrapText = NewHandle(selLen);
@@ -251,8 +326,8 @@ void DoCopy(void)
 void DoPaste(void)
 {
     Handle scrapH;
-    long offset;
-    long len;
+    LONGINT offset;
+    LONGINT len;
 
     scrapH = NewHandle(0);
     len = GetScrap(scrapH, 'TEXT', &offset);
@@ -268,7 +343,7 @@ void DoPaste(void)
         DisposeHandle(scrapH);
     } else {
         HLock(scrapH);
-        TEInsert(*scrapH, len, gActiveTE);
+        WEInsert(*scrapH, len, NULL, gActiveTE);
         HUnlock(scrapH);
         DisposeHandle(scrapH);
     }
@@ -280,6 +355,6 @@ void DoPaste(void)
 
 void DoSelectAll(void)
 {
-    TESetSelect(0, 32767, gActiveTE);
+    WESetSelect(0, WEGetTextLength(gActiveTE), gActiveTE);
     gTypingRunActive = false;
 }

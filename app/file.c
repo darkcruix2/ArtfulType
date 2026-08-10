@@ -15,18 +15,38 @@ void SetViewMode(Boolean hideMarkdown)
 
     ClearUndoRedoStacks();
     UpdateEditMenuState();
-    TEDeactivate(gActiveTE);
+    WEDeactivate(gActiveTE);
 
     if (hideMarkdown) {
-        BuildHiddenView();
+        /* Sync Markdown changes before switching */
+        SyncWindowToBacking();
+        
+        gHideMarkdown = true;
         gActiveTE = gHiddenTE;
+        BuildHiddenView();
+        gWriterDirty = false;   /* entering Writer: start tracking edits fresh */
     } else {
-        SyncHiddenToCanonical();
+        /* Sync Writer changes before switching.
+           Only reconstruct gMarkdownText when the user actually made edits in
+           Writer mode — otherwise the round-trip through SyncHiddenToCanonical
+           subtly corrupts the markdown (spurious # signs, extra blank lines). */
+        SyncWindowToBacking();
+        if (gWriterDirty)
+            SyncHiddenToCanonical();
+        gWriterDirty = false;
+        
+        gHideMarkdown = false;
         gActiveTE = gTE;
+        
+        TEHandle te = (*gTE)->te;
+        if (te != NULL) {
+            (**te).destRect.left = (**te).viewRect.left + 36;
+        }
+        
+        LoadTextWindow(gWindowStart);
     }
 
-    TEActivate(gActiveTE);
-    gHideMarkdown = hideMarkdown;
+    WEActivate(gActiveTE);
     CheckItem(gViewMenu, iMarkdownView, !hideMarkdown);
     CheckItem(gViewMenu, iWriterView, hideMarkdown);
     UpdateMenuBarLook();
@@ -34,11 +54,12 @@ void SetViewMode(Boolean hideMarkdown)
     InvalRect(&gWindow->portRect);
 }
 
+
 static void WriteFile(StringPtr name, short vRefNum)
 {
     short refNum;
-    long count;
-    Handle textH = (**gTE).hText;
+    LONGINT count;
+    Handle textH = WEGetText(gTE);
     OSErr err;
 
     Create(name, vRefNum, 'ArtT', 'TEXT');
@@ -48,20 +69,34 @@ static void WriteFile(StringPtr name, short vRefNum)
         return;
 
     SetEOF(refNum, 0);
-    count = (**gTE).teLength;
+
+    SyncWindowToBacking();
+    
+    if (gMarkdownText != NULL) {
+        count = gMarkdownLen;
+        textH = gMarkdownText;
+    } else {
+        count = WEGetTextLength(gTE);
+        textH = WEGetText(gTE);
+    }
+
     HLock(textH);
     FSWrite(refNum, &count, *textH);
     HUnlock(textH);
     FSClose(refNum);
+
+    SetWTitle(gWindow, name);
 }
 
 static void ReadFile(StringPtr name, short vRefNum)
 {
     short refNum;
-    long count;
-    long eof;
+    LONGINT count;
+    LONGINT eof;
     Handle textH;
     OSErr err;
+
+    SetPort(gWindow);
 
     err = FSOpen(name, vRefNum, &refNum);
     if (err != noErr)
@@ -74,22 +109,79 @@ static void ReadFile(StringPtr name, short vRefNum)
     FSRead(refNum, &count, *textH);
     FSClose(refNum);
 
-    TESetSelect(0, 32767, gTE);
-    TEDelete(gTE);
-    TEInsert(*textH, count, gTE);
-    HUnlock(textH);
-    DisposeHandle(textH);
+    /* Convert UTF-8, LF to CR, and handle CRLF to fix text corruption */
+    {
+        long i, j = 0;
+        
+        /* Skip UTF-8 BOM if present */
+        if (count >= 3 && (unsigned char)(*textH)[0] == 0xEF && (unsigned char)(*textH)[1] == 0xBB && (unsigned char)(*textH)[2] == 0xBF) {
+            i = 3;
+        } else {
+            i = 0;
+        }
 
-    gDirty = false;
+        for (; i < count; i++) {
+            unsigned char c1 = (unsigned char)(*textH)[i];
+            
+            /* Handle UTF-8 common punctuation */
+            if (c1 == 0xE2 && i + 2 < count) {
+                unsigned char c2 = (unsigned char)(*textH)[i+1];
+                unsigned char c3 = (unsigned char)(*textH)[i+2];
+                if (c2 == 0x80) {
+                    if (c3 == 0x98 || c3 == 0x99) { /* smart single quotes */
+                        (*textH)[j++] = '\''; i += 2; continue;
+                    } else if (c3 == 0x9C || c3 == 0x9D) { /* smart double quotes */
+                        (*textH)[j++] = '"'; i += 2; continue;
+                    } else if (c3 == 0x93 || c3 == 0x94) { /* en/em dash */
+                        (*textH)[j++] = '-'; i += 2; continue;
+                    } else if (c3 == 0xA6) { /* ellipsis */
+                        (*textH)[j++] = 0xC9; i += 2; continue; /* MacRoman ellipsis */
+                    } else if (c3 == 0xA2) { /* bullet */
+                        (*textH)[j++] = 0xA5; i += 2; continue; /* MacRoman bullet */
+                    }
+                }
+            }
+
+            if ((*textH)[i] == '\r' && i + 1 < count && (*textH)[i + 1] == '\n') {
+                (*textH)[j++] = '\r';
+                i++; /* skip the LF */
+            } else if ((*textH)[i] == '\n') {
+                (*textH)[j++] = '\r';
+            } else {
+                (*textH)[j++] = (*textH)[i];
+            }
+        }
+        count = j;
+    }
+
+    HUnlock(textH);
+    SetHandleSize(textH, count);
+
+    if (gMarkdownText != NULL)
+        DisposeHandle(gMarkdownText);
+    
+    gMarkdownText = textH;
+    gMarkdownLen = count;
+    gWindowStart = 0;
+
+    if (gHideMarkdown) {
+        BuildHiddenView();
+    } else {
+        LoadTextWindow(0);
+    }
+
+    SetDirty(false);
     ClearUndoRedoStacks();
     UpdateEditMenuState();
     RefreshActiveView();
     AdjustScrollbar();
+    SetWTitle(gWindow, name);
     InvalRect(&gWindow->portRect);
 }
 
 void DoStartupOpen(void)
 {
+#if !defined(__powerpc__) && !defined(__ppc__)
     short message, count;
     AppFile theFile;
 
@@ -97,12 +189,29 @@ void DoStartupOpen(void)
     if (count < 1 || message != appOpen)
         return;
 
+#ifdef ARTFUL_PRO
+    for (short i = 1; i <= count; i++) {
+        GetAppFiles(i, &theFile);
+        if (i > 1 || gHaveFile || gDirty || WEGetTextLength(gTE) > 0) {
+            MakeWindow();
+        }
+        if (gActiveDoc) {
+            BlockMove(theFile.fName, gFileName, theFile.fName[0] + 1);
+            gVRefNum = theFile.vRefNum;
+            gHaveFile = true;
+            ReadFile(gFileName, gVRefNum);
+        }
+        ClrAppFiles(i);
+    }
+#else
     GetAppFiles(1, &theFile);
     BlockMove(theFile.fName, gFileName, theFile.fName[0] + 1);
     gVRefNum = theFile.vRefNum;
     gHaveFile = true;
     ReadFile(gFileName, gVRefNum);
     ClrAppFiles(1);
+#endif
+#endif
 }
 
 Boolean DoSaveAs(void)
@@ -110,10 +219,17 @@ Boolean DoSaveAs(void)
     SFReply reply;
     Point where = {100, 100};
 
+#ifdef ARTFUL_PRO
+    if (!gActiveDoc) return false;
+#endif
+
+    SyncWindowToBacking();
+
     if (gHideMarkdown)
         SyncHiddenToCanonical();
 
     SFPutFile(where, "\pSave document as:", "\pUntitled.md", NULL, &reply);
+
     UpdateMenuBarLook();
     if (!reply.good)
         return false;
@@ -122,20 +238,27 @@ Boolean DoSaveAs(void)
     gVRefNum = reply.vRefNum;
     gHaveFile = true;
     WriteFile(gFileName, gVRefNum);
-    gDirty = false;
+    SetDirty(false);
     return true;
 }
 
 Boolean DoSave(void)
 {
+#ifdef ARTFUL_PRO
+    if (!gActiveDoc) return false;
+#endif
+
+    SyncWindowToBacking();
+
     if (!gHaveFile)
         return DoSaveAs();
 
     if (gHideMarkdown)
         SyncHiddenToCanonical();
 
+
     WriteFile(gFileName, gVRefNum);
-    gDirty = false;
+    SetDirty(false);
     return true;
 }
 
@@ -155,6 +278,10 @@ static short AskSaveChanges(void)
 
 Boolean ConfirmDiscardChanges(void)
 {
+#ifdef ARTFUL_PRO
+    if (!gActiveDoc) return true;
+#endif
+
     if (!gDirty)
         return true;
 
@@ -178,6 +305,13 @@ Boolean DoOpenFile(void)
     if (!reply.good)
         return false;
 
+#ifdef ARTFUL_PRO
+    if (gHaveFile || gDirty || WEGetTextLength(gTE) > 0) {
+        MakeWindow();
+        if (!gActiveDoc) return false;
+    }
+#endif
+
     BlockMove(reply.fName, gFileName, reply.fName[0] + 1);
     gVRefNum = reply.vRefNum;
     gHaveFile = true;
@@ -187,13 +321,20 @@ Boolean DoOpenFile(void)
 
 void DoNewFile(void)
 {
-    TESetSelect(0, 32767, gTE);
-    TEDelete(gTE);
+#ifdef ARTFUL_PRO
+    MakeWindow();
+    if (!gActiveDoc) return;
+#endif
+
+    SetPort(gWindow);
+    WESetSelect(0, WEGetTextLength(gTE), gTE);
+    WEDelete(gTE);
     gHaveFile = false;
-    gDirty = false;
+    SetDirty(false);
     ClearUndoRedoStacks();
     UpdateEditMenuState();
     RefreshActiveView();
     AdjustScrollbar();
+    SetWTitle(gWindow, "\pUntitled");
     InvalRect(&gWindow->portRect);
 }

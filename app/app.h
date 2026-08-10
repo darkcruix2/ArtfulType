@@ -6,6 +6,7 @@
 #include <Fonts.h>
 #include <Menus.h>
 #include <TextEdit.h>
+#include "WASTE.h"
 #include <Dialogs.h>
 #include <Events.h>
 #include <OSUtils.h>
@@ -14,16 +15,51 @@
 #include <Files.h>
 #include <StandardFile.h>
 #include <SegLoad.h>
+#include <TextUtils.h>
 #include <Multiverse.h>
-#include <string.h>
+
+#ifndef HiWord
+#define HiWord(aLong) ((short)(((aLong) >> 16) & 0xFFFF))
+#endif
+#ifndef LoWord
+#define LoWord(aLong) ((short)((aLong) & 0xFFFF))
+#endif
+
 
 #define MARGIN_H     64
 #define MARGIN_TOP   32
-#define MARGIN_BOTTOM 24
+#define MARGIN_BOTTOM 38
 #define MENU_BAR_HEIGHT 20
-#define FONT_SIZE 18
+#define FONT_SIZE 12
 #define SCROLLBAR_WIDTH 16
 
+// Memory pool for handle allocations to reduce overhead
+#define MEMORY_POOL_SIZE 10
+extern Handle gMemoryPool[MEMORY_POOL_SIZE];
+extern short gMemoryPoolCount;
+
+// Simple memory pool macros
+#define PoolNewHandle(size) \
+    (gMemoryPoolCount > 0 ? \
+     (HLock(gMemoryPool[--gMemoryPoolCount]), gMemoryPool[gMemoryPoolCount]) : \
+     NewHandle(size))
+
+#define PoolDisposeHandle(h) \
+    do { \
+        if (h && gMemoryPoolCount < MEMORY_POOL_SIZE) { \
+            HUnlock(h); \
+            gMemoryPool[gMemoryPoolCount++] = h; \
+        } else { \
+            DisposeHandle(h); \
+        } \
+    } while(0)
+
+void InsertDateHeading(short level);
+void InsertTimeHeading(short level);
+void ToggleCodeBlockHidden(void);
+
+#define mApple   1
+#define iAppleAbout 1
 #define mFile    128
 #define iNew     1
 #define iOpen    2
@@ -38,17 +74,25 @@
 #define iCopy    5
 #define iPaste   6
 #define iSelectAll 8
+#define iSearch 10
+#define iSearchReplace 11
+
 
 #define mStyle   129
-#define iBold    1
-#define iItalic  2
-#define iCode    3
-#define iStrike  4
-#define iH1      6
-#define iH2      7
-#define iH3      8
-#define iLink    10
-#define iNone    12
+#define iBold        1
+#define iItalic      2
+#define iInlineCode  3
+#define iCodeBlock   4
+#define iStrike      5
+#define iHighlight   6
+#define iBlockquote  8
+#define iBulletPoints 9
+#define iNumberedList 10
+#define iH1          12
+#define iH2          13
+#define iH3          14
+#define iLink        16
+#define iNone        18
 
 #define kSaveChangesAlert 130
 #define kSaveBtn          1
@@ -69,20 +113,40 @@
 #define iAboutOK     1
 #define iAboutTitle  2
 
+#define kSearchDialog 134
+#define iSearchOK     1
+#define iSearchCancel 2
+#define iSearchField  4
+
+#define kSearchReplaceDialog 135
+#define iReplaceOK           1
+#define iReplaceCancel       2
+#define iReplaceFindField    4
+#define iReplaceWithField    6
+#define iReplaceAll          7
+
+
 #define mView        130
 #define iMarkdownView 1
 #define iWriterView  2
-#define iZoomIn      4
-#define iZoomOut     5
-#define iZoomDefault 6
+#define iRefreshView 4
+#define iZoomIn      6
+#define iZoomOut     7
+#define iZoomDefault 8
+#define iSerif       10
+#define iSansSerif   11
+#define iStatusBar   13
+
+#define mWindow  134
 
 #define mHelp    132
-#define iAbout   1
+#define iAbout   1  /* kept for backward compat; About is now in Apple menu */
 
-#define MAX_STYLE_OPS 512
+#define MAX_STYLE_OPS 8192
 
-#define kNumZoomLevels 5
-#define kZoomBaselineIndex 2
+#define kNumZoomLevels 3
+#define kZoomBaselineIndex 1
+#define kZoomDefaultIndex 0
 
 #define kZoomPrefType 'ZLvl'
 #define kZoomPrefID   128
@@ -105,12 +169,13 @@
     and on new/open -- simpler and more predictable than trying to
     make snapshots meaningful across two independently-edited buffers.
 */
-#define MAX_UNDO_LEVELS 15
+#define MAX_UNDO_LEVELS 100
 
 typedef struct {
     Handle textH;
     long length;
     short selStart, selEnd;
+    Boolean isWriterMode;
 } UndoSnapshot;
 
 /*
@@ -122,63 +187,233 @@ typedef struct {
     (gLinkCount = 0) at the start of every BuildHiddenView, since that's
     a full reparse of gTE and re-derives whichever links currently exist.
 */
-#define MAX_LINKS 64
+#define MAX_LINKS 512
+#define WINDOW_SIZE 4000  /* max chars loaded into the TE at a time for large files */
+
+typedef struct {
+    long start, end;
+    short kind, level;
+    short linkID;
+} StyleOp;
+
+/* One-shot flag set during scrollbar-driven window loads to suppress
+   the caret-based auto-shift in ScrollCaretIntoView. Global (not per-doc). */
+extern Boolean gScrollbarDriven;
+
+/* First line of the document that gWindowStart maps to (1-based, global).
+   Computed by LoadTextWindow; used by UpdateStatusBar to show true line numbers. */
+extern long gWindowStartLine;
+
+#ifdef ARTFUL_PRO
+
+typedef struct DocumentRecord {
+    WindowPtr window;
+    WEHandle te;
+    WEHandle hiddenTE;
+    WEHandle activeTE;
+    ControlHandle scrollBar;
+    ControlHandle jumpToTopBtn;
+    ControlHandle jumpToEndBtn;
+    Boolean scrollBarVisible;
+
+
+
+
+    Boolean haveFile;
+    Boolean dirty;
+    Boolean writerDirty;   /* true only when edits were made in Writer mode */
+    Str255 fileName;
+    short vRefNum;
+    Boolean hideMarkdown;
+    Handle markdownText;
+    long markdownLen;
+    Handle writerText;
+    long writerLen;
+    Handle writerOpsH;
+    short writerOpCount;
+    long windowStart;
+    long windowEnd;
+    Handle lineOffsetsH;
+    long numLines;
+    long lastCharCount;
+    short lastLine;
+    short lastCol;
+    Boolean showStatusBar;
+    UndoSnapshot undoStack[MAX_UNDO_LEVELS];
+    short undoCount;
+    UndoSnapshot redoStack[MAX_UNDO_LEVELS];
+    short redoCount;
+    Boolean typingRunActive;
+    Str255 linkURLs[MAX_LINKS + 1];
+    short linkCount;
+    Boolean shiftSelectionActive;
+    short shiftAnchor;
+    short zoomIndex;
+    struct DocumentRecord *next;
+} DocumentRecord;
+
+extern DocumentRecord *gActiveDoc;
+extern DocumentRecord *gDocumentList;
+
+#define gWindow (gActiveDoc->window)
+#define gTE (gActiveDoc->te)
+#define gHiddenTE (gActiveDoc->hiddenTE)
+#define gActiveTE (gActiveDoc->activeTE)
+#define gScrollBar (gActiveDoc->scrollBar)
+#define gJumpToTopBtn (gActiveDoc->jumpToTopBtn)
+#define gJumpToEndBtn (gActiveDoc->jumpToEndBtn)
+#define gScrollBarVisible (gActiveDoc->scrollBarVisible)
+
+
+
+
+#define gHaveFile (gActiveDoc->haveFile)
+#define gDirty (gActiveDoc->dirty)
+#define gWriterDirty (gActiveDoc->writerDirty)
+#define gFileName (gActiveDoc->fileName)
+#define gVRefNum (gActiveDoc->vRefNum)
+#define gHideMarkdown (gActiveDoc->hideMarkdown)
+#define gMarkdownText (gActiveDoc->markdownText)
+#define gMarkdownLen (gActiveDoc->markdownLen)
+#define gWriterText (gActiveDoc->writerText)
+#define gWriterLen (gActiveDoc->writerLen)
+#define gWriterOpsH (gActiveDoc->writerOpsH)
+#define gWriterOpCount (gActiveDoc->writerOpCount)
+#define gWindowStart (gActiveDoc->windowStart)
+#define gWindowEnd (gActiveDoc->windowEnd)
+#define gLineOffsetsH (gActiveDoc->lineOffsetsH)
+#define gNumLines (gActiveDoc->numLines)
+#define gLastCharCount (gActiveDoc->lastCharCount)
+#define gLastLine (gActiveDoc->lastLine)
+#define gLastCol (gActiveDoc->lastCol)
+#define gShowStatusBar (gActiveDoc->showStatusBar)
+#define gZoomIndex (gActiveDoc->zoomIndex)
+#define gUndoStack (gActiveDoc->undoStack)
+#define gUndoCount (gActiveDoc->undoCount)
+#define gRedoStack (gActiveDoc->redoStack)
+#define gRedoCount (gActiveDoc->redoCount)
+#define gTypingRunActive (gActiveDoc->typingRunActive)
+#define gLinkURLs (gActiveDoc->linkURLs)
+#define gLinkCount (gActiveDoc->linkCount)
+#define gShiftSelectionActive (gActiveDoc->shiftSelectionActive)
+#define gShiftAnchor (gActiveDoc->shiftAnchor)
+
+DocumentRecord* GetDocumentForWindow(WindowPtr w);
+DocumentRecord* CreateNewDocument(void);
+void DisposeDocument(DocumentRecord *doc);
+void SetActiveDocument(DocumentRecord *doc);
+
+#else
 
 /* Global state -- actual storage lives in main.c */
 extern WindowPtr gWindow;
-extern TEHandle gTE;
-extern TEHandle gHiddenTE;
-extern TEHandle gActiveTE;
+extern WEHandle gTE;
+extern WEHandle gHiddenTE;
+extern Handle gMarkdownText;
+extern long gMarkdownLen;
+extern Handle gWriterText;
+extern long gWriterLen;
+extern Handle gWriterOpsH;
+extern short gWriterOpCount;
+extern ControlHandle gScrollBar;
+extern ControlHandle gJumpToTopBtn;
+extern ControlHandle gJumpToEndBtn;
+extern long gWindowStart;
+
+
+
+
+extern long gWindowEnd;
+extern Handle gLineOffsetsH;
+extern long gNumLines;
+extern long gLastCharCount;
+extern short gLastLine;
+extern short gLastCol;
+extern Boolean gShowStatusBar;
+extern WEHandle gActiveTE;
 extern ControlHandle gScrollBar;
 extern Boolean gScrollBarVisible;
-extern Boolean gDone;
 extern Boolean gHaveFile;
 extern Boolean gDirty;
+extern Boolean gWriterDirty;   /* true only when edits were made in Writer mode */
+void SetDirty(Boolean dirty);
 extern Str255 gFileName;
 extern short gVRefNum;
-extern MenuHandle gViewMenu;
-extern MenuHandle gEditMenu;
 extern Boolean gHideMarkdown;
-extern short gZoomIndex;
-
+extern Boolean gShiftSelectionActive;
+extern short gShiftAnchor;
 extern UndoSnapshot gUndoStack[MAX_UNDO_LEVELS];
 extern short gUndoCount;
 extern UndoSnapshot gRedoStack[MAX_UNDO_LEVELS];
 extern short gRedoCount;
 extern Boolean gTypingRunActive;
-
 extern Str255 gLinkURLs[MAX_LINKS + 1];
 extern short gLinkCount;
 
+#endif
+
+extern Boolean gDone;
+extern MenuHandle gViewMenu;
+extern MenuHandle gEditMenu;
+extern MenuHandle gWindowMenu;
+#ifndef ARTFUL_PRO
+extern short gZoomIndex;
+#endif
+extern short gDefaultZoomIndex;
+extern Boolean gUseSansSerif;
+
 /* main.c */
+void MakeWindow(void);
 void UpdateMenuBarLook(void);
+short GetDefaultFontNum(void);
+void SetFontMode(Boolean useSans);
+void SetDirty(Boolean dirty);
 
 /* scrolling.c */
 void UpdateScrollbarRange(void);
 void AdjustScrollbar(void);
-void ScrollCaretIntoView(void);
+void ScrollCaretIntoView(Boolean movingBackward);
+void HandleJumpToTop(void);
+void HandleJumpToEnd(void);
+void HandlePageUp(void);
+void HandlePageDown(void);
+
+
+
+
+void SuppressDrawing(WEHandle te, Rect *saved);
+void RestoreDrawing(WEHandle te, Rect *saved);
+long TotalLength(void);
+short CurrentFontSize(void);
 void DoScrollClick(Point pt);
 void InvalidateHeightCache(void);
 
 /* markdown.c */
 void ClearStyles(void);
-void SuppressDrawing(TEHandle te, Rect *saved);
-void RestoreDrawing(TEHandle te, Rect *saved);
 void BuildHiddenView(void);
 void SyncHiddenToCanonical(void);
-Handle EncodeSelectionAsMarkdown(short start, short end, TEHandle te);
-void InsertMarkdownAsStyled(Handle srcH, long srcLen, TEHandle te);
+Handle EncodeSelectionAsMarkdown(long start, long end, WEHandle te);
+void InsertMarkdownAsStyled(Handle srcH, long srcLen, WEHandle te);
 void WrapSelection(char *prefix, char *suffix);
 void ApplyHeading(short level);
+void InsertDateHeading(short level);
+void ApplyLinePrefix(const char *prefix);
+void ApplyLinePrefixHidden(const char *prefix);
+void InsertTimeHeading(short level);
 void DoLink(void);
+void ApplyZoomIndex(short newIndex);
 void ToggleFace(Style face);
 void DoLinkHidden(void);
 void ToggleCode(void);
+void ToggleCodeBlockHidden(void);
+void ToggleStrike(void);
 void ToggleHeadingHidden(short level);
 void DetectInlineMarkdown(char justTyped);
 void ClearSelectionStyleHidden(void);
 void ClearMarkdownInSelection(void);
 short AddLinkURL(const unsigned char *url);
+void LoadTextWindow(long startOffset);
+void SyncWindowToBacking(void);
 
 /* undo.c */
 void ClearUndoRedoStacks(void);
