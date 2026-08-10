@@ -3284,6 +3284,68 @@ async function openFile() {
   }
 }
 
+async function saveNextcloudAs(f, content, silent = false) {
+  if (!ncConfig) {
+    openModal("prefs-modal");
+    return false;
+  }
+  const defaultName = f.remoteName || f.name.replace(/^☁\s*/, "") || "untitled.md";
+  const filename = prompt("Enter filename to save on Nextcloud:", defaultName);
+  if (!filename || !filename.trim()) {
+    if (!silent) statusMessageEl.textContent = "Save cancelled.";
+    return false;
+  }
+  let cleanName = filename.trim();
+  if (!cleanName.endsWith(".md") && !cleanName.endsWith(".txt") && !cleanName.endsWith(".markdown")) {
+    cleanName += ".md";
+  }
+  const remotePath = ncCurrentPath ? `${ncCurrentPath}/${cleanName}` : cleanName;
+
+  try {
+    const existingContent = await invoke("read_nextcloud_file", { path: remotePath });
+    if (existingContent !== null && existingContent !== undefined) {
+      const confirmOverwrite = await promptConfirm(
+        "Confirm Overwrite",
+        `File "${cleanName}" already exists on Nextcloud. Do you want to overwrite it?`,
+        "Overwrite",
+        true
+      );
+      if (!confirmOverwrite) {
+        if (!silent) statusMessageEl.textContent = "Save cancelled.";
+        return false;
+      }
+    }
+  } catch (_) {
+    // File doesn't exist yet on Nextcloud
+  }
+
+  try {
+    if (!silent) statusMessageEl.textContent = `Saving ${cleanName} to Nextcloud…`;
+    await invoke("write_nextcloud_file", { path: remotePath, content });
+    const oldId = f.id;
+    f.isNextcloud = true;
+    f.remotePath = remotePath;
+    f.remoteName = cleanName;
+    f.name = `☁ ${cleanName}`;
+    f.path = null;
+    f.id = "nc:" + remotePath;
+    if (activeFileId === oldId) {
+      activeFileId = f.id;
+    }
+    f.dirty = false;
+    recordNcRecentFile(remotePath, cleanName);
+    renderTabBar();
+    renderFileList();
+    if (typeof renderNextcloudFileList === "function") renderNextcloudFileList();
+    if (!silent) statusMessageEl.textContent = `Saved to Nextcloud: ${cleanName}`;
+    return true;
+  } catch (err) {
+    console.error(err);
+    if (!silent) statusMessageEl.textContent = `Nextcloud save error: ${err}`;
+    return false;
+  }
+}
+
 async function saveFile(silent = false) {
   syncActiveFileContent();
   let f = getActiveFile();
@@ -3297,6 +3359,7 @@ async function saveFile(silent = false) {
   }
   const content = f.content;
   try {
+    const isNcTabActive = document.getElementById("nextcloud-sidebar-container") && !document.getElementById("nextcloud-sidebar-container").classList.contains("hidden");
     if (f.isNextcloud && f.remotePath) {
       if (!silent) statusMessageEl.textContent = `Saving ${f.remoteName || "file"} to Nextcloud…`;
       await invoke("write_nextcloud_file", { path: f.remotePath, content });
@@ -3309,6 +3372,8 @@ async function saveFile(silent = false) {
       f.dirty = false;
       renderTabBar(); renderFileList();
       if (!silent) statusMessageEl.textContent = "Saved.";
+    } else if (ncConfig && isNcTabActive) {
+      await saveNextcloudAs(f, content, silent);
     } else {
       if (!silent) statusMessageEl.textContent = "Saving…";
       const savedPath = await invoke("save_file_dialog", { content });
@@ -3349,6 +3414,11 @@ async function saveFileAs(silent = false) {
   }
   const content = f.content;
   try {
+    const isNcTabActive = document.getElementById("nextcloud-sidebar-container") && !document.getElementById("nextcloud-sidebar-container").classList.contains("hidden");
+    if (ncConfig && (f.isNextcloud || isNcTabActive)) {
+      await saveNextcloudAs(f, content, silent);
+      return;
+    }
     if (!silent) statusMessageEl.textContent = "Saving As…";
     const savedPath = await invoke("save_file_dialog", { content });
     if (savedPath) {

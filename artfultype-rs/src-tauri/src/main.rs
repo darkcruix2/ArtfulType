@@ -251,7 +251,7 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     for arg in &args[1..] {
         if arg == "-h" || arg == "--help" {
-            println!("ArtfulType Terminal / CLI WebKit Executable v0.30.1");
+            println!("ArtfulType Terminal / CLI WebKit Executable v0.30.2");
             println!("Usage: artfultype-rs [OPTIONS] [FILE]\n");
             println!("Options:");
             println!("  --mode <MODE>      Set initial view mode (writer | markdown | split)");
@@ -260,7 +260,7 @@ fn main() {
             println!("  -v, --version      Print version information");
             return;
         } else if arg == "-v" || arg == "--version" {
-            println!("ArtfulType Terminal / CLI WebKit Executable v0.30.1");
+            println!("ArtfulType Terminal / CLI WebKit Executable v0.30.2");
             return;
         }
     }

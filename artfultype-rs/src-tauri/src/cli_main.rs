@@ -37,6 +37,20 @@ enum PopupState {
         input: String,
         input_focused: bool,
     },
+    NextcloudSaveAs {
+        remote_path: String,
+        entries: Vec<artfultype_rs_lib::nextcloud::NextcloudEntry>,
+        selected: usize,
+        scroll: usize,
+        input: String,
+        input_focused: bool,
+    },
+    OverwriteConfirm {
+        target_path: Option<String>,
+        target_remote_path: Option<String>,
+        file_name: String,
+        is_nextcloud: bool,
+    },
     OpenFile {
         current_dir: String,
         entries: Vec<(String, bool)>,
@@ -981,13 +995,14 @@ impl App {
         } else {
             let dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")).to_string_lossy().to_string();
             let entries = read_dir_entries(&dir);
+            let init_name = self.file_name.trim_start_matches("☁ ").trim().to_string();
             self.popup = PopupState::SaveAs {
                 current_dir: dir,
                 entries,
                 selected: 0,
                 scroll: 0,
-                input: String::new(),
-                input_focused: false,
+                input: init_name,
+                input_focused: true,
             };
         }
     }
@@ -1127,13 +1142,14 @@ impl App {
             MenuAction::SaveAs => {
                 let dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")).to_string_lossy().to_string();
                 let entries = read_dir_entries(&dir);
+                let init_name = self.file_name.trim_start_matches("☁ ").trim().to_string();
                 self.popup = PopupState::SaveAs {
                     current_dir: dir,
                     entries,
                     selected: 0,
                     scroll: 0,
-                    input: String::new(),
-                    input_focused: false,
+                    input: init_name,
+                    input_focused: true,
                 };
             }
             MenuAction::NextcloudConfig => {
@@ -1360,7 +1376,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     while i < args.len() {
         let arg = &args[i];
         if arg == "-h" || arg == "--help" {
-            println!("art Terminal / TUI v0.30.1");
+            println!("art Terminal / TUI v0.30.2");
             println!("Usage: art [OPTIONS] [FILE]\n");
             println!("  -t, --text, --code Set initial mode to Pure Text / Code editor");
             println!("  --mode writer|markdown|split|pure-text|code");
@@ -1370,7 +1386,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("  -v, --version      Version");
             return Ok(());
         } else if arg == "-v" || arg == "--version" {
-            println!("art Terminal / TUI v0.30.1");
+            println!("art Terminal / TUI v0.30.2");
             return Ok(());
         } else if arg == "--vt100" || arg == "--ascii" {
             initial_theme = Some(Theme::VT100);
@@ -1467,7 +1483,7 @@ fn run_app<B: ratatui::backend::Backend>(
                                 KeyCode::Char('y') | KeyCode::Char('Y') => {
                                     app.quit_after_save = true;
                                     app.save_file();
-                                    if !matches!(app.popup, PopupState::SaveAs { .. }) {
+                                    if !matches!(app.popup, PopupState::SaveAs { .. } | PopupState::NextcloudSaveAs { .. } | PopupState::OverwriteConfirm { .. }) {
                                         app.should_quit = true;
                                         app.popup = PopupState::None;
                                     }
@@ -1480,7 +1496,7 @@ fn run_app<B: ratatui::backend::Backend>(
                                     if app.dirty {
                                         app.quit_after_save = true;
                                         app.save_file();
-                                        if !matches!(app.popup, PopupState::SaveAs { .. }) {
+                                        if !matches!(app.popup, PopupState::SaveAs { .. } | PopupState::NextcloudSaveAs { .. } | PopupState::OverwriteConfirm { .. }) {
                                             app.should_quit = true;
                                             app.popup = PopupState::None;
                                         }
@@ -1496,74 +1512,152 @@ fn run_app<B: ratatui::backend::Backend>(
                                 _ => {}
                             }
                         }
-                        PopupState::SaveAs { mut current_dir, mut entries, mut selected, mut scroll, mut input, mut input_focused } => {
+                        PopupState::SaveAs { mut current_dir, mut entries, mut selected, mut scroll, mut input, input_focused } => {
                             match key.code {
                                 KeyCode::Tab => {
-                                    input_focused = !input_focused;
-                                    app.popup = PopupState::SaveAs { current_dir, entries, selected, scroll, input, input_focused };
+                                    if app.nextcloud_config.is_none() {
+                                        app.nextcloud_config = artfultype_rs_lib::nextcloud::load_config();
+                                    }
+                                    if let Some(ref cfg) = app.nextcloud_config {
+                                        if let Ok(nc_entries) = artfultype_rs_lib::nextcloud::list_folder(cfg, "") {
+                                            let clean_input = input.trim_start_matches("☁ ").trim().to_string();
+                                            app.popup = PopupState::NextcloudSaveAs {
+                                                remote_path: "".to_string(),
+                                                entries: nc_entries,
+                                                selected: 0,
+                                                scroll: 0,
+                                                input: if clean_input.is_empty() { app.file_name.trim_start_matches("☁ ").trim().to_string() } else { clean_input },
+                                                input_focused: true,
+                                            };
+                                        } else {
+                                            app.status_msg = "Failed to list Nextcloud folder".to_string();
+                                        }
+                                    } else {
+                                        let (url, user, pass) = ("https://cloud.example.com".to_string(), "".to_string(), "".to_string());
+                                        app.popup = PopupState::NextcloudConfig {
+                                            url_input: url,
+                                            username_input: user,
+                                            password_input: pass,
+                                            focus: 0,
+                                            status_msg: "Nextcloud is not linked yet. Enter credentials below:".to_string(),
+                                        };
+                                    }
                                 }
                                 KeyCode::Up => {
-                                    if !input_focused {
-                                        if selected > 0 {
-                                            selected -= 1;
-                                            if selected < scroll {
-                                                scroll = selected;
-                                            }
-                                            if !entries.is_empty() && selected < entries.len() {
-                                                let (name, is_dir) = &entries[selected];
-                                                if !*is_dir {
-                                                    input = name.clone();
-                                                }
+                                    if selected > 0 {
+                                        selected -= 1;
+                                        if selected < scroll {
+                                            scroll = selected;
+                                        }
+                                        if !entries.is_empty() && selected < entries.len() {
+                                            let (name, is_dir) = &entries[selected];
+                                            if !*is_dir {
+                                                input = name.clone();
                                             }
                                         }
                                     }
                                     app.popup = PopupState::SaveAs { current_dir, entries, selected, scroll, input, input_focused };
                                 }
                                 KeyCode::Down => {
-                                    if !input_focused {
-                                        if !entries.is_empty() && selected < entries.len() - 1 {
-                                            selected += 1;
-                                            if selected >= scroll + 15 {
-                                                scroll = selected.saturating_sub(14);
-                                            }
-                                            if !entries.is_empty() && selected < entries.len() {
-                                                let (name, is_dir) = &entries[selected];
-                                                if !*is_dir {
-                                                    input = name.clone();
-                                                }
+                                    if !entries.is_empty() && selected < entries.len() - 1 {
+                                        selected += 1;
+                                        if selected >= scroll + 12 {
+                                            scroll = selected.saturating_sub(11);
+                                        }
+                                        if !entries.is_empty() && selected < entries.len() {
+                                            let (name, is_dir) = &entries[selected];
+                                            if !*is_dir {
+                                                input = name.clone();
                                             }
                                         }
                                     }
                                     app.popup = PopupState::SaveAs { current_dir, entries, selected, scroll, input, input_focused };
                                 }
-                                KeyCode::Enter => {
-                                    if !input_focused && input.is_empty() {
-                                        if !entries.is_empty() && selected < entries.len() {
-                                            let (name, is_dir) = &entries[selected];
-                                            if *is_dir {
-                                                let new_path = if name == ".." {
-                                                    std::path::PathBuf::from(&current_dir).parent().unwrap_or_else(|| std::path::Path::new(&current_dir)).to_path_buf()
-                                                } else {
-                                                    std::path::PathBuf::from(&current_dir).join(name)
-                                                };
-                                                if let Ok(canon) = new_path.canonicalize() {
-                                                    current_dir = canon.to_string_lossy().to_string();
-                                                    entries = read_dir_entries(&current_dir);
-                                                    selected = 0;
-                                                    scroll = 0;
-                                                    app.popup = PopupState::SaveAs { current_dir, entries, selected, scroll, input, input_focused };
-                                                }
-                                            }
-                                        }
-                                    } else {
-                                        if !input.is_empty() {
-                                            let file_path = std::path::PathBuf::from(&current_dir).join(&input);
-                                            app.file_path = Some(file_path.to_string_lossy().to_string());
-                                            app.file_name = input.clone();
+                                KeyCode::Char('s') | KeyCode::Char('S') if ctrl => {
+                                    if !input.is_empty() {
+                                        let clean_input = input.trim_start_matches("☁ ").trim().to_string();
+                                        let file_path = std::path::PathBuf::from(&current_dir).join(&clean_input);
+                                        let target_str = file_path.to_string_lossy().to_string();
+                                        if file_path.exists() {
+                                            app.popup = PopupState::OverwriteConfirm {
+                                                target_path: Some(target_str),
+                                                target_remote_path: None,
+                                                file_name: clean_input,
+                                                is_nextcloud: false,
+                                            };
+                                        } else {
+                                            app.file_path = Some(target_str);
+                                            app.file_name = clean_input;
+                                            app.is_nextcloud_file = false;
+                                            app.nextcloud_remote_path = None;
                                             app.save_file();
                                             app.popup = PopupState::None;
                                             if app.quit_after_save {
                                                 app.should_quit = true;
+                                            }
+                                        }
+                                    }
+                                }
+                                KeyCode::Enter => {
+                                    if ctrl && !input.is_empty() {
+                                        let clean_input = input.trim_start_matches("☁ ").trim().to_string();
+                                        let file_path = std::path::PathBuf::from(&current_dir).join(&clean_input);
+                                        let target_str = file_path.to_string_lossy().to_string();
+                                        if file_path.exists() {
+                                            app.popup = PopupState::OverwriteConfirm {
+                                                target_path: Some(target_str),
+                                                target_remote_path: None,
+                                                file_name: clean_input,
+                                                is_nextcloud: false,
+                                            };
+                                        } else {
+                                            app.file_path = Some(target_str);
+                                            app.file_name = clean_input;
+                                            app.is_nextcloud_file = false;
+                                            app.nextcloud_remote_path = None;
+                                            app.save_file();
+                                            app.popup = PopupState::None;
+                                            if app.quit_after_save {
+                                                app.should_quit = true;
+                                            }
+                                        }
+                                    } else {
+                                        let is_on_dir = !entries.is_empty() && selected < entries.len() && entries[selected].1;
+                                        if is_on_dir {
+                                            let name = &entries[selected].0;
+                                            let new_path = if name == ".." {
+                                                std::path::PathBuf::from(&current_dir).parent().unwrap_or_else(|| std::path::Path::new(&current_dir)).to_path_buf()
+                                            } else {
+                                                std::path::PathBuf::from(&current_dir).join(name)
+                                            };
+                                            if let Ok(canon) = new_path.canonicalize() {
+                                                current_dir = canon.to_string_lossy().to_string();
+                                                entries = read_dir_entries(&current_dir);
+                                                selected = 0;
+                                                scroll = 0;
+                                                app.popup = PopupState::SaveAs { current_dir, entries, selected, scroll, input, input_focused };
+                                            }
+                                        } else if !input.is_empty() {
+                                            let clean_input = input.trim_start_matches("☁ ").trim().to_string();
+                                            let file_path = std::path::PathBuf::from(&current_dir).join(&clean_input);
+                                            let target_str = file_path.to_string_lossy().to_string();
+                                            if file_path.exists() {
+                                                app.popup = PopupState::OverwriteConfirm {
+                                                    target_path: Some(target_str),
+                                                    target_remote_path: None,
+                                                    file_name: clean_input,
+                                                    is_nextcloud: false,
+                                                };
+                                            } else {
+                                                app.file_path = Some(target_str);
+                                                app.file_name = clean_input;
+                                                app.is_nextcloud_file = false;
+                                                app.nextcloud_remote_path = None;
+                                                app.save_file();
+                                                app.popup = PopupState::None;
+                                                if app.quit_after_save {
+                                                    app.should_quit = true;
+                                                }
                                             }
                                         }
                                     }
@@ -1573,16 +1667,222 @@ fn run_app<B: ratatui::backend::Backend>(
                                     app.quit_after_save = false;
                                 }
                                 KeyCode::Char(c) => {
-                                    if input_focused {
+                                    if !ctrl && !alt {
                                         input.push(c);
                                         app.popup = PopupState::SaveAs { current_dir, entries, selected, scroll, input, input_focused };
                                     }
                                 }
                                 KeyCode::Backspace => {
-                                    if input_focused {
-                                        input.pop();
-                                        app.popup = PopupState::SaveAs { current_dir, entries, selected, scroll, input, input_focused };
+                                    input.pop();
+                                    app.popup = PopupState::SaveAs { current_dir, entries, selected, scroll, input, input_focused };
+                                }
+                                _ => {}
+                            }
+                        }
+                        PopupState::NextcloudSaveAs { mut remote_path, mut entries, mut selected, mut scroll, mut input, input_focused } => {
+                            match key.code {
+                                KeyCode::Tab => {
+                                    let dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")).to_string_lossy().to_string();
+                                    let entries = read_dir_entries(&dir);
+                                    let clean_input = input.trim_start_matches("☁ ").trim().to_string();
+                                    app.popup = PopupState::SaveAs {
+                                        current_dir: dir,
+                                        entries,
+                                        selected: 0,
+                                        scroll: 0,
+                                        input: if clean_input.is_empty() { app.file_name.trim_start_matches("☁ ").trim().to_string() } else { clean_input },
+                                        input_focused: true,
+                                    };
+                                }
+                                KeyCode::Up => {
+                                    if selected > 0 {
+                                        selected -= 1;
+                                        if selected < scroll {
+                                            scroll = selected;
+                                        }
+                                        if !entries.is_empty() && selected < entries.len() {
+                                            let item = &entries[selected];
+                                            if !item.is_dir {
+                                                input = item.name.clone();
+                                            }
+                                        }
                                     }
+                                    app.popup = PopupState::NextcloudSaveAs { remote_path, entries, selected, scroll, input, input_focused };
+                                }
+                                KeyCode::Down => {
+                                    if !entries.is_empty() && selected < entries.len() - 1 {
+                                        selected += 1;
+                                        if selected >= scroll + 12 {
+                                            scroll = selected.saturating_sub(11);
+                                        }
+                                        if !entries.is_empty() && selected < entries.len() {
+                                            let item = &entries[selected];
+                                            if !item.is_dir {
+                                                input = item.name.clone();
+                                            }
+                                        }
+                                    }
+                                    app.popup = PopupState::NextcloudSaveAs { remote_path, entries, selected, scroll, input, input_focused };
+                                }
+                                KeyCode::Char('s') | KeyCode::Char('S') if ctrl => {
+                                    if !input.is_empty() {
+                                        let clean_name = input.trim_start_matches("☁ ").trim().to_string();
+                                        let remote_target = if remote_path.is_empty() {
+                                            clean_name.clone()
+                                        } else {
+                                            format!("{}/{}", remote_path, clean_name)
+                                        };
+                                        let exists = entries.iter().any(|e| !e.is_dir && e.name == clean_name);
+                                        if exists {
+                                            app.popup = PopupState::OverwriteConfirm {
+                                                target_path: None,
+                                                target_remote_path: Some(remote_target),
+                                                file_name: clean_name,
+                                                is_nextcloud: true,
+                                            };
+                                        } else {
+                                            app.is_nextcloud_file = true;
+                                            app.nextcloud_remote_path = Some(remote_target);
+                                            app.file_name = format!("☁ {}", clean_name);
+                                            app.file_path = None;
+                                            app.save_file();
+                                            app.popup = PopupState::None;
+                                            if app.quit_after_save {
+                                                app.should_quit = true;
+                                            }
+                                        }
+                                    }
+                                }
+                                KeyCode::Enter => {
+                                    if ctrl && !input.is_empty() {
+                                        let clean_name = input.trim_start_matches("☁ ").trim().to_string();
+                                        let remote_target = if remote_path.is_empty() {
+                                            clean_name.clone()
+                                        } else {
+                                            format!("{}/{}", remote_path, clean_name)
+                                        };
+                                        let exists = entries.iter().any(|e| !e.is_dir && e.name == clean_name);
+                                        if exists {
+                                            app.popup = PopupState::OverwriteConfirm {
+                                                target_path: None,
+                                                target_remote_path: Some(remote_target),
+                                                file_name: clean_name,
+                                                is_nextcloud: true,
+                                            };
+                                        } else {
+                                            app.is_nextcloud_file = true;
+                                            app.nextcloud_remote_path = Some(remote_target);
+                                            app.file_name = format!("☁ {}", clean_name);
+                                            app.file_path = None;
+                                            app.save_file();
+                                            app.popup = PopupState::None;
+                                            if app.quit_after_save {
+                                                app.should_quit = true;
+                                            }
+                                        }
+                                    } else {
+                                        let is_on_dir = !entries.is_empty() && selected < entries.len() && entries[selected].is_dir;
+                                        if is_on_dir {
+                                            let item = &entries[selected];
+                                            if item.name == ".." {
+                                                let parent = std::path::Path::new(&remote_path).parent().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
+                                                if let Some(ref cfg) = app.nextcloud_config {
+                                                    if let Ok(mut new_entries) = artfultype_rs_lib::nextcloud::list_folder(cfg, &parent) {
+                                                        if !parent.is_empty() {
+                                                            let p_dir = std::path::Path::new(&parent).parent().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
+                                                            new_entries.insert(0, artfultype_rs_lib::nextcloud::NextcloudEntry { name: "..".to_string(), path: p_dir, is_dir: true, size: 0, modified: String::new() });
+                                                        }
+                                                        remote_path = parent;
+                                                        entries = new_entries;
+                                                        selected = 0;
+                                                        scroll = 0;
+                                                    }
+                                                }
+                                            } else if let Some(ref cfg) = app.nextcloud_config {
+                                                if let Ok(mut new_entries) = artfultype_rs_lib::nextcloud::list_folder(cfg, &item.path) {
+                                                    new_entries.insert(0, artfultype_rs_lib::nextcloud::NextcloudEntry { name: "..".to_string(), path: remote_path.clone(), is_dir: true, size: 0, modified: String::new() });
+                                                    remote_path = item.path.clone();
+                                                    entries = new_entries;
+                                                    selected = 0;
+                                                    scroll = 0;
+                                                }
+                                            }
+                                            app.popup = PopupState::NextcloudSaveAs { remote_path, entries, selected, scroll, input, input_focused };
+                                        } else if !input.is_empty() {
+                                            let clean_name = input.trim_start_matches("☁ ").trim().to_string();
+                                            let remote_target = if remote_path.is_empty() {
+                                                clean_name.clone()
+                                            } else {
+                                                format!("{}/{}", remote_path, clean_name)
+                                            };
+                                            let exists = entries.iter().any(|e| !e.is_dir && e.name == clean_name);
+                                            if exists {
+                                                app.popup = PopupState::OverwriteConfirm {
+                                                    target_path: None,
+                                                    target_remote_path: Some(remote_target),
+                                                    file_name: clean_name,
+                                                    is_nextcloud: true,
+                                                };
+                                            } else {
+                                                app.is_nextcloud_file = true;
+                                                app.nextcloud_remote_path = Some(remote_target);
+                                                app.file_name = format!("☁ {}", clean_name);
+                                                app.file_path = None;
+                                                app.save_file();
+                                                app.popup = PopupState::None;
+                                                if app.quit_after_save {
+                                                    app.should_quit = true;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                KeyCode::Esc => {
+                                    app.popup = PopupState::None;
+                                    app.quit_after_save = false;
+                                }
+                                KeyCode::Char(c) => {
+                                    if !ctrl && !alt {
+                                        input.push(c);
+                                        app.popup = PopupState::NextcloudSaveAs { remote_path, entries, selected, scroll, input, input_focused };
+                                    }
+                                }
+                                KeyCode::Backspace => {
+                                    input.pop();
+                                    app.popup = PopupState::NextcloudSaveAs { remote_path, entries, selected, scroll, input, input_focused };
+                                }
+                                _ => {}
+                            }
+                        }
+                        PopupState::OverwriteConfirm { target_path, target_remote_path, file_name, is_nextcloud } => {
+                            match key.code {
+                                KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
+                                    if is_nextcloud {
+                                        if let Some(remote_target) = target_remote_path {
+                                            app.is_nextcloud_file = true;
+                                            app.nextcloud_remote_path = Some(remote_target);
+                                            app.file_name = format!("☁ {}", file_name);
+                                            app.file_path = None;
+                                            app.save_file();
+                                        }
+                                    } else {
+                                        if let Some(local_path) = target_path {
+                                            app.file_path = Some(local_path);
+                                            app.file_name = file_name;
+                                            app.is_nextcloud_file = false;
+                                            app.nextcloud_remote_path = None;
+                                            app.save_file();
+                                        }
+                                    }
+                                    app.popup = PopupState::None;
+                                    if app.quit_after_save {
+                                        app.should_quit = true;
+                                    }
+                                }
+                                KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+                                    app.popup = PopupState::None;
+                                    app.quit_after_save = false;
+                                    app.status_msg = "Save cancelled".to_string();
                                 }
                                 _ => {}
                             }
@@ -2198,7 +2498,7 @@ fn ui(f: &mut ratatui::Frame, app: &mut App) {
                 Style::default().fg(colors.fg)
             },
         ),
-        Span::styled("  | art v0.30.1", Style::default().fg(colors.muted)),
+        Span::styled("  | art v0.30.2", Style::default().fg(colors.muted)),
     ];
     f.render_widget(
         Paragraph::new(Line::from(menu_spans)).style(Style::default().bg(colors.border)),
@@ -2277,7 +2577,7 @@ fn render_popup(f: &mut ratatui::Frame, app: &App, colors: &ThemeColors) {
     let size = f.area();
     let mut height = 5;
     let mut width = 40;
-    if let PopupState::OpenFile { .. } | PopupState::SaveAs { .. } | PopupState::NextcloudOpen { .. } | PopupState::NextcloudConfig { .. } = &app.popup {
+    if let PopupState::OpenFile { .. } | PopupState::SaveAs { .. } | PopupState::NextcloudOpen { .. } | PopupState::NextcloudSaveAs { .. } | PopupState::NextcloudConfig { .. } = &app.popup {
         height = 20;
         width = 65;
     }
@@ -2306,11 +2606,11 @@ fn render_popup(f: &mut ratatui::Frame, app: &App, colors: &ThemeColors) {
             )
         }
         PopupState::SaveAs { current_dir, entries, selected, scroll, input, input_focused } => {
-            let mut lines = vec![format!("Dir: {}", current_dir), "".to_string()];
-            let display_count = height.saturating_sub(7) as usize; // account for borders (2), headers/footers (5)
+            let mut lines = vec![format!("Local Dir: {}", current_dir), "".to_string()];
+            let display_count = height.saturating_sub(8) as usize; // account for borders (2), headers/footers (6)
             for (i, (name, is_dir)) in entries.iter().skip(*scroll).take(display_count).enumerate() {
                 let actual_idx = i + scroll;
-                let cursor = if !*input_focused && actual_idx == *selected { ">" } else { " " };
+                let cursor = if actual_idx == *selected { ">" } else { " " };
                 let icon = if *is_dir { "📁" } else { "📄" };
                 lines.push(format!("{} {} {}", cursor, icon, name));
             }
@@ -2319,10 +2619,47 @@ fn render_popup(f: &mut ratatui::Frame, app: &App, colors: &ThemeColors) {
             }
             lines.push("".to_string());
             let input_cursor = if *input_focused { "_" } else { "" };
-            lines.push(format!("Save as [Tab]: {}{}", input, input_cursor));
+            lines.push(format!("Save as: {}{}", input, input_cursor));
+            lines.push("[Ctrl+S] Save Here   [Tab] Nextcloud FS".to_string());
             (
-                " Save As ",
+                " Save As (Local FS) ",
                 lines
+            )
+        }
+        PopupState::NextcloudSaveAs { remote_path, entries, selected, scroll, input, input_focused } => {
+            let mut lines = vec![
+                format!("Remote Path: /{}", remote_path),
+                "".to_string(),
+            ];
+            let display_count = height.saturating_sub(8) as usize;
+            for (i, item) in entries.iter().skip(*scroll).take(display_count).enumerate() {
+                let actual_idx = i + scroll;
+                let cursor = if actual_idx == *selected { ">" } else { " " };
+                let icon = if item.is_dir { "📁" } else { "📄" };
+                lines.push(format!("{} {} {}", cursor, icon, item.name));
+            }
+            if entries.len() > scroll + display_count {
+                lines.push("   ...".to_string());
+            }
+            lines.push("".to_string());
+            let input_cursor = if *input_focused { "_" } else { "" };
+            lines.push(format!("Save to Nextcloud: {}{}", input, input_cursor));
+            lines.push("[Ctrl+S] Save Here   [Tab] Local FS".to_string());
+            (
+                " Save As (Nextcloud) ",
+                lines
+            )
+        }
+        PopupState::OverwriteConfirm { file_name, is_nextcloud, .. } => {
+            let dest_type = if *is_nextcloud { "Nextcloud" } else { "Local disk" };
+            (
+                " Confirm Overwrite ",
+                vec![
+                    format!("File '{}' already exists on {}.", file_name, dest_type),
+                    "Do you want to overwrite it?".to_string(),
+                    "".to_string(),
+                    "[y/Enter] Overwrite    [n/Esc] Cancel".to_string(),
+                ]
             )
         }
         PopupState::OpenFile { current_dir, entries, selected, scroll } => {
@@ -2426,7 +2763,7 @@ fn render_popup(f: &mut ratatui::Frame, app: &App, colors: &ThemeColors) {
             (
                 " About art ",
                 vec![
-                    "art v0.30.1".to_string(),
+                    "art v0.30.2".to_string(),
                     "Distraction-free Markdown TUI Editor".to_string(),
                     "".to_string(),
                     "Maintainer:       Roland Huber".to_string(),

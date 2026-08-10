@@ -1,4 +1,4 @@
-# ArtfulType Pro (Rust / Tauri Edition) v0.30.1
+# ArtfulType Pro (Rust / Tauri Edition) v0.30.2
 
 A distraction-free Markdown writing app built natively for desktop and terminal using Rust and Tauri. This is the modern, cross-platform successor to the classic Macintosh `ArtfulType`.
 
