@@ -188,21 +188,31 @@ Supports **Writer**, **Markdown**, **Split**, and **Pure Text / Coding** view mo
 
 ### CLI Keyboard Shortcuts
 
-| Action | Shortcut |
-| --- | --- |
-| Writer / MD / Split / Pure Text Mode | `Cmd+Alt+2` / `3` / `4` / `5` (or `F2`–`F5`) |
-| Toggle Syntax Highlighting | `Cmd+Alt+6` / `F6` / `Ctrl+H` |
-| Save | `Ctrl+S` |
-| Quit | `Ctrl+Q` |
-| Indent / Unindent | `Tab` / `Shift+Tab` |
-| Duplicate Line / Selection | `Ctrl+D` |
-| Move Line Up / Down | `Alt+Up` / `Alt+Down` |
-| Bold / Italic / Code | `Ctrl+Alt+B` / `Ctrl+Alt+I` / `Ctrl+Alt+K` |
-| Heading 1 / 2 / 3 | `Ctrl+1` / `Ctrl+2` / `Ctrl+3` |
-| Copy / Cut / Paste | `Ctrl+Alt+C` / `Ctrl+Alt+X` / `Ctrl+Alt+V` |
-| Select (extend) | `Shift+Arrow` |
-| Clear selection | `Esc` |
-| Open menu bar | `Option+Cmd+F` / `E` / `O` / `V` / `T` / `H` (or `Alt+F/E/O/V/T/H`) |
+| Action | Linux / Windows | macOS (Terminal) |
+| --- | --- | --- |
+| Writer Mode | `F2` | `Cmd+Alt+2` / `⌥⌘2` (or `F2`) |
+| Markdown Mode | `F3` | `Cmd+Alt+3` / `⌥⌘3` (or `F3`) |
+| Split Mode | `F4` | `Cmd+Alt+4` / `⌥⌘4` (or `F4`) |
+| Pure Text / Code Mode | `F5` / `-t` | `Cmd+Alt+5` / `⌥⌘5` (or `F5`) |
+| Toggle Syntax Highlighting | `F6` / `Ctrl+H` | `Cmd+Alt+6` / `⌥⌘6` / `F6` / `Ctrl+H` |
+| Open File Menu | `Alt+F` | `Option+Cmd+F` / `⌥⌘F` (or `Alt+F`) |
+| Open Edit Menu | `Alt+E` | `Option+Cmd+E` / `⌥⌘E` (or `Alt+E`) |
+| Open Format / Manipulation Menu | `Alt+O` | `Option+Cmd+O` / `⌥⌘O` (or `Alt+O`) |
+| Open View Menu | `Alt+V` | `Option+Cmd+V` / `⌥⌘V` (or `Alt+V`) |
+| Open Theme Menu | `Alt+T` | `Option+Cmd+T` / `⌥⌘T` (or `Alt+T`) |
+| Open Help Menu | `Alt+H` | `Option+Cmd+H` / `⌥⌘H` (or `Alt+H`) |
+| Save File | `Ctrl+S` | `Ctrl+S` |
+| Quit Application | `Ctrl+Q` | `Ctrl+Q` |
+| Indent / Unindent | `Tab` / `Shift+Tab` | `Tab` / `Shift+Tab` |
+| Duplicate Line / Selection | `Ctrl+D` | `Ctrl+D` |
+| Move Line Up / Down | `Alt+Up` / `Alt+Down` | `Alt+Up` / `Alt+Down` (or `Option+Up/Down`) |
+| Bold / Italic / Code | `Ctrl+Alt+B/I/K` | `Ctrl+Alt+B/I/K` |
+| Heading 1 / 2 / 3 | `Ctrl+1` / `2` / `3` | `Ctrl+1` / `2` / `3` |
+| Copy / Cut / Paste | `Ctrl+Alt+C/X/V` | `Ctrl+Alt+C/X/V` |
+| Extend Selection | `Shift+Arrow` | `Shift+Arrow` |
+| Clear selection / Cancel | `Esc` | `Esc` |
+
+> **Note for macOS Terminal users**: Standard macOS terminal apps (Terminal.app, iTerm2) intercept single Option/Alt character keys and F-keys (`F1`–`F12`). Use **Option+Cmd** (`⌥⌘`) combinations (e.g. `⌥⌘F` for File Menu, `⌥⌘2` for Writer, `⌥⌘3` for Markdown, `⌥⌘4` for Split, `⌥⌘5` for Pure Text, `⌥⌘6` for Syntax Highlighting).
 
 ### CLI Downloads (Linux & macOS, v0.30.2)
 
