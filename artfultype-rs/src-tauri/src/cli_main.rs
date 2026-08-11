@@ -1437,12 +1437,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     enable_raw_mode()?;
     let mut stdout = stdout();
     execute!(stdout, EnterAlternateScreen)?;
+    let _ = execute!(stdout, event::PushKeyboardEnhancementFlags(event::KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES));
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
     let mut app = App::new(initial_file, initial_mode, initial_theme);
     let res = run_app(&mut terminal, &mut app);
 
+    let _ = execute!(terminal.backend_mut(), event::PopKeyboardEnhancementFlags);
     disable_raw_mode()?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
     terminal.show_cursor()?;
@@ -1478,9 +1480,36 @@ fn run_app<B: ratatui::backend::Backend>(
 
                 // Option+Cmd / Cmd+Alt / Ctrl+Alt modifier check for macOS & cross-platform
                 let is_cmd_alt = (alt && cmd) || (ctrl && alt) || (ctrl && cmd);
+                let has_alt_or_cmd = alt || cmd || is_cmd_alt;
 
-                // ── Mode switching shortcuts (Cmd+Alt+2..6 or F2..F6) ─────
-                if is_cmd_alt {
+                // ── macOS Option unicode characters (Terminal.app native Option mapping) ──
+                let is_mac_option_char = match key.code {
+                    KeyCode::Char('ƒ') | KeyCode::Char('Ï') => { app.open_menu(ActiveMenu::File); true }
+                    KeyCode::Char('´') => { app.open_menu(ActiveMenu::Edit); true }
+                    KeyCode::Char('ø') | KeyCode::Char('Ø') => {
+                        if app.view_mode == ViewMode::PureText {
+                            app.open_menu(ActiveMenu::Manipulation);
+                        } else {
+                            app.open_menu(ActiveMenu::Format);
+                        }
+                        true
+                    }
+                    KeyCode::Char('√') | KeyCode::Char('◊') => { app.open_menu(ActiveMenu::View); true }
+                    KeyCode::Char('†') | KeyCode::Char('‡') => { app.open_menu(ActiveMenu::Theme); true }
+                    KeyCode::Char('˙') | KeyCode::Char('Ó') => { app.open_menu(ActiveMenu::Help); true }
+                    KeyCode::Char('™') => { app.view_mode = ViewMode::Writer; app.save_settings(); true }
+                    KeyCode::Char('£') => { app.view_mode = ViewMode::Markdown; app.save_settings(); true }
+                    KeyCode::Char('¢') => { app.view_mode = ViewMode::Split; app.save_settings(); true }
+                    KeyCode::Char('∞') => { app.view_mode = ViewMode::PureText; app.save_settings(); true }
+                    KeyCode::Char('§') => { app.execute_action(MenuAction::SyntaxHighlighting, inner_h); true }
+                    _ => false,
+                };
+                if is_mac_option_char {
+                    continue;
+                }
+
+                // ── Mode switching shortcuts (Cmd+Alt+2..6, Alt+2..6, F2..F6) ─────
+                if has_alt_or_cmd {
                     match key.code {
                         KeyCode::Char('2') => { app.view_mode = ViewMode::Writer; app.save_settings(); continue; }
                         KeyCode::Char('3') => { app.view_mode = ViewMode::Markdown; app.save_settings(); continue; }
@@ -1492,12 +1521,7 @@ fn run_app<B: ratatui::backend::Backend>(
                 }
 
                 // ── Alt / Cmd+Alt key: open menus ────────────────────────
-                if (alt || cmd || is_cmd_alt) && !ctrl {
-                    if key.modifiers.contains(KeyModifiers::CONTROL) && (key.code == KeyCode::Char('l') || key.code == KeyCode::Char('L')) {
-                        app.execute_action(MenuAction::NextcloudConfig, inner_h);
-                        continue;
-                    }
-
+                if has_alt_or_cmd && !ctrl {
                     match key.code {
                         KeyCode::Char('f') | KeyCode::Char('F') => { app.open_menu(ActiveMenu::File); continue; }
                         KeyCode::Char('e') | KeyCode::Char('E') => { app.open_menu(ActiveMenu::Edit); continue; }
