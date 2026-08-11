@@ -1,6 +1,12 @@
 # ArtfulType
 
-A distraction-free Markdown writing app for classic 68k Macintosh computers (System 6/7), built to run from a [BlueSCSI](https://bluescsi.com) device on a Mac Plus or similar compact Mac.
+> 🚀 **Looking for modern Linux, Windows, or macOS versions?**  
+> All modern versions built in Rust (including the Tauri GUI application and the `art` terminal TUI editor) have moved to the dedicated **[ArtfulTypePro](https://github.com/darkcruix2/ArtfulTypePro)** repository!  
+> **👉 Visit [github.com/darkcruix2/ArtfulTypePro](https://github.com/darkcruix2/ArtfulTypePro) for modern desktop & terminal downloads.**
+
+---
+
+A distraction-free Markdown writing app for classic 68k Macintosh computers (System 6/7) and Mac OS X PowerPC (10.5 Leopard).
 
 ![ArtfulType running in Writer mode](screenshot1.png)
 
@@ -15,67 +21,58 @@ A distraction-free Markdown writing app for classic 68k Macintosh computers (Sys
 
 Video overview: [Artful Type demo](https://youtu.be/HEheu_r9UGw)
 
-## ArtfulType Pro
+---
 
-A version of ArtfulType that requires at least a 16MHz 68030 (SE/30), 16 MB of RAM, and Mac OS 7.1 or later.
+## ArtfulType Pro (Classic 68k Macintosh)
+
+A version of ArtfulType for classic Macintosh computers requiring at least a 16MHz 68030 (SE/30), 16 MB of RAM, and Mac OS 7.1 or later.
 
 ![ArtfulType Pro running in Writer mode](screenshot2.png)
 
-### Additional Features of the "Pro" version
+### Additional Features of the "Pro" 68k Version
 
-- Multi File Support - you can open multiple markdown files at once
+- Multi-file support — open multiple Markdown files simultaneously
 - Maximum file size increased to 256K
-- Bullet Point Lists / Numbered Lists
-- Resizable windows
-- Status Bar
-- Icon Bar for text formatting and view change
-- Style menu contains more features
-- Markdown view contains line numbers
-- Shortcuts for navigation, like:
-  - CMD + Left     : Jump in front of the first letter of the line
-  - CMD + RIGHT    : Jump past the last letter of the line
-  - CMD + DOWN     : Jump to the end of the document (There is also a clickable button)
-  - CMD + UP       : Jump to the beginning of the document (There is also a clickable button)
+- Bullet point lists & numbered lists
+- Resizable windows & status bar
+- Icon bar for text formatting and view toggles
+- Expanded Style menu
+- Markdown view line numbers
+- Navigation keyboard shortcuts (Jump to start/end of line or document)
 
-### Planned Features
+### Classic Mac (68k) Release Downloads
 
-- Full Basic Markdown support (excluding images)
-- Print functionality
-- Code block to be encapsulated by top and bottom lines
-- Blockquote
-- Check-Box List
+Pre-built binaries for 68k Mac OS are available in the `releases/` directory:
 
-## Getting Started
+- **MacBinary**: [releases/ArtfulTypePro.bin](releases/ArtfulTypePro.bin)
+- **Bootable Floppy Image**: [releases/ArtfulTypePro.dsk](releases/ArtfulTypePro.dsk)
+
+---
+
+## Getting Started (68k Mac)
 
 If your Mac can use [BlueSCSI](https://bluescsi.com), use the BlueSCSI image. If it can't (or you just want a physical floppy), use the 800K floppy image instead.
 
 ### Real hardware with BlueSCSI
 
-1. Copy `HD1_ArtfulType.hda` onto your BlueSCSI SD card — the `HD1_` prefix is BlueSCSI's naming convention for assigning an image to SCSI ID 1, so no renaming is needed. (See [BlueSCSI](https://bluescsi.com) for how to set up and image an SD card for your specific BlueSCSI hardware.)
-2. Boot the Mac. The Finder will appear as usual — double-click ArtfulType to launch it.
-3. To also write a physical 800K floppy: open `Utilities/Disk Copy 4.2` (already on the disk image), and use it to write `ArtfulType 800K` (also already on the disk image, in proper DiskCopy 4.2 format) to a blank floppy in your Mac's floppy drive.
+1. Copy `HD1_ArtfulType.hda` onto your BlueSCSI SD card — the `HD1_` prefix is BlueSCSI's naming convention for assigning an image to SCSI ID 1.
+2. Boot the Mac. Double-click ArtfulType to launch it.
+3. To write a physical 800K floppy: open `Utilities/Disk Copy 4.2` on the disk image and write `ArtfulType 800K` to a blank floppy.
 
 ### Real hardware without BlueSCSI
 
-Write `ArtfulType-800K.dsk` to a real 800K floppy disk and boot from it directly — no BlueSCSI required.
+Write `ArtfulType-800K.dsk` to a real 800K floppy disk and boot from it directly.
 
 ### In an emulator (Mini vMac)
 
-For trying ArtfulType without real hardware, use [Mini vMac](https://www.gryphel.com/c/minivmac/) configured for a Mac Plus, with either:
+Use [Mini vMac](https://www.gryphel.com/c/minivmac/) configured for a Mac Plus:
 
-- `ArtfulType-20MB.dsk` — the full HD setup (System 7.1, stripped down, with the app, Disk Copy, and the embedded floppy image)
-- `ArtfulType-800K.dsk` — a bootable 800K floppy (System 6.0.8) with just the app
+- `ArtfulType-20MB.dsk` — full HD setup (System 7.1 with the app, Disk Copy, and embedded floppy image)
+- `ArtfulType-800K.dsk` — bootable 800K floppy (System 6.0.8) with just the app
 
-## Usage
+---
 
-ArtfulType has two views, toggled from the View menu:
-
-- **Writer** (default) — markdown syntax is hidden; text is shown styled (bold, italic, headings, etc.)
-- **Markdown** — the raw markdown source, unstyled
-
-Saved files are plain `.md` text, editable in any text editor.
-
-### Keyboard shortcuts
+## Keyboard Shortcuts (Classic Mac)
 
 | Action | Shortcut |
 | --- | --- |
@@ -90,40 +87,36 @@ Saved files are plain `.md` text, editable in any text editor.
 | Link | ⌘L |
 | Zoom In / Out / Default | ⌘= / ⌘- / ⌘0 |
 
-## Building
+---
+
+## Building Classic 68k Version
 
 Built with [Retro68](https://github.com/autc04/Retro68), a GCC-based cross-compiler for classic Mac OS. See `app/CMakeLists.txt` for the build configuration.
 
-## Classic Mac (68k) Versions
-
-The classic 68k version of ArtfulType Pro is available in the `releases/` directory:
-
-- **MacBinary**: [releases/ArtfulTypePro.bin](releases/ArtfulTypePro.bin)
-- **Bootable Floppy Image**: [releases/ArtfulTypePro.dsk](releases/ArtfulTypePro.dsk)
+---
 
 ## Mac OS X (PowerPC) — Leopard Edition
 
 A native Objective-C / WebKit version of ArtfulType for **Mac OS X 10.5 Leopard on PowerPC** hardware (G4/G5).  
-Compiled with GCC/Cocoa — no Xcode required. Runs on as little as a 1 GHz PowerPC G4 with 1 GB of RAM.
+Compiled with GCC/Cocoa — no Xcode required. Runs smoothly on PowerPC G4 hardware.
 
 ![ArtfulType running on Mac OS X 10.5.8 PowerPC G4](docs/OSX-PPC-ArtfulType.png)
 
 ### Leopard Edition Features
 
 - Native Aqua toolbar with icon buttons (Bold, Italic, Code, Lists, Blockquote, Horizontal Rule)
-- Writer mode (rich-text live preview) and Markdown mode toggled via the ✏ / M↓ segmented control
+- Writer mode (rich-text live preview) and Markdown mode toggled via segmented control
 - Full read/write support for `.md` files
-- Undo/Redo, word/character count in the status bar
-- Built-in Marked.js renderer for pixel-perfect Markdown preview
+- Undo/Redo, word/character count status bar
+- Built-in Marked.js renderer for Markdown preview
 
-### Download
+### PowerPC Downloads
 
-- **Mac OS X 10.5+ PowerPC**: [releases/ArtfulType-1.0-macOS-PowerPC.zip](releases/ArtfulType-1.0-macOS-PowerPC.zip)
+- **Mac OS X 10.5+ PowerPC Zip**: [releases/ArtfulType-1.0-macOS-PowerPC.zip](releases/ArtfulType-1.0-macOS-PowerPC.zip)
 
-### Building from Source
+### Building Leopard Edition from Source
 
 ```bash
-# On the target Mac (requires GCC + Cocoa + WebKit):
 cd ArtfulType-ObjC
 make
 open build/ArtfulType.app
@@ -131,102 +124,11 @@ open build/ArtfulType.app
 
 ---
 
-## Modern Versions (artfultype-rs)
+## Modern Versions (Linux, Windows, macOS ARM64)
 
-### Screenshots
-
-**Mac (ARM64)**
-![ArtfulType on Mac](screenshots/ArtfullType-Mac.png)
-
-**Windows 11**
-![ArtfulType on Windows 11](screenshots/ArtfulType-Windows11.png)
-
-**Linux (Debian/Gnome)**
-![ArtfulType on Debian/Gnome](screenshots/ArtfulType-DebianGnome.png)
-
-Modern companion binaries for macOS, Linux, and Windows are available in the `releases/` directory in this repository:
-
-- **Mac OS X 10.5+ PowerPC**: [releases/ArtfulType-1.0-macOS-PowerPC.zip](releases/ArtfulType-1.0-macOS-PowerPC.zip)
-- **Mac (ARM64)**:
-  - DMG Installer: [releases/artfultype-rs_0.30.2_aarch64.dmg](releases/artfultype-rs_0.30.2_aarch64.dmg)
-  - Application Zip: [releases/artfultype-rs-mac.zip](releases/artfultype-rs-mac.zip)
-  - CLI Binary: [releases/artfultype-cli-mac-arm64](releases/artfultype-cli-mac-arm64)
-- **Windows (x64)**:
-  - Installer: [releases/artfultype-rs_0.30.2_x64-setup.exe](releases/artfultype-rs_0.30.2_x64-setup.exe)
-  - Portable Executable: [releases/artfultype-rs-windows-x64.exe](releases/artfultype-rs-windows-x64.exe)
-- **Linux (AMD64)**:
-  - AppImage: [releases/artfultype-rs_0.30.2_amd64.AppImage](releases/artfultype-rs_0.30.2_amd64.AppImage)
-  - Debian Package: [releases/artfultype-rs_0.30.2_amd64.deb](releases/artfultype-rs_0.30.2_amd64.deb)
-  - RPM Package: [releases/artfultype-rs-0.30.2-1.x86_64.rpm](releases/artfultype-rs-0.30.2-1.x86_64.rpm)
-  - Raw Binary: [releases/artfultype-rs-linux-amd64](releases/artfultype-rs-linux-amd64)
+For modern cross-platform GUI & terminal TUI versions, visit **[ArtfulTypePro](https://github.com/darkcruix2/ArtfulTypePro)**.
 
 ---
-
-## art — Terminal TUI (Linux & macOS)
-
-A distraction-free Markdown & Code editor that runs entirely in the terminal — no GUI required.  
-Supports **Writer**, **Markdown**, **Split**, and **Pure Text / Coding** view modes with live Markdown preview, toggleable multi-language syntax highlighting, shift-selection, cut/copy/paste, bold/italic/code wrapping, auto-indentation, line moving/duplication, and VT100/ASCII mode for legacy terminals.
-
-![art TUI — Split view showing Markdown editor and Writer preview side by side](screenshots/artfultype-cli-split.png)
-
-### CLI Features
-
-- **Four view modes**: Writer (styled preview), Markdown (raw editor), Split (side-by-side), Pure Text / Code Mode (`F5` / `-t`)
-- **Toggleable Syntax Highlighting**: `F6` or `Ctrl+H` enables/disables real-time syntax highlighting with status bar indication (`[SYNTAX: ON/OFF]`)
-- **Auto-Detection**: Automatically launches in Pure Text / Code Mode when opening non-Markdown code files (`.rs`, `.py`, `.c`, `.cpp`, `.js`, `.ts`, `.go`, `.java`, `.sh`, `.json`, `.sql`, etc.)
-- **Coding Productivity**:
-  - `Tab` / `Shift+Tab`: Indent / Unindent selection or line
-  - `Enter`: Smart auto-indentation (carries leading whitespace & expands on `{`, `:`, `(`, `[`)
-  - `Ctrl+D`: Duplicate line or selection
-  - `Alt+Up` / `Alt+Down`: Move current line UP or DOWN
-  - `(` `[` `{` `"` `'` `` ` ``: Wrap selected text in matching delimiters
-- **Selection mode**: hold `Shift` + arrow keys to select text in any direction
-- **Clipboard**: `Ctrl+C` / `Ctrl+X` / `Ctrl+V`
-- **Multiple themes**: Dark Antigravity, Dracula, Retro Green, Retro Amber, DOS Edit, VT100
-- **VT100 / ASCII mode** (`--vt100`): pure ASCII borders for legacy or restricted terminals
-- **Menu bar**: `Option+Cmd+F/E/O/V/T/H` (or `Alt+F/E/O/V/T/H`) or arrow keys to navigate menus
-
-### CLI Keyboard Shortcuts
-
-| Action | Linux / Windows | macOS (Terminal) |
-| --- | --- | --- |
-| Writer Mode | `F2` | `Cmd+Alt+2` / `⌥⌘2` (or `F2`) |
-| Markdown Mode | `F3` | `Cmd+Alt+3` / `⌥⌘3` (or `F3`) |
-| Split Mode | `F4` | `Cmd+Alt+4` / `⌥⌘4` (or `F4`) |
-| Pure Text / Code Mode | `F5` / `-t` | `Cmd+Alt+5` / `⌥⌘5` (or `F5`) |
-| Toggle Syntax Highlighting | `F6` / `Ctrl+H` | `Cmd+Alt+6` / `⌥⌘6` / `F6` / `Ctrl+H` |
-| Open File Menu | `Alt+F` | `Option+Cmd+F` / `⌥⌘F` (or `Alt+F`) |
-| Open Edit Menu | `Alt+E` | `Option+Cmd+E` / `⌥⌘E` (or `Alt+E`) |
-| Open Format / Manipulation Menu | `Alt+O` | `Option+Cmd+O` / `⌥⌘O` (or `Alt+O`) |
-| Open View Menu | `Alt+V` | `Option+Cmd+V` / `⌥⌘V` (or `Alt+V`) |
-| Open Theme Menu | `Alt+T` | `Option+Cmd+T` / `⌥⌘T` (or `Alt+T`) |
-| Open Help Menu | `Alt+H` | `Option+Cmd+H` / `⌥⌘H` (or `Alt+H`) |
-| Save File | `Ctrl+S` | `Ctrl+S` |
-| Quit Application | `Ctrl+Q` | `Ctrl+Q` |
-| Indent / Unindent | `Tab` / `Shift+Tab` | `Tab` / `Shift+Tab` |
-| Duplicate Line / Selection | `Ctrl+D` | `Ctrl+D` |
-| Move Line Up / Down | `Alt+Up` / `Alt+Down` | `Alt+Up` / `Alt+Down` (or `Option+Up/Down`) |
-| Bold / Italic / Code | `Ctrl+Alt+B/I/K` | `Ctrl+Alt+B/I/K` |
-| Heading 1 / 2 / 3 | `Ctrl+1` / `2` / `3` | `Ctrl+1` / `2` / `3` |
-| Copy / Cut / Paste | `Ctrl+Alt+C/X/V` | `Ctrl+Alt+C/X/V` |
-| Extend Selection | `Shift+Arrow` | `Shift+Arrow` |
-| Clear selection / Cancel | `Esc` | `Esc` |
-
-> **Note for macOS Terminal users**: Standard macOS terminal apps (Terminal.app, iTerm2) intercept single Option/Alt character keys and F-keys (`F1`–`F12`). Use **Option+Cmd** (`⌥⌘`) combinations (e.g. `⌥⌘F` for File Menu, `⌥⌘2` for Writer, `⌥⌘3` for Markdown, `⌥⌘4` for Split, `⌥⌘5` for Pure Text, `⌥⌘6` for Syntax Highlighting).
-
-### CLI Downloads (Linux & macOS, v0.30.2)
-
-- **macOS (ARM64 Binary)**: [releases/artfultype-cli-mac-arm64](releases/artfultype-cli-mac-arm64)
-- **Debian/Ubuntu `.deb`**: [releases/artfultype-cli_0.30.2-1_amd64.deb](releases/artfultype-cli_0.30.2-1_amd64.deb)
-- **RPM (Fedora/RHEL/openSUSE)**: [releases/artfultype-cli-0.30.2-1.x86_64.rpm](releases/artfultype-cli-0.30.2-1.x86_64.rpm)
-
-```bash
-# Install .deb (installs /usr/bin/art)
-sudo dpkg -i artfultype-cli_0.30.2-1_amd64.deb
-
-# Install .rpm
-sudo rpm -i artfultype-cli-0.30.2-1.x86_64.rpm
-```
 
 ## License
 
@@ -234,6 +136,8 @@ Code: GPLv3 — see [LICENSE](LICENSE).
 
 Creative assets (the ArtfulType name/branding, icon, and artwork): all rights reserved.
 
+---
+
 ## AI Disclaimer
 
-Claude Code was used in the creation of this software.
+Claude Code and Google DeepMind AI tools were used in the creation of this software.
