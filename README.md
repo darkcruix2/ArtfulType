@@ -184,25 +184,25 @@ Supports **Writer**, **Markdown**, **Split**, and **Pure Text / Coding** view mo
 - **Clipboard**: `Ctrl+C` / `Ctrl+X` / `Ctrl+V`
 - **Multiple themes**: Dark Antigravity, Dracula, Retro Green, Retro Amber, DOS Edit, VT100
 - **VT100 / ASCII mode** (`--vt100`): pure ASCII borders for legacy or restricted terminals
-- **Menu bar**: `Alt+F/E/O/V/T/H` or arrow keys to navigate menus
+- **Menu bar**: `Option+Cmd+F/E/O/V/T/H` (or `Alt+F/E/O/V/T/H`) or arrow keys to navigate menus
 
 ### CLI Keyboard Shortcuts
 
 | Action | Shortcut |
 | --- | --- |
-| Writer / MD / Split / Pure Text Mode | `F2` / `F3` / `F4` / `F5` |
-| Toggle Syntax Highlighting | `F6` / `Ctrl+H` |
+| Writer / MD / Split / Pure Text Mode | `Cmd+Alt+2` / `3` / `4` / `5` (or `F2`–`F5`) |
+| Toggle Syntax Highlighting | `Cmd+Alt+6` / `F6` / `Ctrl+H` |
 | Save | `Ctrl+S` |
 | Quit | `Ctrl+Q` |
 | Indent / Unindent | `Tab` / `Shift+Tab` |
 | Duplicate Line / Selection | `Ctrl+D` |
 | Move Line Up / Down | `Alt+Up` / `Alt+Down` |
-| Bold / Italic / Code | `Ctrl+B` / `Ctrl+I` / `Ctrl+K` |
+| Bold / Italic / Code | `Ctrl+Alt+B` / `Ctrl+Alt+I` / `Ctrl+Alt+K` |
 | Heading 1 / 2 / 3 | `Ctrl+1` / `Ctrl+2` / `Ctrl+3` |
-| Copy / Cut / Paste | `Ctrl+C` / `Ctrl+X` / `Ctrl+V` |
+| Copy / Cut / Paste | `Ctrl+Alt+C` / `Ctrl+Alt+X` / `Ctrl+Alt+V` |
 | Select (extend) | `Shift+Arrow` |
 | Clear selection | `Esc` |
-| Open menu bar | `Alt+F` / `Alt+E` / `Alt+O` / `Alt+V` / `Alt+T` / `Alt+H` |
+| Open menu bar | `Option+Cmd+F` / `E` / `O` / `V` / `T` / `H` (or `Alt+F/E/O/V/T/H`) |
 
 ### CLI Downloads (Linux & macOS, v0.30.2)
 

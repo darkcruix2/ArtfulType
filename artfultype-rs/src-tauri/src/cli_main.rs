@@ -1303,12 +1303,12 @@ fn get_menu_items(menu: ActiveMenu) -> Vec<(&'static str, MenuAction)> {
             ("Syntax Highlighting (F6 / Ctrl+H)", MenuAction::SyntaxHighlighting),
         ],
         ActiveMenu::View => vec![
-            ("Writer Mode   (F2)", MenuAction::ViewWriter),
-            ("Markdown Mode (F3)", MenuAction::ViewMarkdown),
-            ("Split Mode    (F4)", MenuAction::ViewSplit),
-            ("Pure Text / Code (F5)", MenuAction::ViewPureText),
+            ("Writer Mode   (Cmd+Alt+2 / F2)", MenuAction::ViewWriter),
+            ("Markdown Mode (Cmd+Alt+3 / F3)", MenuAction::ViewMarkdown),
+            ("Split Mode    (Cmd+Alt+4 / F4)", MenuAction::ViewSplit),
+            ("Pure Text / Code (Cmd+Alt+5 / F5)", MenuAction::ViewPureText),
             ("Word Wrap", MenuAction::WordWrap),
-            ("Syntax Highlighting (F6 / Ctrl+H)", MenuAction::SyntaxHighlighting),
+            ("Syntax Highlighting (Cmd+Alt+6 / F6)", MenuAction::SyntaxHighlighting),
         ],
         ActiveMenu::Theme => vec![
             ("Dark Antigravity", MenuAction::ThemeDarkAntigravity),
@@ -1322,11 +1322,11 @@ fn get_menu_items(menu: ActiveMenu) -> Vec<(&'static str, MenuAction)> {
             ("About art", MenuAction::About),
             ("Maintainer: Roland Huber", MenuAction::About),
             ("Original Creator: Sean Malseed", MenuAction::About),
-            ("F2:Writer F3:MD F4:Split F5:Text", MenuAction::NoOp),
-            ("F6 / Ctrl+H: Syntax Highlight", MenuAction::NoOp),
+            ("Cmd+Alt+2:Writer 3:MD 4:Split 5:Text", MenuAction::NoOp),
+            ("Cmd+Alt+6 / F6 / Ctrl+H: Syntax Highlight", MenuAction::NoOp),
             ("Shift+Arrows: Select text", MenuAction::NoOp),
             ("Ctrl+D: Duplicate Line", MenuAction::NoOp),
-            ("Alt+Up/Down: Move Line Up/Down", MenuAction::NoOp),
+            ("Alt/Cmd+Up/Down: Move Line Up/Down", MenuAction::NoOp),
             ("Tab / Shift+Tab: Indent / Unindent", MenuAction::NoOp),
             ("Ctrl+S:Save  Ctrl+Q:Quit", MenuAction::NoOp),
         ],
@@ -1474,6 +1474,51 @@ fn run_app<B: ratatui::backend::Backend>(
                 let shift = key.modifiers.contains(KeyModifiers::SHIFT);
                 let ctrl  = key.modifiers.contains(KeyModifiers::CONTROL);
                 let alt   = key.modifiers.contains(KeyModifiers::ALT);
+                let cmd   = key.modifiers.contains(KeyModifiers::SUPER);
+
+                // Option+Cmd / Cmd+Alt / Ctrl+Alt modifier check for macOS & cross-platform
+                let is_cmd_alt = (alt && cmd) || (ctrl && alt) || (ctrl && cmd);
+
+                // ── Mode switching shortcuts (Cmd+Alt+2..6 or F2..F6) ─────
+                if is_cmd_alt {
+                    match key.code {
+                        KeyCode::Char('2') => { app.view_mode = ViewMode::Writer; app.save_settings(); continue; }
+                        KeyCode::Char('3') => { app.view_mode = ViewMode::Markdown; app.save_settings(); continue; }
+                        KeyCode::Char('4') => { app.view_mode = ViewMode::Split; app.save_settings(); continue; }
+                        KeyCode::Char('5') => { app.view_mode = ViewMode::PureText; app.save_settings(); continue; }
+                        KeyCode::Char('6') => { app.execute_action(MenuAction::SyntaxHighlighting, inner_h); continue; }
+                        _ => {}
+                    }
+                }
+
+                // ── Alt / Cmd+Alt key: open menus ────────────────────────
+                if (alt || cmd || is_cmd_alt) && !ctrl {
+                    if key.modifiers.contains(KeyModifiers::CONTROL) && (key.code == KeyCode::Char('l') || key.code == KeyCode::Char('L')) {
+                        app.execute_action(MenuAction::NextcloudConfig, inner_h);
+                        continue;
+                    }
+
+                    match key.code {
+                        KeyCode::Char('f') | KeyCode::Char('F') => { app.open_menu(ActiveMenu::File); continue; }
+                        KeyCode::Char('e') | KeyCode::Char('E') => { app.open_menu(ActiveMenu::Edit); continue; }
+                        KeyCode::Char('o') | KeyCode::Char('O') => {
+                            if app.view_mode == ViewMode::PureText {
+                                app.open_menu(ActiveMenu::Manipulation);
+                            } else {
+                                app.open_menu(ActiveMenu::Format);
+                            }
+                            continue;
+                        }
+                        KeyCode::Char('v') | KeyCode::Char('V') => { app.open_menu(ActiveMenu::View); continue; }
+                        KeyCode::Char('t') | KeyCode::Char('T') => { app.open_menu(ActiveMenu::Theme); continue; }
+                        KeyCode::Char('h') | KeyCode::Char('H') => { app.open_menu(ActiveMenu::Help); continue; }
+                        KeyCode::Up => { app.move_line_up(); continue; }
+                        KeyCode::Down => { app.move_line_down(); continue; }
+                        KeyCode::Home => { app.move_to_file_start(); continue; }
+                        KeyCode::End => { app.move_to_file_end(inner_h, inner_w); continue; }
+                        _ => {}
+                    }
+                }
 
                 // ── Popup handling ───────────────────────────────────────
                 if app.popup != PopupState::None {
@@ -2201,34 +2246,7 @@ fn run_app<B: ratatui::backend::Backend>(
                     continue;
                 }
 
-                // ── Alt key: open menus ──────────────────────────────────
-                if alt && !ctrl {
-                    if key.modifiers.contains(KeyModifiers::CONTROL) && (key.code == KeyCode::Char('l') || key.code == KeyCode::Char('L')) {
-                        app.execute_action(MenuAction::NextcloudConfig, inner_h);
-                        continue;
-                    }
 
-                    match key.code {
-                        KeyCode::Char('f') | KeyCode::Char('F') => app.open_menu(ActiveMenu::File),
-                        KeyCode::Char('e') | KeyCode::Char('E') => app.open_menu(ActiveMenu::Edit),
-                        KeyCode::Char('o') | KeyCode::Char('O') => {
-                            if app.view_mode == ViewMode::PureText {
-                                app.open_menu(ActiveMenu::Manipulation)
-                            } else {
-                                app.open_menu(ActiveMenu::Format)
-                            }
-                        }
-                        KeyCode::Char('v') | KeyCode::Char('V') => app.open_menu(ActiveMenu::View),
-                        KeyCode::Char('t') | KeyCode::Char('T') => app.open_menu(ActiveMenu::Theme),
-                        KeyCode::Char('h') | KeyCode::Char('H') => app.open_menu(ActiveMenu::Help),
-                        KeyCode::Up => app.move_line_up(),
-                        KeyCode::Down => app.move_line_down(),
-                        KeyCode::Home => app.move_to_file_start(),
-                        KeyCode::End => app.move_to_file_end(inner_h, inner_w),
-                        _ => {}
-                    }
-                    continue;
-                }
 
                 // ── Dropdown menu navigation ─────────────────────────────
                 if app.active_menu != ActiveMenu::None {
