@@ -68,3 +68,20 @@ cargo tauri build
 ```
 
 The resulting binaries will be placed in the `src-tauri/target/release/bundle/` directory.
+
+
+## Pre-built Releases
+
+Pre-compiled release binaries and packages are available in the `../releases/` directory:
+
+- **macOS (ARM64)**:
+  - GUI DMG Installer: `../releases/artfultype-rs_0.30.2_aarch64.dmg`
+  - GUI App Zip: `../releases/artfultype-rs-mac.zip`
+  - CLI Binary (`art`): `../releases/artfultype-cli-mac-arm64`
+- **Linux (AMD64)**:
+  - AppImage: `../releases/artfultype-rs_0.30.2_amd64.AppImage`
+  - Debian Package: `../releases/artfultype-rs_0.30.2_amd64.deb`
+  - RPM Package: `../releases/artfultype-rs-0.30.2-1.x86_64.rpm`
+- **Windows (x64)**:
+  - Installer: `../releases/artfultype-rs_0.30.2_x64-setup.exe`
+  - Portable Executable: `../releases/artfultype-rs-windows-x64.exe`

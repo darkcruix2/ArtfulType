@@ -147,7 +147,10 @@ open build/ArtfulType.app
 Modern companion binaries for macOS, Linux, and Windows are available in the `releases/` directory in this repository:
 
 - **Mac OS X 10.5+ PowerPC**: [releases/ArtfulType-1.0-macOS-PowerPC.zip](releases/ArtfulType-1.0-macOS-PowerPC.zip)
-- **Mac (ARM64)**: [releases/artfultype-rs-mac.zip](releases/artfultype-rs-mac.zip)
+- **Mac (ARM64)**:
+  - DMG Installer: [releases/artfultype-rs_0.30.2_aarch64.dmg](releases/artfultype-rs_0.30.2_aarch64.dmg)
+  - Application Zip: [releases/artfultype-rs-mac.zip](releases/artfultype-rs-mac.zip)
+  - CLI Binary: [releases/artfultype-cli-mac-arm64](releases/artfultype-cli-mac-arm64)
 - **Windows (x64)**:
   - Installer: [releases/artfultype-rs_0.30.2_x64-setup.exe](releases/artfultype-rs_0.30.2_x64-setup.exe)
   - Portable Executable: [releases/artfultype-rs-windows-x64.exe](releases/artfultype-rs-windows-x64.exe)
@@ -159,7 +162,7 @@ Modern companion binaries for macOS, Linux, and Windows are available in the `re
 
 ---
 
-## art — Terminal TUI (Linux)
+## art — Terminal TUI (Linux & macOS)
 
 A distraction-free Markdown & Code editor that runs entirely in the terminal — no GUI required.  
 Supports **Writer**, **Markdown**, **Split**, and **Pure Text / Coding** view modes with live Markdown preview, toggleable multi-language syntax highlighting, shift-selection, cut/copy/paste, bold/italic/code wrapping, auto-indentation, line moving/duplication, and VT100/ASCII mode for legacy terminals.
@@ -201,8 +204,9 @@ Supports **Writer**, **Markdown**, **Split**, and **Pure Text / Coding** view mo
 | Clear selection | `Esc` |
 | Open menu bar | `Alt+F` / `Alt+E` / `Alt+O` / `Alt+V` / `Alt+T` / `Alt+H` |
 
-### CLI Downloads (Linux AMD64, v0.30.2)
+### CLI Downloads (Linux & macOS, v0.30.2)
 
+- **macOS (ARM64 Binary)**: [releases/artfultype-cli-mac-arm64](releases/artfultype-cli-mac-arm64)
 - **Debian/Ubuntu `.deb`**: [releases/artfultype-cli_0.30.2-1_amd64.deb](releases/artfultype-cli_0.30.2-1_amd64.deb)
 - **RPM (Fedora/RHEL/openSUSE)**: [releases/artfultype-cli-0.30.2-1.x86_64.rpm](releases/artfultype-cli-0.30.2-1.x86_64.rpm)
 
